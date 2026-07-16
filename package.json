@@ -1,0 +1,23 @@
+{
+  "name": "sistema-de-facturas",
+  "private": true,
+  "version": "0.1.0",
+  "description": "ERP de gestión integral para empresas de construcción",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build:packages": "npm run build -w @erp/shared -w @erp/db",
+    "build": "npm run build:packages && npm run build -w @erp/api && npm run build -w @erp/web",
+    "db:generate": "npm run generate -w @erp/db",
+    "db:migrate": "npm run migrate -w @erp/db",
+    "db:seed": "npm run seed -w @erp/db",
+    "dev:api": "npm run dev -w @erp/api",
+    "dev:web": "npm run dev -w @erp/web",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

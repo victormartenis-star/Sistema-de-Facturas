@@ -25,3 +25,39 @@ Plataforma en la nube que centraliza toda la información económica, administra
 ## Roles
 
 `admin` · `gerente` · `administracion` · `obra` (acceso restringido a sus obras asignadas). Matriz completa en [03 · Módulos](03-modulos.md).
+
+## Estado del desarrollo
+
+| Incremento | Estado |
+|---|---|
+| Monorepo (apps/web, apps/api, packages/shared, packages/db) | ✅ |
+| Tabla `projects` (obras) + migración + seed | ✅ |
+| API CRUD de obras (buscar, filtrar, alta, edición, borrado lógico) | ✅ |
+| Pantalla de obras (listado + formulario de alta/edición) | ✅ |
+| Contactos (proveedores/clientes) | ⏳ siguiente |
+| Categorías de gasto (seed) | ⏳ |
+| Subida de documentos + pipeline OCR/IA | ⏳ |
+
+## Cómo ejecutar en local
+
+Requisitos: Node 22+, Docker (para PostgreSQL).
+
+```bash
+# 1. Dependencias
+npm install
+
+# 2. Base de datos
+docker compose -f infra/docker/docker-compose.yml up -d
+cp .env.example .env
+
+# 3. Esquema y datos iniciales
+npm run build:packages
+npm run db:migrate
+npm run db:seed
+
+# 4. Arrancar (dos terminales)
+npm run dev:api    # API en http://localhost:3001
+npm run dev:web    # Web en http://localhost:3000
+```
+
+Estructura del monorepo en [05 · Stack tecnológico](05-stack-tecnologico.md).
