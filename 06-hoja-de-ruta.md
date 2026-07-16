@@ -1,150 +1,118 @@
-# 03 · Módulos Funcionales
+# 06 · Hoja de Ruta
 
-Cada módulo es un bounded context con sus propias pantallas, endpoints y reglas. La obra (`project`) es la dimensión transversal que los atraviesa todos.
-
-## Mapa de módulos
+Plan de 12 meses en 5 fases, orientado a **entregar valor usable desde el mes 3** (el archivo documental con OCR ya ahorra horas de administración aunque el resto no exista). Equipo de referencia: 2 desarrolladores full-stack + 1 perfil producto/QA a tiempo parcial; las duraciones escalan proporcionalmente con otro tamaño de equipo.
 
 ```mermaid
-mindmap
-  root((ERP Construcción))
-    Documental
-      Subida multiformato
-      OCR + extracción IA
-      Clasificación automática
-      Bandeja de validación
-      Archivo por obra/tipo/fecha
-    Facturación
-      Compras
-      Ventas
-      Series y numeración
-      IVA / IRPF / ISP
-    Tesorería
-      Cobros pendientes
-      Pagos pendientes
-      Bancos y caja
-      Conciliación
-      Flujo de caja proyectado
-    Obras
-      Ficha económica
-      Coste real por categoría
-      Presupuesto vs real
-      Margen en tiempo real
-    Presupuestos y Certificaciones
-      Capítulos y partidas
-      Import BC3
-      Certificación a origen
-      Retenciones de garantía
-    Compras
-      Pedidos
-      Albaranes
-      Cuadre pedido-albarán-factura
-    Dashboard e Informes
-      KPIs y gráficos
-      Exportación Excel/PDF
-      Informes automáticos
-    Buscador
-      Full-text
-      Semántico
-      Filtros facetados
-    Copiloto IA
-      NLQ
-      Alertas
-      Predicciones
-      Recomendaciones
-    Administración
-      Usuarios y roles
-      Auditoría
-      Configuración
+gantt
+    dateFormat  YYYY-MM
+    axisFormat  %b %Y
+    title Hoja de ruta (12 meses)
+
+    section Fase 0 · Fundaciones
+    Infra, CI/CD, auth, esqueleto        :f0, 2026-08, 1M
+
+    section Fase 1 · MVP Documental
+    Subida + OCR/IA + validación         :f1, 2026-09, 2M
+    Facturas compra/venta + buscador v1  :f1b, 2026-10, 1M
+
+    section Fase 2 · Tesorería y Obras
+    Vencimientos, bancos, caja, flujo    :f2, 2026-11, 2M
+    Obras: coste y margen en tiempo real :f2b, 2026-12, 1M
+
+    section Fase 3 · Ciclo completo
+    Presupuestos + certificaciones       :f3, 2027-01, 2M
+    Pedidos + albaranes + 3-way match    :f3b, 2027-02, 1M
+
+    section Fase 4 · Inteligencia
+    Dashboard completo + informes        :f4, 2027-03, 2M
+    Copiloto IA (NLQ, predicciones)      :f4b, 2027-04, 2M
+
+    section Fase 5 · Endurecimiento
+    Rendimiento, seguridad, VeriFactu    :f5, 2027-06, 2M
 ```
 
-## M1 · Gestión documental (núcleo)
+## Fase 0 · Fundaciones (mes 1)
 
-- **Entrada**: arrastrar y soltar (multi-archivo), foto desde móvil, buzón de email dedicado, API. Formatos: PDF, JPG, PNG, HEIC, TIFF, XML (Facturae/UBL), ZIP.
-- **Pipeline**: subida → OCR/extracción IA → clasificación (tipo de documento, categoría de gasto, obra sugerida) → **bandeja de validación**.
-- **Bandeja de validación**: vista de dos paneles (documento a la izquierda, campos extraídos editables a la derecha, con la zona del documento de la que procede cada dato resaltada al enfocar el campo). Validar con una tecla; los campos con confianza baja aparecen marcados.
-- **Archivo**: navegación por obra / tipo / proveedor / mes; todo documento validado queda enlazado a su entidad económica (factura, albarán…).
-- **Avisos del pipeline**: duplicado detectado, descuadre base+IVA≠total, NIF inválido, factura ya vencida al subirla.
+**Objetivo**: esqueleto profesional sobre el que todo lo demás se apoya.
 
-## M2 · Facturación
+- Monorepo, Docker de desarrollo, CI/CD (lint, tests, deploy a staging).
+- Esquema base de datos inicial + migraciones + seeds (categorías, roles).
+- Autenticación (JWT + refresh), RBAC de 4 roles, gestión de usuarios.
+- Layout de la aplicación (navegación, tema, responsive) con shadcn/ui.
+- Entidades maestras: empresa, contactos (proveedores/clientes), obras.
+- Sentry, logs, backups automáticos configurados **desde el primer día**.
 
-- **Compras**: nacen casi siempre del pipeline documental. Estados: `pendiente_validacion → validada → parcial/pagada`. Reparto multi-obra y multi-categoría por líneas. Soporte de **inversión del sujeto pasivo** (habitual entre contratista y subcontratista en construcción) e IRPF.
-- **Ventas**: emisión de facturas propias con series configurables (p.ej. `FV-2026-`), generación desde certificación aprobada o presupuesto, PDF con plantilla corporativa, envío por email. Preparado para **VeriFactu/Facturae**.
-- **Vencimientos**: al validar una factura se generan automáticamente sus vencimientos según la forma de pago (30/60/90, confirming, pagaré…), editables.
+**Criterio de salida**: un usuario puede registrarse, crear obras y contactos desde móvil y PC; deploy automático funcionando.
 
-## M3 · Tesorería
+## Fase 1 · MVP documental y facturas (meses 2-4) — primer valor real
 
-- **Cobros y pagos pendientes**: listas operativas ordenadas por vencimiento, con aging (0-30/30-60/60-90/+90), acciones de "marcar pagado", pago parcial, remesas.
-- **Bancos y caja**: cuentas ilimitadas; la caja es una cuenta de tipo `caja` con movimientos manuales. Importación de extractos (CSV/Norma 43) o **sincronización automática PSD2** (GoCardless Bank Account Data u similar).
-- **Conciliación**: sugerencia automática de emparejamiento movimiento↔vencimiento (importe + fecha + similitud del concepto con el proveedor); confirmación en un clic.
-- **Flujo de caja**: curva de saldo real + proyección a 30/60/90 días a partir de vencimientos y estacionalidad histórica; escenarios (¿y si el cliente X paga 30 días tarde?).
+- Subida multi-archivo (web + cámara móvil) a S3, listado y visor de documentos.
+- Pipeline OCR/IA: extracción de los 7 campos clave + clasificación en las 8 categorías + sugerencia de obra.
+- Bandeja de validación (documento + campos editables + confianza + avisos).
+- Detección de duplicados (hash + clave natural) y validaciones (NIF, cuadre base+IVA=total, tipos de IVA).
+- CRUD de facturas de compra y venta con líneas, series de venta, PDF de factura emitida.
+- Buscador v1: full-text (tsvector + trgm) sobre documentos y facturas.
+- Export básico a Excel del listado de facturas.
 
-## M4 · Obras (proyectos)
+**Criterio de salida**: la empresa deja de archivar en carpetas: toda factura entra por el sistema, se lee sola y se encuentra en segundos. *Este es el momento de empezar a usarlo en producción con datos reales.*
 
-- **Ficha de obra**: datos de contrato, cliente, fechas, estado, retención de garantía, equipo asignado.
-- **Panel económico en tiempo real**: contratado · presupuestado · coste real (desglosado por las 8 categorías) · certificado · facturado · cobrado · **margen actual (€ y %)** · desviación presupuesto vs. real por capítulo.
-- **Imputación**: toda factura/línea, albarán o pedido pide obra; existe la pseudo-obra "Gastos generales" para costes de estructura.
-- **Documentos de obra**: todo lo archivado filtrado por la obra (contrato, facturas, albaranes, certificaciones, fotos).
+## Fase 2 · Tesorería y control por obra (meses 4-6)
 
-## M5 · Presupuestos y certificaciones
+- Vencimientos automáticos por forma de pago; cobros/pagos pendientes con aging.
+- Cuentas bancarias y caja; importación de extractos (CSV/Norma 43); conciliación asistida.
+- Flujo de caja: saldo real + proyección 30/60/90 días.
+- Panel económico por obra: coste real por categoría, facturado, cobrado, margen en vivo.
+- Alertas automáticas: pagos/cobros vencidos (email + in-app).
+- Dashboard v1: facturación, gastos, beneficio, IVA, pendientes.
 
-- **Presupuestos**: árbol de capítulos → partidas con cantidad, unidad, coste y precio; versionado; **importación BC3/FIEBDC-3** (estándar español de presupuestación) y Excel; comparativo entre versiones.
-- **Certificaciones**: certificación mensual a origen por partida (cantidad o %), cálculo automático de la certificación del periodo (origen actual − origen anterior), retención de garantía, y generación de la **factura de venta** al aprobarla.
-- **Control**: certificado a origen vs. facturado vs. cobrado por obra; avisos si se certifica por encima del contrato.
+**Criterio de salida**: gerencia sabe cada mañana cuánto hay, cuánto se debe, cuánto deben y qué margen lleva cada obra.
 
-## M6 · Compras: pedidos y albaranes
+## Fase 3 · Ciclo de construcción completo (meses 6-8)
 
-- **Pedidos**: creación rápida (también desde el móvil a pie de obra), envío por email al proveedor con PDF, estados hasta `facturado`.
-- **Albaranes**: alta por foto (el OCR extrae proveedor, fecha y líneas) o manual; recepción contra pedido (control de cantidades pendientes).
-- **Cuadre a 3 bandas (3-way match)**: al validar una factura de compra, el sistema propone los albaranes/pedidos abiertos del proveedor y avisa de diferencias de precio o cantidad → evita pagar de más, principal fuga de dinero en construcción.
+- Presupuestos: capítulos/partidas, versionado, importación **BC3** y Excel.
+- Certificaciones a origen + retención de garantía + factura de venta automática.
+- Comparativo presupuesto vs. coste real por capítulo, con alertas de desviación.
+- Pedidos a proveedor (también desde móvil) y albaranes por foto.
+- Cuadre pedido ↔ albarán ↔ factura (3-way match) con bloqueo de facturas descuadradas.
+- Integración bancaria PSD2 (sincronización automática de movimientos).
 
-## M7 · Dashboard e informes
+**Criterio de salida**: el ciclo completo oferta→obra→certificación→cobro vive en el sistema; ninguna factura descuadrada se paga sin revisión.
 
-**Dashboard principal** (configurable por rol):
+## Fase 4 · Inteligencia y reporting (meses 8-11)
 
-| Widget | Fuente |
+- Dashboard completo (todos los widgets, filtros por periodo/obra, comparativas interanuales).
+- Informes automáticos exportables (Excel/PDF): cierre mensual, libro de IVA, económico por obra, aging; envío programado.
+- Copiloto IA con NLQ (tool use sobre consultas tipadas con permisos).
+- Predicción de liquidez con histórico de comportamiento de pago por cliente.
+- Recomendaciones de ahorro (comparativa de precios por proveedor/material).
+- Buscador v2: semántico (pgvector) + fusión de resultados.
+- Informe mensual redactado por IA para gerencia.
+
+**Criterio de salida**: cualquier pregunta económica de la empresa se responde en < 10 segundos, escrita en lenguaje natural.
+
+## Fase 5 · Endurecimiento y escala (meses 11-12)
+
+- Auditoría de seguridad externa (pentest) + revisión RGPD.
+- Rendimiento: particionado, índices, presupuesto de carga < 2 s en 4G.
+- Cumplimiento **VeriFactu / factura electrónica B2B** (calendario legal español).
+- Simulacros de restauración de backup; runbooks de operación.
+- Pulido UX con feedback de los usuarios reales de las fases 1-4.
+- Preparación multi-empresa (activar RLS) si se quiere comercializar a terceros.
+
+## Principios de ejecución
+
+1. **Producción temprana**: usuarios reales desde el fin de la Fase 1; cada fase se valida con el uso diario, no con demos.
+2. **Datos reales desde el principio**: migrar el histórico de facturas del último año en Fase 1 (el propio pipeline OCR sirve para la migración).
+3. **Calidad de extracción medida**: dashboard interno de precisión del OCR/IA por campo; objetivo ≥ 97% en número, fecha, total; cada corrección manual del usuario se registra como dato de evaluación.
+4. **Deuda controlada**: tests de integración en los circuitos de dinero (facturas, vencimientos, pagos, certificaciones) como mínimo innegociable.
+5. **Una métrica por fase**: F1 = % de facturas que entran sin teclear · F2 = días de retraso medio detectado en cobros · F3 = € recuperados por descuadres detectados · F4 = preguntas NLQ respondidas correctamente.
+
+## Riesgos principales y mitigación
+
+| Riesgo | Mitigación |
 |---|---|
-| Facturación mensual (12 meses, barras) | `mv_monthly_summary` |
-| Gastos mensuales por categoría (barras apiladas) | `mv_monthly_summary` |
-| Beneficio mensual y acumulado (línea) | `mv_monthly_summary` |
-| IVA repercutido vs. soportado + previsión del modelo 303 | `mv_monthly_summary` |
-| Cobros pendientes / Pagos pendientes (tarjetas + aging) | `mv_aging` |
-| Rentabilidad por obra (ranking con margen %) | `mv_project_economics` |
-| Posición de tesorería + curva de caja proyectada | `mv_treasury_position` |
-| Alertas activas (vencidos, liquidez, duplicados) | `alerts` |
-
-**Informes** (todos exportables a **Excel (xlsx)** y **PDF**, con envío programado por email):
-
-- Cierre mensual (P&L de gestión), libro de facturas emitidas/recibidas (formato compatible con asesoría/AEAT), informe económico por obra, aging de cobros/pagos, resumen de IVA por trimestre, comparativo presupuesto vs. real, diario de tesorería.
-
-## M8 · Buscador inteligente
-
-- Caja única global (atajo `Ctrl/Cmd+K`): busca en facturas, documentos, contactos, obras, pedidos y albaranes.
-- Entiende importes, fechas y rangos ("facturas de Ferralla López de más de 5.000 € en marzo").
-- Filtros facetados post-búsqueda: tipo, obra, categoría, estado, rango de fechas/importes.
-- Resultados con vista previa del documento y resaltado del término encontrado.
-- Detalle técnico en `02-base-de-datos.md` §4.
-
-## M9 · Copiloto IA
-
-- **Chat NLQ**: responde "¿Cuánto hemos gastado en materiales este mes?", "¿Qué clientes tienen facturas pendientes?", "¿Qué obra tiene peor margen?" mediante *tool use* sobre consultas tipadas y con los permisos del usuario. Las respuestas citan los datos (enlaces a facturas/obras).
-- **Alertas proactivas**: pagos/cobros vencidos (diario), riesgo de liquidez (proyección < umbral), desviación de presupuesto > X% en un capítulo, subida de precio de un material respecto al histórico, posible duplicado.
-- **Recomendaciones**: comparativa de precios entre proveedores del mismo material, partidas sistemáticamente desviadas, clientes con peor comportamiento de pago.
-- **Informe automático mensual** redactado (resumen ejecutivo + tablas) enviado a gerencia.
-
-## M10 · Administración
-
-- **Usuarios y roles** con la siguiente matriz base:
-
-| Capacidad | Admin | Gerente | Administración | Obra |
-|---|:-:|:-:|:-:|:-:|
-| Configuración, usuarios, backups | ✅ | — | — | — |
-| Dashboard global y márgenes | ✅ | ✅ | ✅ | — |
-| Validar/editar facturas, tesorería, conciliación | ✅ | ✅ | ✅ | — |
-| Ver datos económicos de todas las obras | ✅ | ✅ | ✅ | — |
-| Subir documentos/fotos, crear pedidos y albaranes | ✅ | ✅ | ✅ | ✅ (sus obras) |
-| Ver documentación de obra | ✅ | ✅ | ✅ | ✅ (sus obras) |
-| Exportar informes | ✅ | ✅ | ✅ | — |
-| Copiloto IA | ✅ | ✅ | ✅ | ✅ (limitado a sus obras) |
-
-- **Auditoría**: consulta del `audit_log` con filtros (usuario, entidad, fecha).
-- **Configuración**: series de facturación, umbrales de alertas (liquidez, desviación), categorías/subcategorías, plantillas PDF, condiciones de pago por defecto, buzón de email de entrada.
+| Precisión OCR insuficiente en facturas "difíciles" (fotos malas, tickets) | Confianza por campo + validación humana; guía de captura en el móvil; reintento con modelo superior si confianza baja. |
+| Adopción por el personal de obra | La app móvil se limita a 2 acciones (foto de albarán, pedido rápido); formación de 1 hora; valor inmediato visible. |
+| Cambios normativos (VeriFactu, e-factura) | Módulo de facturación de venta aislado tras una interfaz; seguimiento del calendario normativo en Fase 5. |
+| Dependencia del proveedor LLM | Capa `packages/ai` abstrae el proveedor; prompts y schemas versionados; posibilidad de cambiar de modelo sin tocar el dominio. |
+| Alcance creciente ("ya que estamos…") | Este documento es el contrato de alcance; lo que no esté aquí va a una lista v2 priorizada trimestralmente. |

@@ -6,12 +6,12 @@ Plataforma en la nube que centraliza toda la información económica, administra
 
 | Documento | Contenido |
 |---|---|
-| [01 · Arquitectura](docs/01-arquitectura.md) | Visión general, monolito modular, pipeline OCR/IA, seguridad, infraestructura, backups |
-| [02 · Base de datos](docs/02-base-de-datos.md) | Modelo entidad-relación, esquema SQL completo, vistas del dashboard, estrategia del buscador |
-| [03 · Módulos](docs/03-modulos.md) | Los 10 módulos funcionales y la matriz de permisos por rol |
-| [04 · Flujos de trabajo](docs/04-flujos-de-trabajo.md) | Circuitos de gasto, ingreso, compras, ciclo mensual y procesos automáticos |
-| [05 · Stack tecnológico](docs/05-stack-tecnologico.md) | Tecnologías recomendadas, alternativas descartadas, costes de operación, estructura del repo |
-| [06 · Hoja de ruta](docs/06-hoja-de-ruta.md) | Plan de 12 meses en 5 fases, criterios de salida, métricas y riesgos |
+| [01 · Arquitectura](01-arquitectura.md) | Visión general, monolito modular, pipeline OCR/IA, seguridad, infraestructura, backups |
+| [02 · Base de datos](02-base-de-datos.md) | Modelo entidad-relación, esquema SQL completo, vistas del dashboard, estrategia del buscador |
+| [03 · Módulos](03-modulos.md) | Los 10 módulos funcionales y la matriz de permisos por rol |
+| [04 · Flujos de trabajo](04-flujos-de-trabajo.md) | Circuitos de gasto, ingreso, compras, ciclo mensual y procesos automáticos |
+| [05 · Stack tecnológico](05-stack-tecnologico.md) | Tecnologías recomendadas, alternativas descartadas, costes de operación, estructura del repo |
+| [06 · Hoja de ruta](06-hoja-de-ruta.md) | Plan de 12 meses en 5 fases, criterios de salida, métricas y riesgos |
 
 ## Resumen ejecutivo
 
@@ -24,4 +24,4 @@ Plataforma en la nube que centraliza toda la información económica, administra
 
 ## Roles
 
-`admin` · `gerente` · `administracion` · `obra` (acceso restringido a sus obras asignadas). Matriz completa en [03 · Módulos](docs/03-modulos.md).
+`admin` · `gerente` · `administracion` · `obra` (acceso restringido a sus obras asignadas). Matriz completa en [03 · Módulos](03-modulos.md).

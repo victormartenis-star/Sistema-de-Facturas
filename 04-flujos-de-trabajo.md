@@ -1,69 +1,119 @@
-# 05 · Stack Tecnológico Recomendado
+# 04 · Flujos de Trabajo
 
-Criterios de elección: un solo lenguaje principal (TypeScript) para minimizar el coste de equipo, tecnologías maduras con gran comunidad, y servicios gestionados para todo lo que no sea el core del negocio.
+Los cuatro circuitos operativos que cubren el día a día de una constructora, más los procesos automáticos de fondo.
 
-## Stack principal
+## F1 · Circuito de gasto (factura de compra)
 
-| Capa | Tecnología | Por qué |
-|---|---|---|
-| **Frontend** | **Next.js 15 (React 19) + TypeScript** | SSR para carga rápida, un solo framework para web/PWA, ecosistema enorme. |
-| UI | **Tailwind CSS + shadcn/ui** | Interfaz moderna tipo Notion/Linear con poco esfuerzo; componentes accesibles y personalizables. |
-| Estado/datos | **TanStack Query + Zustand** | Caché de servidor declarativa, optimistic updates (validación de facturas fluida). |
-| Tablas y gráficos | **TanStack Table + Recharts** | Tablas virtuales para miles de facturas; gráficos del dashboard. |
-| Visor documental | **pdf.js** + visor de imágenes propio | Vista previa con resaltado de zonas extraídas. |
-| **Backend** | **NestJS (Node 22 + TypeScript)** | Arquitectura modular que casa 1:1 con los bounded contexts; DI, guards (RBAC), OpenAPI generado. |
-| ORM | **Prisma** (o Drizzle) | Migraciones versionadas, tipos end-to-end con el frontend. |
-| Validación | **Zod** (compartido front/back) | Un único esquema de validación para API y formularios. |
-| **Base de datos** | **PostgreSQL 16** + `pgvector` + `pg_trgm` + `unaccent` | Transaccional + full-text + semántico en un solo motor: menos piezas. |
-| Cola / caché | **Redis + BullMQ** | Pipeline OCR asíncrono, reintentos, prioridades, cron jobs. |
-| Ficheros | **S3 / Cloudflare R2** (región UE, versionado) | Durabilidad 11 nueves, URLs firmadas, Object Lock. |
-| **IA - extracción** | **Claude API (visión + tool use)** — modelo `claude-sonnet-5` para extracción/clasificación, `claude-haiku-4-5` para tareas simples de bajo coste | Extracción estructurada de facturas heterogéneas con JSON Schema estricto; mejor relación precisión/esfuerzo que entrenar OCR propio. |
-| IA - OCR texto completo | **Tesseract 5** (self-host, gratis) o **Azure Document Intelligence** (si se requiere más precisión) | Texto íntegro para el buscador full-text. |
-| IA - embeddings | Voyage AI / text-embedding multilingüe | Búsqueda semántica de documentos. |
-| Banca | **GoCardless Bank Account Data** (ex-Nordigen) | Agregación bancaria PSD2 en España con coste bajo. |
-| Email entrante/saliente | **Postmark / SES** + inbound webhooks | Buzón de facturas y envío de avisos/informes. |
-| Exportación | **exceljs** (xlsx) + **Playwright/Chromium headless** (PDF desde plantillas HTML) | Informes idénticos a lo que se ve en pantalla. |
-| **Infra** | **Docker + GitHub Actions**; Railway/Render al inicio → AWS ECS después | CI/CD simple, coste inicial < 100 €/mes. |
-| Observabilidad | **Sentry + logs estructurados (pino) + Better Stack** | Errores y uptime desde el día 1. |
-| Auth | Propia (JWT + Argon2 + TOTP) o **Keycloak** si se prefiere delegar | Control total del RBAC por obra. |
-
-## Alternativas consideradas (y por qué no)
-
-| Opción | Motivo de descarte |
-|---|---|
-| Microservicios desde el inicio | Sobrecarga operativa injustificada para un equipo pequeño; el monolito modular permite extraer servicios más tarde. |
-| Python/Django o FastAPI como backend único | Válido, pero rompe el "un solo lenguaje" con el frontend; el ecosistema TS cubre todo el dominio. Python queda como opción para un microservicio de ML futuro. |
-| Odoo como base | Personalizar Odoo a este flujo documental-IA cuesta más que construir a medida, y ata a su modelo de datos y licencias. |
-| OCR propio entrenado (LayoutLM etc.) | Coste alto de datos etiquetados; los LLM de visión actuales lo superan sin entrenamiento. Reevaluar solo si el coste por documento se dispara. |
-| Elasticsearch para el buscador | PostgreSQL FTS + pgvector cubre el volumen esperado (decenas de miles de documentos); una pieza menos que operar. |
-| MongoDB | El dominio es fuertemente relacional (facturas↔vencimientos↔pagos↔obras); se necesitan transacciones y agregaciones SQL. |
-
-## Estimación de costes de operación (fase inicial)
-
-| Concepto | Coste mensual aprox. |
-|---|---|
-| Hosting PaaS (API + workers + frontend) | 40–80 € |
-| PostgreSQL gestionado | 20–50 € |
-| S3/R2 (100 GB + tráfico) | 5–15 € |
-| Claude API (~2.000 facturas/mes con Sonnet visión) | 30–80 € |
-| Agregador bancario | 0–50 € |
-| Email transaccional + monitorización | 15–30 € |
-| **Total** | **≈ 110–300 €/mes** |
-
-## Estructura de repositorio propuesta (monorepo)
-
+```mermaid
+flowchart LR
+    A["📥 Entrada<br/>(web · foto móvil · email · API)"] --> B["🤖 OCR + IA<br/>extracción y clasificación"]
+    B --> C{"¿Avisos?<br/>duplicado · descuadre · NIF"}
+    C -- sí --> D["⚠️ Bandeja con avisos<br/>revisión obligatoria"]
+    C -- no --> E["📋 Bandeja de validación"]
+    D --> E
+    E --> F["👤 Administración valida<br/>(corrige campos, asigna obra y categoría)"]
+    F --> G["🧾 Factura contabilizada<br/>+ vencimientos generados"]
+    G --> H["🔗 Cuadre con albaranes/pedidos<br/>(3-way match)"]
+    G --> I["📊 Coste imputado a obra<br/>margen actualizado en tiempo real"]
+    G --> J["💰 Pago (manual o conciliado<br/>con extracto bancario)"]
+    J --> K["✅ Pagada"]
 ```
-sistema-facturas/
-├── apps/
-│   ├── web/                  # Next.js (frontend PWA)
-│   ├── api/                  # NestJS (API REST + módulos de dominio)
-│   └── workers/              # Procesos BullMQ (OCR, alertas, informes, banca)
-├── packages/
-│   ├── shared/               # Tipos, esquemas Zod, utilidades comunes
-│   ├── db/                   # Esquema Prisma + migraciones + seeds
-│   └── ai/                   # Prompts, JSON Schemas de extracción, clientes LLM
-├── infra/
-│   ├── docker/               # Dockerfiles + docker-compose para desarrollo
-│   └── github/               # Workflows CI/CD
-└── docs/                     # Esta documentación
+
+Reglas:
+- Un documento nunca se convierte en apunte económico sin validación humana (salvo que el usuario active auto-validación para extracciones con confianza > 98% y sin avisos).
+- La factura vencida sin pagar pasa automáticamente a `vencida` y genera alerta.
+- El rol `obra` puede subir la foto del ticket/albarán; la validación económica queda siempre en `administracion`/`gerente`.
+
+## F2 · Circuito de ingreso (presupuesto → certificación → cobro)
+
+```mermaid
+flowchart LR
+    A["📐 Presupuesto<br/>(capítulos y partidas, import BC3)"] --> B{"¿Aprobado<br/>por el cliente?"}
+    B -- no --> A2["Nueva versión"] --> A
+    B -- sí --> C["🏗️ Obra en curso<br/>(presupuesto = línea base de coste)"]
+    C --> D["📏 Certificación mensual<br/>(avance a origen por partida)"]
+    D --> E{"¿Aprobada por<br/>dirección facultativa?"}
+    E -- no --> D
+    E -- sí --> F["🧾 Factura de venta generada<br/>(con retención de garantía)"]
+    F --> G["📤 Envío al cliente<br/>+ vencimiento de cobro"]
+    G --> H{"¿Cobrada al<br/>vencimiento?"}
+    H -- sí --> I["✅ Cobro conciliado"]
+    H -- no --> J["⚠️ Alerta de cobro vencido<br/>+ reclamación"]
+    J --> H
+    I --> K["🔓 Devolución de retenciones<br/>al fin de garantía (aviso automático)"]
+```
+
+## F3 · Circuito de compras (pedido → albarán → factura)
+
+```mermaid
+flowchart LR
+    A["🛒 Pedido<br/>(desde oficina o móvil en obra)"] --> B["📧 Enviado al proveedor"]
+    B --> C["🚚 Entrega en obra"]
+    C --> D["📸 Albarán fotografiado<br/>por el encargado (rol obra)"]
+    D --> E["🤖 OCR: líneas y cantidades<br/>casadas contra el pedido"]
+    E --> F{"¿Cantidades y precios<br/>coinciden?"}
+    F -- no --> G["⚠️ Incidencia de recepción<br/>(falta material / precio distinto)"]
+    F -- sí --> H["✅ Recepción confirmada"]
+    G --> H
+    H --> I["🧾 Llega la factura del proveedor"]
+    I --> J["🔗 3-way match automático<br/>pedido ↔ albaranes ↔ factura"]
+    J --> K{"¿Cuadra?"}
+    K -- sí --> L["Validación exprés"]
+    K -- no --> M["⚠️ Bloqueada: diferencia detectada<br/>(se reclama abono al proveedor)"]
+```
+
+## F4 · Ciclo mensual de gestión
+
+| Día | Proceso | Automático / Manual |
+|---|---|---|
+| Continuo | Entrada y validación de documentos; conciliación bancaria diaria | Mixto |
+| Día 1 | Refresco de cierre del mes anterior; **informe mensual automático** (P&L, IVA, obras) enviado a gerencia | Automático |
+| Días 1-5 | Certificaciones de obra del mes anterior → facturas de venta | Manual asistido |
+| Día 5 | Aviso de vencimientos de la semana + previsión de caja a 30/60/90 | Automático |
+| Días 15/20 | Revisión de desviaciones presupuesto vs. real por obra (alertas si > umbral) | Automático |
+| Trimestre | Export libro de IVA + facturas para la asesoría (Excel/PDF) | Automático programable |
+
+## F5 · Procesos automáticos de fondo (workers)
+
+| Worker | Disparo | Acción |
+|---|---|---|
+| `ocr-extraction` | Evento `documento.subido` | OCR + extracción + clasificación + dedupe |
+| `alerts-due` | Cron diario 07:00 | Vencidos e impagados → alertas + email |
+| `cashflow-forecast` | Cron diario + al registrar pagos | Recalcula proyección de caja; alerta si < umbral |
+| `bank-sync` | Cron cada 6h | Descarga movimientos PSD2 y propone conciliaciones |
+| `budget-deviation` | Al imputar coste a obra | Recalcula desviación por capítulo; alerta si > X% |
+| `monthly-report` | Cron día 1 | Genera y envía informe de cierre (PDF/Excel) |
+| `backup-verify` | Cron semanal | Comprueba integridad de backups y restauración de muestra |
+| `retention-reminder` | Cron diario | Avisa de retenciones de garantía recuperables |
+
+## F6 · Estados y transiciones clave
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    state "Documento" as doc {
+        [*] --> subido
+        subido --> procesando
+        procesando --> extraido
+        procesando --> error
+        extraido --> validado
+        extraido --> rechazado
+        error --> procesando : reintento
+    }
+```
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    state "Factura" as inv {
+        [*] --> pendiente_validacion
+        pendiente_validacion --> validada
+        validada --> parcialmente_pagada
+        validada --> vencida : vence sin pago
+        vencida --> parcialmente_pagada
+        parcialmente_pagada --> pagada
+        validada --> pagada
+        pendiente_validacion --> anulada
+        validada --> anulada : rectificativa
+    }
 ```
