@@ -14,6 +14,7 @@ import {
   formatDate,
   formatEur,
   projectsApi,
+  validationApi,
 } from '@/lib/api';
 import { DocStatusBadge } from '@/components/doc-status-badge';
 import { ErrorBanner } from '@/components/ui';
@@ -142,6 +143,10 @@ export default function DashboardPage() {
     queryKey: ['documents', '', '', ''],
     queryFn: () => documentsApi.list('', '', ''),
   });
+  const validacionQuery = useQuery({
+    queryKey: ['validacion', ''],
+    queryFn: () => validationApi.list(''),
+  });
 
   const projects = projectsQuery.data ?? [];
   const contacts = contactsQuery.data ?? [];
@@ -159,6 +164,9 @@ export default function DashboardPage() {
     (c) => c.kind === 'cliente' || c.kind === 'ambos',
   ).length;
   const sinClasificar = documents.filter((d) => d.docType === null).length;
+  const pendientes = (validacionQuery.data ?? []).filter(
+    (v) => v.status === 'extraido',
+  ).length;
 
   const statusCounts = PROJECT_STATUSES.map((s) => ({
     status: s,
@@ -359,22 +367,27 @@ export default function DashboardPage() {
             />
           </div>
 
-          {/* Siguiente hito de la hoja de ruta */}
-          <div className="mt-6 flex items-start gap-4 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 p-5 text-white shadow-lg shadow-amber-500/20">
+          {/* Bandeja de validación de la IA */}
+          <Link
+            href="/validacion"
+            className="mt-6 flex items-start gap-4 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 p-5 text-white shadow-lg shadow-amber-500/20 transition hover:shadow-xl"
+          >
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/20">
               <IconSparkles size={20} />
             </span>
             <div>
               <p className="font-semibold">
-                Siguiente paso: lectura automática de facturas con IA
+                {pendientes > 0
+                  ? `${pendientes} documento${pendientes > 1 ? 's' : ''} leído${pendientes > 1 ? 's' : ''} por la IA esperando validación`
+                  : 'Lectura automática de facturas con IA'}
               </p>
               <p className="mt-1 text-sm text-amber-50">
-                Los documentos que subas hoy quedarán listos para el pipeline
-                OCR/IA: extraerá número, fecha, proveedor, importes e IVA, y tú
-                solo tendrás que validar.
+                {pendientes > 0
+                  ? 'Revisa número, fecha, proveedor e importes y confirma en segundos: la factura se crea en borrador →'
+                  : 'Sube una factura en Documentos y la IA extraerá número, fecha, proveedor, base, IVA y total para que solo tengas que validarla →'}
               </p>
             </div>
-          </div>
+          </Link>
         </>
       )}
     </div>

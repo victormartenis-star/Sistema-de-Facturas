@@ -449,6 +449,27 @@ export const paymentMilestones = pgTable('payment_milestones', {
     .defaultNow(),
 });
 
+/**
+ * Resultado bruto del pipeline OCR/IA (02-base-de-datos.md §2.4).
+ * Versionable: cada pasada del modelo deja una fila, la más reciente es la
+ * que se muestra en la bandeja de validación. `payload` guarda los campos
+ * extraídos, `confidence` la confianza 0-1 por campo y `warnings` los avisos
+ * (descuadre, NIF inválido, duplicado…).
+ */
+export const extractions = pgTable('extractions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  documentId: uuid('document_id')
+    .notNull()
+    .references(() => documents.id, { onDelete: 'cascade' }),
+  model: text('model').notNull(),
+  payload: jsonb('payload').notNull(),
+  confidence: jsonb('confidence').notNull(),
+  warnings: jsonb('warnings').notNull().default([]),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export type Company = typeof companies.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;
@@ -469,3 +490,5 @@ export type DeliveryNote = typeof deliveryNotes.$inferSelect;
 export type NewDeliveryNote = typeof deliveryNotes.$inferInsert;
 export type PaymentMilestone = typeof paymentMilestones.$inferSelect;
 export type NewPaymentMilestone = typeof paymentMilestones.$inferInsert;
+export type Extraction = typeof extractions.$inferSelect;
+export type NewExtraction = typeof extractions.$inferInsert;

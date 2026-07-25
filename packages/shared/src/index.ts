@@ -1,5 +1,6 @@
 export * from './contacts';
 export * from './documents';
+export * from './extractions';
 export * from './projects';
 export * from './phases';
 export * from './invoices';

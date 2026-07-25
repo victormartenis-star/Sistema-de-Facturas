@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createReadStream, ReadStream } from 'node:fs';
-import { access, mkdir, unlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import { Injectable } from '@nestjs/common';
 
@@ -35,6 +35,11 @@ export class StorageService {
 
   read(key: string): ReadStream {
     return createReadStream(this.pathFor(key));
+  }
+
+  /** Contenido completo en memoria (lo necesita el pipeline OCR/IA). */
+  readBuffer(key: string): Promise<Buffer> {
+    return readFile(this.pathFor(key));
   }
 
   async exists(key: string): Promise<boolean> {

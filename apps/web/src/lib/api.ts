@@ -16,6 +16,7 @@ import type {
   DeviationReportDto,
   DocumentDto,
   DocumentUpdateInput,
+  ExtractionValidateInput,
   InvoiceCreateInput,
   InvoiceDto,
   InvoiceUpdateInput,
@@ -26,6 +27,8 @@ import type {
   ProjectCreateInput,
   ProjectDto,
   ProjectUpdateInput,
+  ValidationItemDto,
+  ValidationResultDto,
 } from '@erp/shared';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
@@ -243,6 +246,32 @@ export const deliveryNotesApi = {
     }),
   remove: (id: string) =>
     request<void>(`/delivery-notes/${id}`, { method: 'DELETE' }),
+};
+
+export const ocrApi = {
+  /** Estado del pipeline: avisa en la interfaz si falta la clave de la API. */
+  status: () =>
+    request<{ enabled: boolean; model: string | null }>('/ocr/estado'),
+};
+
+export const validationApi = {
+  list: (status: string) =>
+    request<ValidationItemDto[]>(
+      `/validacion${status ? `?status=${status}` : ''}`,
+    ),
+  /** Relanza la lectura del documento con el modelo de visión. */
+  reprocess: (documentId: string) =>
+    request<{ documentId: string; status: string }>(
+      `/documents/${documentId}/extraer`,
+      { method: 'POST' },
+    ),
+  validate: (documentId: string, input: ExtractionValidateInput) =>
+    request<ValidationResultDto>(`/validacion/${documentId}/validar`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  reject: (documentId: string) =>
+    request<void>(`/validacion/${documentId}/rechazar`, { method: 'POST' }),
 };
 
 export const treasuryApi = {

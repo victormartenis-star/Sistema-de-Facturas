@@ -44,7 +44,25 @@ Plataforma en la nube que centraliza toda la información económica, administra
 | Certificaciones a origen con factura de venta automática | ✅ |
 | Albaranes/partes con punteado (matching) de facturas de compra | ✅ |
 | Tesorería: vencimientos + cash flow semanal/mensual con alerta de tensión | ✅ |
-| Pipeline OCR/IA (extracción, validación) | ⏳ siguiente |
+| Pipeline OCR/IA: worker + lectura con Claude visión, tabla `extractions` | ✅ |
+| Bandeja de validación (original + datos leídos, confianza por campo) | ✅ |
+| Autenticación, roles y permisos por obra | ⏳ siguiente |
+
+### Pipeline OCR/IA
+
+El worker ([apps/api/src/ocr](apps/api/src/ocr)) toma cada documento en estado
+`subido`, lo envía al modelo de visión con salida estructurada y guarda en
+`extractions` los 7 campos clave (número, fecha, emisor, base, IVA, total y
+forma de pago), la clasificación documental y de gasto, una confianza 0-1 por
+campo y los avisos detectados (descuadre base+IVA≠total, NIF con dígito de
+control inválido, fecha futura, posible duplicado). En la bandeja de validación
+el usuario ve el original junto a lo leído, corrige lo que haga falta y al
+confirmar puede generar la factura de compra en borrador.
+
+Requiere `ANTHROPIC_API_KEY` en el `.env`. Sin clave el resto de la aplicación
+funciona igual: los documentos se guardan y la interfaz avisa de que la lectura
+automática está desactivada. Variables opcionales: `ANTHROPIC_MODEL` (por
+defecto `claude-opus-4-8`) y `OCR_WORKER_INTERVAL_MS` (por defecto 10000).
 
 ## Cómo ejecutar en local
 

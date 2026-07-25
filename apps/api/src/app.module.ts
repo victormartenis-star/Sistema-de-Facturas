@@ -6,6 +6,7 @@ import { DbModule } from './db/db.module';
 import { DeliveryNotesModule } from './delivery-notes/delivery-notes.module';
 import { DocumentsModule } from './documents/documents.module';
 import { InvoicesModule } from './invoices/invoices.module';
+import { OcrModule } from './ocr/ocr.module';
 import { PhasesModule } from './phases/phases.module';
 import { ProjectsModule } from './projects/projects.module';
 import { TreasuryModule } from './treasury/treasury.module';
@@ -22,6 +23,7 @@ import { TreasuryModule } from './treasury/treasury.module';
     CertificationsModule,
     DeliveryNotesModule,
     TreasuryModule,
+    OcrModule,
   ],
 })
 export class AppModule {}
