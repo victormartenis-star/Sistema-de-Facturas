@@ -1,12 +1,16 @@
 import { sql } from 'drizzle-orm';
 import {
+  AnyPgColumn,
+  boolean,
   date,
+  integer,
   jsonb,
   numeric,
   pgEnum,
   pgTable,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
@@ -74,6 +78,73 @@ export const projects = pgTable(
   ],
 );
 
+/** Categorías de gasto (02-base-de-datos.md §2.3). Las 8 de serie llevan is_system. */
+export const categories = pgTable(
+  'categories',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    name: text('name').notNull(),
+    slug: text('slug').notNull(),
+    parentId: uuid('parent_id').references((): AnyPgColumn => categories.id),
+    isSystem: boolean('is_system').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [unique('categories_company_slug_unique').on(t.companyId, t.slug)],
+);
+
+export const contactKindEnum = pgEnum('contact_kind', [
+  'proveedor',
+  'cliente',
+  'ambos',
+]);
+
+/** Proveedores y clientes unificados (02-base-de-datos.md §2.2). */
+export const contacts = pgTable(
+  'contacts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    kind: contactKindEnum('kind').notNull(),
+    legalName: text('legal_name').notNull(),
+    tradeName: text('trade_name'),
+    taxId: text('tax_id'),
+    address: jsonb('address'),
+    iban: text('iban'),
+    email: text('email'),
+    phone: text('phone'),
+    paymentTermsDays: integer('payment_terms_days').notNull().default(30),
+    defaultCategoryId: uuid('default_category_id').references(
+      () => categories.id,
+    ),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  // Único parcial: un NIF/CIF activo por empresa (los borrados no bloquean)
+  (t) => [
+    uniqueIndex('contacts_company_taxid_unique')
+      .on(t.companyId, t.taxId)
+      .where(sql`deleted_at IS NULL`),
+  ],
+);
+
 export type Company = typeof companies.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;
+export type Category = typeof categories.$inferSelect;
+export type Contact = typeof contacts.$inferSelect;
+export type NewContact = typeof contacts.$inferInsert;

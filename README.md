@@ -34,9 +34,9 @@ Plataforma en la nube que centraliza toda la información económica, administra
 | Tabla `projects` (obras) + migración + seed | ✅ |
 | API CRUD de obras (buscar, filtrar, alta, edición, borrado lógico) | ✅ |
 | Pantalla de obras (listado + formulario de alta/edición) | ✅ |
-| Contactos (proveedores/clientes) | ⏳ siguiente |
-| Categorías de gasto (seed) | ⏳ |
-| Subida de documentos + pipeline OCR/IA | ⏳ |
+| Contactos (proveedores/clientes): tabla, API y pantalla | ✅ |
+| Categorías de gasto (8 de sistema, seed + API) | ✅ |
+| Subida de documentos + pipeline OCR/IA | ⏳ siguiente |
 
 ## Cómo ejecutar en local
 

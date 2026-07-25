@@ -1,4 +1,8 @@
 import type {
+  CategoryDto,
+  ContactCreateInput,
+  ContactDto,
+  ContactUpdateInput,
   ProjectCreateInput,
   ProjectDto,
   ProjectUpdateInput,
@@ -57,6 +61,32 @@ export const projectsApi = {
     }),
   remove: (id: string) =>
     request<void>(`/projects/${id}`, { method: 'DELETE' }),
+};
+
+export const contactsApi = {
+  list: (search: string, kind: string) => {
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (kind) params.set('kind', kind);
+    const qs = params.toString();
+    return request<ContactDto[]>(`/contacts${qs ? `?${qs}` : ''}`);
+  },
+  create: (input: ContactCreateInput) =>
+    request<ContactDto>('/contacts', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  update: (id: string, input: ContactUpdateInput) =>
+    request<ContactDto>(`/contacts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  remove: (id: string) =>
+    request<void>(`/contacts/${id}`, { method: 'DELETE' }),
+};
+
+export const categoriesApi = {
+  list: () => request<CategoryDto[]>('/categories'),
 };
 
 export function formatEur(value: number | null): string {
