@@ -1,11 +1,28 @@
 import { DOCUMENT_MAX_SIZE_MB } from '@erp/shared';
 import type {
+  CashflowGrouping,
+  CashflowReportDto,
   CategoryDto,
+  CertificationCreateInput,
+  CertificationDto,
+  CertificationInvoiceInput,
   ContactCreateInput,
   ContactDto,
   ContactUpdateInput,
+  DeliveryNoteCreateInput,
+  DeliveryNoteDto,
+  DeliveryNoteStatus,
+  DeliveryNoteUpdateInput,
+  DeviationReportDto,
   DocumentDto,
   DocumentUpdateInput,
+  InvoiceCreateInput,
+  InvoiceDto,
+  InvoiceUpdateInput,
+  MilestoneDto,
+  PhaseCreateInput,
+  PhaseDto,
+  PhaseUpdateInput,
   ProjectCreateInput,
   ProjectDto,
   ProjectUpdateInput,
@@ -61,6 +78,7 @@ export const projectsApi = {
     const qs = params.toString();
     return request<ProjectDto[]>(`/projects${qs ? `?${qs}` : ''}`);
   },
+  get: (id: string) => request<ProjectDto>(`/projects/${id}`),
   create: (input: ProjectCreateInput) =>
     request<ProjectDto>('/projects', {
       method: 'POST',
@@ -124,6 +142,134 @@ export const documentsApi = {
     }),
   remove: (id: string) =>
     request<void>(`/documents/${id}`, { method: 'DELETE' }),
+};
+
+export const phasesApi = {
+  list: (projectId: string) =>
+    request<PhaseDto[]>(`/projects/${projectId}/phases`),
+  create: (projectId: string, input: PhaseCreateInput) =>
+    request<PhaseDto>(`/projects/${projectId}/phases`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  update: (id: string, input: PhaseUpdateInput) =>
+    request<PhaseDto>(`/phases/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  remove: (id: string) => request<void>(`/phases/${id}`, { method: 'DELETE' }),
+  /** Presupuesto teórico vs. gasto imputado real. */
+  deviation: (projectId: string) =>
+    request<DeviationReportDto>(`/projects/${projectId}/desvio`),
+};
+
+export const invoicesApi = {
+  list: (kind: string, status: string, search: string) => {
+    const params = new URLSearchParams();
+    if (kind) params.set('kind', kind);
+    if (status) params.set('status', status);
+    if (search) params.set('search', search);
+    const qs = params.toString();
+    return request<InvoiceDto[]>(`/invoices${qs ? `?${qs}` : ''}`);
+  },
+  get: (id: string) => request<InvoiceDto>(`/invoices/${id}`),
+  create: (input: InvoiceCreateInput) =>
+    request<InvoiceDto>('/invoices', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  update: (id: string, input: InvoiceUpdateInput) =>
+    request<InvoiceDto>(`/invoices/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  approve: (id: string) =>
+    request<InvoiceDto>(`/invoices/${id}/aprobar`, { method: 'POST' }),
+  markPaid: (id: string) =>
+    request<InvoiceDto>(`/invoices/${id}/pagar`, { method: 'POST' }),
+  cancel: (id: string) =>
+    request<InvoiceDto>(`/invoices/${id}/anular`, { method: 'POST' }),
+  remove: (id: string) =>
+    request<void>(`/invoices/${id}`, { method: 'DELETE' }),
+};
+
+export const certificationsApi = {
+  list: (projectId: string) =>
+    request<CertificationDto[]>(`/certifications?projectId=${projectId}`),
+  create: (input: CertificationCreateInput) =>
+    request<CertificationDto>('/certifications', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  invoice: (id: string, input: CertificationInvoiceInput) =>
+    request<CertificationDto>(`/certifications/${id}/facturar`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  remove: (id: string) =>
+    request<void>(`/certifications/${id}`, { method: 'DELETE' }),
+};
+
+export const deliveryNotesApi = {
+  list: (options: {
+    search?: string;
+    status?: DeliveryNoteStatus | '';
+    contactId?: string;
+    availableForContact?: string;
+  }) => {
+    const params = new URLSearchParams();
+    if (options.search) params.set('search', options.search);
+    if (options.status) params.set('status', options.status);
+    if (options.contactId) params.set('contactId', options.contactId);
+    if (options.availableForContact) {
+      params.set('availableForContact', options.availableForContact);
+    }
+    const qs = params.toString();
+    return request<DeliveryNoteDto[]>(`/delivery-notes${qs ? `?${qs}` : ''}`);
+  },
+  create: (input: DeliveryNoteCreateInput) =>
+    request<DeliveryNoteDto>('/delivery-notes', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  update: (id: string, input: DeliveryNoteUpdateInput) =>
+    request<DeliveryNoteDto>(`/delivery-notes/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  validate: (id: string) =>
+    request<DeliveryNoteDto>(`/delivery-notes/${id}/validar`, {
+      method: 'POST',
+    }),
+  remove: (id: string) =>
+    request<void>(`/delivery-notes/${id}`, { method: 'DELETE' }),
+};
+
+export const treasuryApi = {
+  milestones: (options: {
+    direction?: string;
+    status?: string;
+    from?: string;
+    to?: string;
+  }) => {
+    const params = new URLSearchParams();
+    if (options.direction) params.set('direction', options.direction);
+    if (options.status) params.set('status', options.status);
+    if (options.from) params.set('from', options.from);
+    if (options.to) params.set('to', options.to);
+    const qs = params.toString();
+    return request<MilestoneDto[]>(`/treasury/milestones${qs ? `?${qs}` : ''}`);
+  },
+  pay: (id: string) =>
+    request<void>(`/treasury/milestones/${id}/pagar`, { method: 'POST' }),
+  reopen: (id: string) =>
+    request<void>(`/treasury/milestones/${id}/reabrir`, { method: 'POST' }),
+  cashflow: (groupBy: CashflowGrouping, from?: string, to?: string) => {
+    const params = new URLSearchParams({ groupBy });
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    return request<CashflowReportDto>(`/treasury/cashflow?${params}`);
+  },
 };
 
 /** URL del original (visor); la sirve la API en streaming. */

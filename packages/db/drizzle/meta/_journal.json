@@ -22,6 +22,13 @@
       "when": 1784998356020,
       "tag": "0002_silent_quasar",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785005679264,
+      "tag": "0003_economic_modules",
+      "breakpoints": true
     }
   ]
 }

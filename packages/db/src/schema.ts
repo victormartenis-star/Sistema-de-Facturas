@@ -201,6 +201,254 @@ export const documents = pgTable(
   ],
 );
 
+/* ─────────────────────────── Módulos económicos ───────────────────────────
+ * Partidas, facturas con imputación analítica, certificaciones a origen,
+ * albaranes (matching) y vencimientos de tesorería.
+ */
+
+/** Partidas/fases de ejecución con presupuesto teórico (desvío por obra). */
+export const projectPhases = pgTable(
+  'project_phases',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    code: text('code').notNull(),
+    name: text('name').notNull(),
+    budgetAmount: numeric('budget_amount', { precision: 14, scale: 2 }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('project_phases_project_code_unique')
+      .on(t.projectId, t.code)
+      .where(sql`deleted_at IS NULL`),
+  ],
+);
+
+export const invoiceKindEnum = pgEnum('invoice_kind', ['compra', 'venta']);
+
+export const invoiceStatusEnum = pgEnum('invoice_status', [
+  'borrador',
+  'aprobada',
+  'pagada',
+  'anulada',
+]);
+
+/**
+ * Facturas de compra y venta. Los importes se guardan calculados
+ * (base, IVA, total, retención) para que el histórico no cambie si
+ * mañana cambian los tipos. ISP ⇒ IVA 0 + leyenda legal en el PDF.
+ */
+export const invoices = pgTable(
+  'invoices',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    kind: invoiceKindEnum('kind').notNull(),
+    status: invoiceStatusEnum('status').notNull().default('borrador'),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id),
+    invoiceNumber: text('invoice_number').notNull(),
+    issueDate: date('issue_date').notNull(),
+    dueDate: date('due_date'),
+    baseAmount: numeric('base_amount', { precision: 14, scale: 2 }).notNull(),
+    vatAmount: numeric('vat_amount', { precision: 14, scale: 2 }).notNull(),
+    totalAmount: numeric('total_amount', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    isp: boolean('isp').notNull().default(false),
+    retentionPct: numeric('retention_pct', { precision: 5, scale: 2 })
+      .notNull()
+      .default('0.00'),
+    retentionAmount: numeric('retention_amount', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0.00'),
+    retentionReleaseDate: date('retention_release_date'),
+    notes: text('notes'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  // Un mismo proveedor/cliente no puede repetir número de factura activo
+  (t) => [
+    uniqueIndex('invoices_contact_number_unique')
+      .on(t.companyId, t.kind, t.contactId, t.invoiceNumber)
+      .where(sql`deleted_at IS NULL`),
+  ],
+);
+
+/** Líneas de factura: aquí vive la imputación analítica obra/partida. */
+export const invoiceLines = pgTable('invoice_lines', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  invoiceId: uuid('invoice_id')
+    .notNull()
+    .references(() => invoices.id, { onDelete: 'cascade' }),
+  description: text('description').notNull(),
+  baseAmount: numeric('base_amount', { precision: 14, scale: 2 }).notNull(),
+  vatPct: numeric('vat_pct', { precision: 5, scale: 2 })
+    .notNull()
+    .default('21.00'),
+  projectId: uuid('project_id').references(() => projects.id),
+  phaseId: uuid('phase_id').references(() => projectPhases.id),
+  categoryId: uuid('category_id').references(() => categories.id),
+  sortOrder: integer('sort_order').notNull().default(0),
+});
+
+export const certStatusEnum = pgEnum('cert_status', [
+  'borrador',
+  'facturada',
+]);
+
+/** Certificaciones de obra: % a origen y facturación por diferencia. */
+export const certifications = pgTable(
+  'certifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    seq: integer('seq').notNull(),
+    certDate: date('cert_date').notNull(),
+    cumulativePct: numeric('cumulative_pct', {
+      precision: 5,
+      scale: 2,
+    }).notNull(),
+    cumulativeAmount: numeric('cumulative_amount', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    periodAmount: numeric('period_amount', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    retentionPct: numeric('retention_pct', { precision: 5, scale: 2 })
+      .notNull()
+      .default('0.00'),
+    retentionAmount: numeric('retention_amount', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0.00'),
+    status: certStatusEnum('status').notNull().default('borrador'),
+    invoiceId: uuid('invoice_id').references(() => invoices.id),
+    notes: text('notes'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('certifications_project_seq_unique')
+      .on(t.projectId, t.seq)
+      .where(sql`deleted_at IS NULL`),
+  ],
+);
+
+export const deliveryNoteStatusEnum = pgEnum('delivery_note_status', [
+  'pendiente',
+  'validado',
+  'facturado',
+]);
+
+/** Albaranes/partes de trabajo para el punteado de facturas de compra. */
+export const deliveryNotes = pgTable(
+  'delivery_notes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id),
+    projectId: uuid('project_id').references(() => projects.id),
+    phaseId: uuid('phase_id').references(() => projectPhases.id),
+    noteNumber: text('note_number').notNull(),
+    noteDate: date('note_date').notNull(),
+    description: text('description'),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    status: deliveryNoteStatusEnum('status').notNull().default('pendiente'),
+    validatedAt: timestamp('validated_at', { withTimezone: true }),
+    invoiceId: uuid('invoice_id').references(() => invoices.id),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('delivery_notes_contact_number_unique')
+      .on(t.companyId, t.contactId, t.noteNumber)
+      .where(sql`deleted_at IS NULL`),
+  ],
+);
+
+export const milestoneDirectionEnum = pgEnum('milestone_direction', [
+  'cobro',
+  'pago',
+]);
+
+export const milestoneKindEnum = pgEnum('milestone_kind', [
+  'ordinario',
+  'retencion',
+]);
+
+export const milestoneStatusEnum = pgEnum('milestone_status', [
+  'previsto',
+  'pagado',
+]);
+
+/**
+ * Vencimientos de cobro/pago. Se generan al aprobar una factura:
+ * uno ordinario (total - retención) y, si hay retención de garantía,
+ * otro diferido a la fecha de liberación de la garantía.
+ */
+export const paymentMilestones = pgTable('payment_milestones', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  invoiceId: uuid('invoice_id')
+    .notNull()
+    .references(() => invoices.id, { onDelete: 'cascade' }),
+  direction: milestoneDirectionEnum('direction').notNull(),
+  kind: milestoneKindEnum('kind').notNull().default('ordinario'),
+  dueDate: date('due_date').notNull(),
+  amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+  status: milestoneStatusEnum('status').notNull().default('previsto'),
+  paidAt: date('paid_at'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export type Company = typeof companies.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;
@@ -209,3 +457,15 @@ export type Contact = typeof contacts.$inferSelect;
 export type NewContact = typeof contacts.$inferInsert;
 export type Document = typeof documents.$inferSelect;
 export type NewDocument = typeof documents.$inferInsert;
+export type ProjectPhase = typeof projectPhases.$inferSelect;
+export type NewProjectPhase = typeof projectPhases.$inferInsert;
+export type Invoice = typeof invoices.$inferSelect;
+export type NewInvoice = typeof invoices.$inferInsert;
+export type InvoiceLine = typeof invoiceLines.$inferSelect;
+export type NewInvoiceLine = typeof invoiceLines.$inferInsert;
+export type Certification = typeof certifications.$inferSelect;
+export type NewCertification = typeof certifications.$inferInsert;
+export type DeliveryNote = typeof deliveryNotes.$inferSelect;
+export type NewDeliveryNote = typeof deliveryNotes.$inferInsert;
+export type PaymentMilestone = typeof paymentMilestones.$inferSelect;
+export type NewPaymentMilestone = typeof paymentMilestones.$inferInsert;

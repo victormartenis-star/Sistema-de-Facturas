@@ -12,8 +12,9 @@ const STYLES: Record<DocStatus, string> = {
 export function DocStatusBadge({ status }: { status: DocStatus }) {
   return (
     <span
-      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${STYLES[status]}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${STYLES[status]}`}
     >
+      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
       {DOC_STATUS_LABELS[status]}
     </span>
   );
