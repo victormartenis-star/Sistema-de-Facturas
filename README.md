@@ -38,6 +38,12 @@ Plataforma en la nube que centraliza toda la información económica, administra
 | Categorías de gasto (8 de sistema, seed + API) | ✅ |
 | Tabla `documents` + subida de archivos (dedupe SHA-256, visor) | ✅ |
 | Pantalla de documentos (multi-archivo, filtros, tipo/obra) | ✅ |
+| Rediseño visual: sidebar, dashboard, toasts, tablas ordenables | ✅ |
+| Partidas por obra + desvío presupuestario (imputación analítica) | ✅ |
+| Facturas compra/venta: líneas imputadas, retención de garantía, ISP | ✅ |
+| Certificaciones a origen con factura de venta automática | ✅ |
+| Albaranes/partes con punteado (matching) de facturas de compra | ✅ |
+| Tesorería: vencimientos + cash flow semanal/mensual con alerta de tensión | ✅ |
 | Pipeline OCR/IA (extracción, validación) | ⏳ siguiente |
 
 ## Cómo ejecutar en local
