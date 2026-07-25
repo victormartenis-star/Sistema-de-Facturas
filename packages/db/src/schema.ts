@@ -142,9 +142,70 @@ export const contacts = pgTable(
   ],
 );
 
+export const docStatusEnum = pgEnum('doc_status', [
+  'subido',
+  'procesando',
+  'extraido',
+  'validado',
+  'rechazado',
+  'error',
+]);
+
+export const docTypeEnum = pgEnum('doc_type', [
+  'factura_compra',
+  'factura_venta',
+  'albaran',
+  'presupuesto',
+  'certificacion',
+  'pedido',
+  'contrato',
+  'ticket',
+  'otro',
+]);
+
+/**
+ * Archivo documental (02-base-de-datos.md §2.4): original + metadatos +
+ * dedupe por hash. Las columnas de extracción (full_text, fts, embedding)
+ * y uploaded_by llegarán con el pipeline OCR y la autenticación.
+ * file_sha256 se guarda en hexadecimal (64 caracteres) en lugar de bytea.
+ */
+export const documents = pgTable(
+  'documents',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id').references(() => projects.id),
+    docType: docTypeEnum('doc_type'),
+    status: docStatusEnum('status').notNull().default('subido'),
+    storageKey: text('storage_key').notNull(),
+    fileName: text('file_name').notNull(),
+    mimeType: text('mime_type').notNull(),
+    fileSize: integer('file_size').notNull(),
+    fileSha256: text('file_sha256').notNull(),
+    source: text('source').notNull().default('web'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  // Dedupe exacto por contenido; el borrado lógico permite volver a subir
+  (t) => [
+    uniqueIndex('documents_dedupe_idx')
+      .on(t.companyId, t.fileSha256)
+      .where(sql`deleted_at IS NULL`),
+  ],
+);
+
 export type Company = typeof companies.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;
 export type Category = typeof categories.$inferSelect;
 export type Contact = typeof contacts.$inferSelect;
 export type NewContact = typeof contacts.$inferInsert;
+export type Document = typeof documents.$inferSelect;
+export type NewDocument = typeof documents.$inferInsert;

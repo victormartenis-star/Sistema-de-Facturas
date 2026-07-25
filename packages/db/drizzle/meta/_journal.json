@@ -15,6 +15,13 @@
       "when": 1784995597764,
       "tag": "0001_adorable_vulcan",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784998356020,
+      "tag": "0002_silent_quasar",
+      "breakpoints": true
     }
   ]
 }

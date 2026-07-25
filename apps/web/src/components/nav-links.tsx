@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 const LINKS = [
   { href: '/obras', label: 'Obras' },
   { href: '/contactos', label: 'Contactos' },
+  { href: '/documentos', label: 'Documentos' },
 ];
 
 export function NavLinks() {

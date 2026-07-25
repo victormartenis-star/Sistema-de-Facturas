@@ -36,7 +36,9 @@ Plataforma en la nube que centraliza toda la información económica, administra
 | Pantalla de obras (listado + formulario de alta/edición) | ✅ |
 | Contactos (proveedores/clientes): tabla, API y pantalla | ✅ |
 | Categorías de gasto (8 de sistema, seed + API) | ✅ |
-| Subida de documentos + pipeline OCR/IA | ⏳ siguiente |
+| Tabla `documents` + subida de archivos (dedupe SHA-256, visor) | ✅ |
+| Pantalla de documentos (multi-archivo, filtros, tipo/obra) | ✅ |
+| Pipeline OCR/IA (extracción, validación) | ⏳ siguiente |
 
 ## Cómo ejecutar en local
 
