@@ -4,6 +4,12 @@ import type {
   CashflowReportDto,
   CategoryDto,
   CertificationCreateInput,
+  ComplianceDocCreateInput,
+  ComplianceDocDto,
+  ComplianceDocUpdateInput,
+  ComplianceSummaryDto,
+  ComplianceWaiverDto,
+  ComplianceWaiverInput,
   CertificationDto,
   CertificationInvoiceInput,
   ContactCreateInput,
@@ -272,6 +278,50 @@ export const validationApi = {
     }),
   reject: (documentId: string) =>
     request<void>(`/validacion/${documentId}/rechazar`, { method: 'POST' }),
+};
+
+export const complianceApi = {
+  /** Panel de homologación; `todos` incluye los no sujetos a control. */
+  list: (todos = false) =>
+    request<ComplianceSummaryDto[]>(`/cumplimiento${todos ? '?todos=1' : ''}`),
+  summary: (contactId: string) =>
+    request<ComplianceSummaryDto>(`/contacts/${contactId}/cumplimiento`),
+  setRequired: (contactId: string, required: boolean) =>
+    request<ComplianceSummaryDto>(
+      `/contacts/${contactId}/cumplimiento/exigir`,
+      { method: 'POST', body: JSON.stringify({ required }) },
+    ),
+  addDoc: (contactId: string, input: ComplianceDocCreateInput) =>
+    request<ComplianceDocDto>(
+      `/contacts/${contactId}/cumplimiento/documentos`,
+      { method: 'POST', body: JSON.stringify(input) },
+    ),
+  updateDoc: (docId: string, input: ComplianceDocUpdateInput) =>
+    request<ComplianceDocDto>(`/cumplimiento/documentos/${docId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  removeDoc: (docId: string) =>
+    request<void>(`/cumplimiento/documentos/${docId}`, { method: 'DELETE' }),
+  block: (contactId: string, reason: string) =>
+    request<ComplianceSummaryDto>(
+      `/contacts/${contactId}/cumplimiento/bloquear`,
+      { method: 'POST', body: JSON.stringify({ reason }) },
+    ),
+  unblock: (contactId: string) =>
+    request<ComplianceSummaryDto>(
+      `/contacts/${contactId}/cumplimiento/desbloquear`,
+      { method: 'POST' },
+    ),
+  grantWaiver: (contactId: string, input: ComplianceWaiverInput) =>
+    request<ComplianceWaiverDto>(
+      `/contacts/${contactId}/cumplimiento/exencion`,
+      { method: 'POST', body: JSON.stringify(input) },
+    ),
+  revokeWaiver: (contactId: string) =>
+    request<void>(`/contacts/${contactId}/cumplimiento/exencion`, {
+      method: 'DELETE',
+    }),
 };
 
 export const treasuryApi = {

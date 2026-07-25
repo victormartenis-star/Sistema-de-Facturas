@@ -36,6 +36,7 @@ const GESTION: NavItem[] = [
   { href: '/facturas', label: 'Facturas', icon: IconReceipt },
   { href: '/albaranes', label: 'Albaranes', icon: IconInbox },
   { href: '/tesoreria', label: 'Tesorería', icon: IconWallet },
+  { href: '/cumplimiento', label: 'Homologación', icon: IconLock },
 ];
 
 /** Módulos previstos en la hoja de ruta que aún no están construidos. */

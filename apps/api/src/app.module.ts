@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { CategoriesModule } from './categories/categories.module';
 import { CertificationsModule } from './certifications/certifications.module';
+import { ComplianceModule } from './compliance/compliance.module';
 import { ContactsModule } from './contacts/contacts.module';
 import { DbModule } from './db/db.module';
 import { DeliveryNotesModule } from './delivery-notes/delivery-notes.module';
@@ -24,6 +25,7 @@ import { TreasuryModule } from './treasury/treasury.module';
     DeliveryNotesModule,
     TreasuryModule,
     OcrModule,
+    ComplianceModule,
   ],
 })
 export class AppModule {}

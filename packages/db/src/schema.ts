@@ -126,6 +126,12 @@ export const contacts = pgTable(
     defaultCategoryId: uuid('default_category_id').references(
       () => categories.id,
     ),
+    // Homologación PRL: solo las subcontratas y empresas que pisan la obra
+    // quedan sujetas a control documental; un proveedor de material no.
+    requiresCompliance: boolean('requires_compliance').notNull().default(false),
+    // Bloqueo manual (distinto del automático por documentación vencida)
+    blockedAt: timestamp('blocked_at', { withTimezone: true }),
+    blockedReason: text('blocked_reason'),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -449,6 +455,70 @@ export const paymentMilestones = pgTable('payment_milestones', {
     .defaultNow(),
 });
 
+/* ───────────────── Homologación de subcontratas (PRL) ─────────────────
+ * En construcción el contratista principal responde solidariamente de las
+ * deudas con la Seguridad Social de sus subcontratas, así que la
+ * documentación vigente es requisito para aprobar facturas y pagar.
+ */
+
+export const complianceDocTypeEnum = pgEnum('compliance_doc_type', [
+  'plan_seguridad',
+  'seguro_rc',
+  'certificado_ss',
+  'certificado_aeat',
+  'rea',
+  'itinerario_formativo',
+  'reconocimiento_medico',
+  'epi',
+  'otro',
+]);
+
+/** Documento de homologación aportado por una subcontrata o proveedor. */
+export const contactComplianceDocs = pgTable('contact_compliance_docs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  contactId: uuid('contact_id')
+    .notNull()
+    .references(() => contacts.id),
+  docType: complianceDocTypeEnum('doc_type').notNull(),
+  // El archivo se reaprovecha del módulo documental (dedupe + almacenamiento)
+  documentId: uuid('document_id').references(() => documents.id),
+  issuedAt: date('issued_at'),
+  // Sin fecha de caducidad el documento se considera permanente
+  expiresAt: date('expires_at'),
+  rejected: boolean('rejected').notNull().default(false),
+  notes: text('notes'),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
+ * Exención temporal: permite operar con un contacto bloqueado bajo la
+ * responsabilidad de quien la concede. Exige motivo y fecha de caducidad.
+ */
+export const complianceWaivers = pgTable('compliance_waivers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  contactId: uuid('contact_id')
+    .notNull()
+    .references(() => contacts.id),
+  reason: text('reason').notNull(),
+  validUntil: date('valid_until').notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 /**
  * Resultado bruto del pipeline OCR/IA (02-base-de-datos.md §2.4).
  * Versionable: cada pasada del modelo deja una fila, la más reciente es la
@@ -492,3 +562,7 @@ export type PaymentMilestone = typeof paymentMilestones.$inferSelect;
 export type NewPaymentMilestone = typeof paymentMilestones.$inferInsert;
 export type Extraction = typeof extractions.$inferSelect;
 export type NewExtraction = typeof extractions.$inferInsert;
+export type ContactComplianceDoc = typeof contactComplianceDocs.$inferSelect;
+export type NewContactComplianceDoc =
+  typeof contactComplianceDocs.$inferInsert;
+export type ComplianceWaiver = typeof complianceWaivers.$inferSelect;

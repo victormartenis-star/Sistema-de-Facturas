@@ -37,6 +37,7 @@ import {
   invoiceUpdateSchema,
   InvoiceUpdateInput,
 } from '@erp/shared';
+import { ComplianceService } from '../compliance/compliance.service';
 import { DbService } from '../db/db.service';
 
 /** Cliente de transacción de drizzle (el callback de db.transaction). */
@@ -81,7 +82,10 @@ function computeAmounts(
 
 @Injectable()
 export class InvoicesService {
-  constructor(private readonly dbs: DbService) {}
+  constructor(
+    private readonly dbs: DbService,
+    private readonly compliance: ComplianceService,
+  ) {}
 
   async list(
     kind?: InvoiceKind,
@@ -282,6 +286,15 @@ export class InvoicesService {
       throw new ConflictException('Solo se aprueban facturas en borrador');
     }
     const contact = await this.findContact(invoice.contactId);
+
+    // Homologación PRL: no se aprueba gasto a una subcontrata sin la
+    // documentación al día (responsabilidad solidaria del contratista).
+    if (invoice.kind === 'compra') {
+      await this.compliance.assertCanTransact(
+        invoice.contactId,
+        'aprobar la factura',
+      );
+    }
 
     await this.dbs.db.transaction(async (tx) => {
       if (invoice.kind === 'compra') {

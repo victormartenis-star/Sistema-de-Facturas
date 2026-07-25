@@ -13,6 +13,7 @@ import {
   MilestoneDto,
   MilestoneStatus,
 } from '@erp/shared';
+import { ComplianceService } from '../compliance/compliance.service';
 import { DbService } from '../db/db.service';
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -71,7 +72,10 @@ function bucketLabel(periodStart: string, groupBy: CashflowGrouping): string {
 
 @Injectable()
 export class TreasuryService {
-  constructor(private readonly dbs: DbService) {}
+  constructor(
+    private readonly dbs: DbService,
+    private readonly compliance: ComplianceService,
+  ) {}
 
   async milestones(options: {
     direction?: MilestoneDirection;
@@ -132,6 +136,21 @@ export class TreasuryService {
     }
     if (row.status === status) {
       throw new ConflictException('El vencimiento ya está en ese estado');
+    }
+    // Homologación PRL: no se paga a una subcontrata bloqueada. Reabrir un
+    // vencimiento sí se permite siempre (es deshacer, no comprometer dinero).
+    if (status === 'pagado' && row.direction === 'pago') {
+      const [invoice] = await this.dbs.db
+        .select({ contactId: invoices.contactId })
+        .from(invoices)
+        .where(eq(invoices.id, row.invoiceId))
+        .limit(1);
+      if (invoice) {
+        await this.compliance.assertCanTransact(
+          invoice.contactId,
+          'liquidar el pago',
+        );
+      }
     }
     await this.dbs.db.transaction(async (tx) => {
       await tx
