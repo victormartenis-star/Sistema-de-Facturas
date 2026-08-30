@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { round2 } from './calculo';
+import type { BudgetImpactDto } from './variations';
 
 /**
  * Coste probable y evolución económica mensual.
@@ -299,6 +300,8 @@ export interface ProjectEconomicsDto {
   projectName: string;
   probableCost: ProbableCost;
   atCompletion: MarginAtCompletion;
+  /** Cuadro de impacto de las modificaciones sobre el presupuesto. */
+  budgetImpact: BudgetImpactDto;
   evolution: MonthlyEvolution;
   /** Última estimación de coste pendiente de contratar, si la hay. */
   lastForecast: CostForecastDto | null;

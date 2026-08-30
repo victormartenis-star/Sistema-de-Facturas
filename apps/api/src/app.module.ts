@@ -12,6 +12,7 @@ import { OcrModule } from './ocr/ocr.module';
 import { PhasesModule } from './phases/phases.module';
 import { ProjectsModule } from './projects/projects.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
+import { VariationsModule } from './variations/variations.module';
 import { TreasuryModule } from './treasury/treasury.module';
 
 @Module({
@@ -27,6 +28,7 @@ import { TreasuryModule } from './treasury/treasury.module';
     PurchaseOrdersModule,
     DeliveryNotesModule,
     TreasuryModule,
+    VariationsModule,
     ForecastModule,
     OcrModule,
     ComplianceModule,

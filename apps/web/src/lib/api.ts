@@ -44,6 +44,12 @@ import type {
   PurchaseOrderUpdateInput,
   TraceabilityReportDto,
   ValidationItemDto,
+  VariationApproveInput,
+  VariationCreateInput,
+  VariationDto,
+  VariationRejectInput,
+  VariationReportDto,
+  VariationUpdateInput,
   ValidationResultDto,
 } from '@erp/shared';
 
@@ -227,6 +233,39 @@ export const certificationsApi = {
     }),
   remove: (id: string) =>
     request<void>(`/certifications/${id}`, { method: 'DELETE' }),
+};
+
+export const variationsApi = {
+  list: (projectId?: string) =>
+    request<VariationDto[]>(
+      `/variations${projectId ? `?projectId=${projectId}` : ''}`,
+    ),
+  report: (projectId: string) =>
+    request<VariationReportDto>(`/variations/informe/${projectId}`),
+  create: (input: VariationCreateInput) =>
+    request<VariationDto>('/variations', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  update: (id: string, input: VariationUpdateInput) =>
+    request<VariationDto>(`/variations/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  approve: (id: string, input: VariationApproveInput) =>
+    request<VariationDto>(`/variations/${id}/aprobar`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  reject: (id: string, input: VariationRejectInput) =>
+    request<VariationDto>(`/variations/${id}/rechazar`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  reopen: (id: string) =>
+    request<VariationDto>(`/variations/${id}/reabrir`, { method: 'POST' }),
+  remove: (id: string) =>
+    request<void>(`/variations/${id}`, { method: 'DELETE' }),
 };
 
 export const forecastApi = {

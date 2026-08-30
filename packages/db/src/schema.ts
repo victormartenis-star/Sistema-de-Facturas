@@ -605,6 +605,91 @@ export const complianceWaivers = pgTable('compliance_waivers', {
     .defaultNow(),
 });
 
+/* ─────────── Modificados, contradictorios y presupuesto ───────────
+ * Solo se consideran consolidadas —e incorporadas al presupuesto de venta
+ * actualizado— las modificaciones con aprobación expresa de la Dirección
+ * Facultativa y de la Propiedad, técnica y económica. Las pendientes se
+ * recogen de forma diferenciada y no computan como ingreso.
+ */
+
+export const variationKindEnum = pgEnum('variation_kind', [
+  'modificado',
+  'contradictorio',
+  'exceso_medicion',
+  'cambio_solucion',
+  'variacion_calidades',
+  'eliminacion_partida',
+]);
+
+export const variationStatusEnum = pgEnum('variation_status', [
+  'pendiente',
+  'aprobado',
+  'rechazado',
+]);
+
+export const variations = pgTable(
+  'variations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    /** Correlativo dentro de la obra; forma el número con el código de obra. */
+    seq: integer('seq').notNull(),
+    variationNumber: text('variation_number').notNull(),
+    kind: variationKindEnum('kind').notNull().default('modificado'),
+    /** Partida afectada. */
+    phaseId: uuid('phase_id').references(() => projectPhases.id),
+    description: text('description').notNull(),
+    /** Variación del presupuesto de venta. Puede ser negativa (a la baja). */
+    salesVariation: numeric('sales_variation', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    /**
+     * Coste que la modificación provoca. El informe del manual recogía solo la
+     * variación de venta; sin el coste no se ve que un modificado ejecutado y
+     * no aprobado consume coste sin generar ingreso.
+     */
+    costVariation: numeric('cost_variation', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    requestedAt: date('requested_at').notNull(),
+    /**
+     * Las dos aprobaciones son independientes: con la de la Dirección
+     * Facultativa pero sin la de la Propiedad el modificado sigue pendiente.
+     */
+    dfApprovedAt: date('df_approved_at'),
+    ownerApprovedAt: date('owner_approved_at'),
+    rejectedAt: date('rejected_at'),
+    rejectionReason: text('rejection_reason'),
+    status: variationStatusEnum('status').notNull().default('pendiente'),
+    /** ¿Se está ejecutando ya? Es lo que convierte un pendiente en un riesgo. */
+    executed: boolean('executed').notNull().default(false),
+    /** Orden escrita del cliente: ningún trabajo fuera de contrato sin ella. */
+    clientOrderRef: text('client_order_ref'),
+    notes: text('notes'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('variations_number_unique')
+      .on(t.companyId, t.variationNumber)
+      .where(sql`deleted_at IS NULL`),
+    uniqueIndex('variations_project_seq_unique')
+      .on(t.projectId, t.seq)
+      .where(sql`deleted_at IS NULL`),
+  ],
+);
+
 /* ──────────── Planificación económica y coste probable ────────────
  * Lo que se revisa en la reunión mensual: tres curvas sobre el mismo eje de
  * meses —venta, coste objetivo y coste real—. En cuanto la curva de coste
@@ -732,6 +817,8 @@ export type InvoiceLine = typeof invoiceLines.$inferSelect;
 export type NewInvoiceLine = typeof invoiceLines.$inferInsert;
 export type Certification = typeof certifications.$inferSelect;
 export type NewCertification = typeof certifications.$inferInsert;
+export type Variation = typeof variations.$inferSelect;
+export type NewVariation = typeof variations.$inferInsert;
 export type ProjectMonthlyPlan = typeof projectMonthlyPlan.$inferSelect;
 export type NewProjectMonthlyPlan = typeof projectMonthlyPlan.$inferInsert;
 export type CostForecast = typeof costForecasts.$inferSelect;

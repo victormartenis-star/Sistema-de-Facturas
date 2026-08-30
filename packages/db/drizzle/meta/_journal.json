@@ -57,6 +57,13 @@
       "when": 1788088245814,
       "tag": "0007_eager_maelstrom",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788088960562,
+      "tag": "0008_brave_sir_ram",
+      "breakpoints": true
     }
   ]
 }

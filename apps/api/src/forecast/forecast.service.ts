@@ -11,6 +11,7 @@ import {
   projectMonthlyPlan,
   projects,
   purchaseOrders,
+  variations,
 } from '@erp/db';
 import {
   CostForecastDto,
@@ -19,9 +20,12 @@ import {
   MonthlyPlanRowDto,
   MonthlyPlanSaveInput,
   ProjectEconomicsDto,
+  VariationStatus,
   buildMonthlyEvolution,
+  computeBudgetImpact,
   computeMarginAtCompletion,
   computeProbableCost,
+  formatEuros,
   costForecastSchema,
   monthlyPlanSaveSchema,
   round2,
@@ -165,6 +169,7 @@ export class ForecastService {
       realProduction,
       realCost,
       withoutOrder,
+      approvedVariations,
     ] = await Promise.all([
       this.invoicedCost(projectId),
       this.accruedCost(projectId),
@@ -174,6 +179,7 @@ export class ForecastService {
       this.productionByMonth(projectId),
       this.costByMonth(projectId),
       this.deliveredWithoutOrder(projectId),
+      this.variationAmounts(projectId),
     ]);
 
     const probableCost = computeProbableCost({
@@ -183,8 +189,16 @@ export class ForecastService {
       pendingToContract: lastForecast?.pendingToContract ?? 0,
     });
 
-    const atCompletion = computeMarginAtCompletion(
+    // El presupuesto de venta que cuenta es el **actualizado**: el inicial
+    // más las modificaciones aprobadas por DF y Propiedad. Lo pendiente no
+    // computa como ingreso, así que no entra aquí.
+    const budgetImpact = computeBudgetImpact(
       Number(project.contractAmount ?? 0),
+      approvedVariations,
+    );
+
+    const atCompletion = computeMarginAtCompletion(
+      budgetImpact.updatedBudget,
       project.targetCost === null ? null : Number(project.targetCost),
       probableCost.total,
     );
@@ -199,12 +213,14 @@ export class ForecastService {
       projectName: project.name,
       probableCost,
       atCompletion,
+      budgetImpact,
       evolution,
       lastForecast,
       warnings: buildWarnings(project, probableCost, atCompletion, evolution, {
         hasPlan: plan.length > 0,
         lastForecast,
         withoutOrder,
+        budgetImpact,
       }),
     };
   }
@@ -253,6 +269,22 @@ export class ForecastService {
         ),
       );
     return round2(Number(row?.total ?? 0));
+  }
+
+  /** Modificaciones vivas de la obra, para el presupuesto actualizado. */
+  private async variationAmounts(projectId: string) {
+    const rows = await this.dbs.db
+      .select()
+      .from(variations)
+      .where(
+        and(eq(variations.projectId, projectId), isNull(variations.deletedAt)),
+      );
+    return rows.map((v) => ({
+      status: v.status as VariationStatus,
+      salesVariation: Number(v.salesVariation),
+      costVariation: Number(v.costVariation),
+      executed: v.executed,
+    }));
   }
 
   /** Material recibido sin pedido: la fuga que la regla de oro persigue. */
@@ -411,14 +443,6 @@ function mergeMonths(
   }));
 }
 
-/** Importe en euros con separadores españoles, para los textos de aviso. */
-function eur(amount: number): string {
-  return `${amount.toLocaleString('es-ES', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })} €`;
-}
-
 /** Avisos en lenguaje llano, los que hay que leer antes de la reunión. */
 function buildWarnings(
   project: Project,
@@ -430,6 +454,7 @@ function buildWarnings(
     lastForecast: CostForecastDto | null;
     /** Importe recibido en obra sin pedido detrás. */
     withoutOrder: number;
+    budgetImpact: ReturnType<typeof computeBudgetImpact>;
   },
 ): string[] {
   const warnings: string[] = [];
@@ -463,12 +488,22 @@ function buildWarnings(
   }
   if (probableCost.accruedCost > 0) {
     warnings.push(
-      `Hay ${eur(probableCost.accruedCost)} en albaranes recibidos sin facturar. Si no se provisionan, el coste del mes sale a la baja.`,
+      `Hay ${formatEuros(probableCost.accruedCost)} en albaranes recibidos sin facturar. Si no se provisionan, el coste del mes sale a la baja.`,
     );
   }
   if (context.withoutOrder > 0) {
     warnings.push(
-      `Han entrado ${eur(context.withoutOrder)} de material sin pedido. Es coste que nadie autorizó antes de que llegara: regulariza el pedido o registra la incidencia.`,
+      `Han entrado ${formatEuros(context.withoutOrder)} de material sin pedido. Es coste que nadie autorizó antes de que llegara: regulariza el pedido o registra la incidencia.`,
+    );
+  }
+  if (context.budgetImpact.executedNotApprovedCount > 0) {
+    warnings.push(
+      `Hay ${formatEuros(context.budgetImpact.executedNotApprovedCost)} de coste en modificados que se están ejecutando sin aprobar: consumen coste sin generar ingreso.`,
+    );
+  }
+  if (context.budgetImpact.potentialImpact !== 0) {
+    warnings.push(
+      `Quedan ${formatEuros(context.budgetImpact.potentialImpact)} de impacto pendiente de aprobación. No computa como ingreso mientras la Propiedad no lo apruebe.`,
     );
   }
   if (evolution.firstDivergenceMonth) {

@@ -22,6 +22,20 @@ export function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/**
+ * Importe en euros con separadores españoles.
+ *
+ * Vive aquí y no en la interfaz porque los mensajes de aviso se redactan en
+ * el servidor: si cada capa formatea a su manera, el mismo importe aparece
+ * escrito de dos formas distintas en la misma pantalla.
+ */
+export function formatEuros(amount: number): string {
+  return `${amount.toLocaleString('es-ES', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} €`;
+}
+
 /** Tolerancia de cuadre entre importes: un céntimo de redondeo. */
 export const MATCHING_TOLERANCE = 0.01;
 
