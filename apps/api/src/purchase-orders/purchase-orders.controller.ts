@@ -18,6 +18,7 @@ import {
   purchaseOrderCreateSchema,
   purchaseOrderUpdateSchema,
 } from '@erp/shared';
+import { RequireCapability } from '../auth/auth.decorators';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { PurchaseOrdersService } from './purchase-orders.service';
 
@@ -61,6 +62,7 @@ export class PurchaseOrdersController {
     return this.service.get(id);
   }
 
+  @RequireCapability('pedidos.emitir')
   @Post()
   create(
     @Body(new ZodValidationPipe(purchaseOrderCreateSchema))
@@ -69,6 +71,7 @@ export class PurchaseOrdersController {
     return this.service.create(body);
   }
 
+  @RequireCapability('pedidos.emitir')
   @Patch(':id')
   update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -79,16 +82,19 @@ export class PurchaseOrdersController {
   }
 
   /** Liquidación del pedido: ningún pedido debe quedar sin factura. */
+  @RequireCapability('pedidos.emitir')
   @Post(':id/cerrar')
   close(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.close(id);
   }
 
+  @RequireCapability('pedidos.emitir')
   @Post(':id/anular')
   cancel(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.cancel(id);
   }
 
+  @RequireCapability('pedidos.emitir')
   @Delete(':id')
   @HttpCode(204)
   async remove(@Param('id', ParseUUIDPipe) id: string) {

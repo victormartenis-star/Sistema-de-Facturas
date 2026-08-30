@@ -18,6 +18,7 @@ import {
   deliveryNoteCreateSchema,
   deliveryNoteUpdateSchema,
 } from '@erp/shared';
+import { RequireCapability } from '../auth/auth.decorators';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { DeliveryNotesService } from './delivery-notes.service';
 
@@ -63,6 +64,7 @@ export class DeliveryNotesController {
   }
 
   /** Validación del jefe de obra (pendiente → validado). */
+  @RequireCapability('albaranes.validar')
   @Post(':id/validar')
   validate(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.validate(id);

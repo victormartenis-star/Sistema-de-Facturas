@@ -20,9 +20,11 @@ import {
   complianceDocUpdateSchema,
   complianceWaiverSchema,
 } from '@erp/shared';
+import { RequireCapability } from '../auth/auth.decorators';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { ComplianceService } from './compliance.service';
 
+@RequireCapability('homologacion.gestionar')
 @Controller()
 export class ComplianceController {
   constructor(private readonly service: ComplianceService) {}

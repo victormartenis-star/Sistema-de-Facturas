@@ -13,6 +13,7 @@ import {
   costForecastSchema,
   monthlyPlanSaveSchema,
 } from '@erp/shared';
+import { RequireCapability } from '../auth/auth.decorators';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { ForecastService } from './forecast.service';
 
@@ -21,6 +22,7 @@ export class ForecastController {
   constructor(private readonly service: ForecastService) {}
 
   /** La fotografía económica completa de la obra. */
+  @RequireCapability('economico.ver')
   @Get(':projectId/economia')
   economics(@Param('projectId', ParseUUIDPipe) projectId: string) {
     return this.service.economics(projectId);
@@ -31,6 +33,7 @@ export class ForecastController {
     return this.service.getPlan(projectId);
   }
 
+  @RequireCapability('presupuesto.definir')
   @Put(':projectId/plan')
   savePlan(
     @Param('projectId', ParseUUIDPipe) projectId: string,
@@ -46,6 +49,7 @@ export class ForecastController {
   }
 
   /** Declaración mensual del coste pendiente de contratar y ejecutar. */
+  @RequireCapability('prevision.declarar')
   @Post(':projectId/previsiones')
   saveForecast(
     @Param('projectId', ParseUUIDPipe) projectId: string,

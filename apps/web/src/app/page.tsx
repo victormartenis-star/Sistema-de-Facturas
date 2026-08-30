@@ -16,6 +16,7 @@ import {
   projectsApi,
   validationApi,
 } from '@/lib/api';
+import { hasCapability } from '@/lib/session';
 import { DocStatusBadge } from '@/components/doc-status-badge';
 import { ErrorBanner } from '@/components/ui';
 import {
@@ -152,6 +153,7 @@ export default function DashboardPage() {
   const contacts = contactsQuery.data ?? [];
   const documents = documentsQuery.data ?? [];
 
+  const verEconomico = hasCapability('economico.ver');
   const enCurso = projects.filter((p) => p.status === 'en_curso');
   const contratado = enCurso.reduce(
     (sum, p) => sum + (p.contractAmount ?? 0),
@@ -221,13 +223,17 @@ export default function DashboardPage() {
               value={String(enCurso.length)}
               hint={`de ${projects.length} en total`}
             />
-            <KpiCard
-              icon={IconEuro}
-              tone="bg-amber-50 text-amber-600"
-              label="Contratado (en curso)"
-              value={formatEur(contratado)}
-              hint="Suma de contratos sin IVA"
-            />
+            {/* La API ya vacía el importe a quien no puede verlo; aquí se
+                oculta la tarjeta para no mostrar un 0 € engañoso. */}
+            {verEconomico && (
+              <KpiCard
+                icon={IconEuro}
+                tone="bg-amber-50 text-amber-600"
+                label="Contratado (en curso)"
+                value={formatEur(contratado)}
+                hint="Suma de contratos sin IVA"
+              />
+            )}
             <KpiCard
               icon={IconUsers}
               tone="bg-sky-50 text-sky-600"

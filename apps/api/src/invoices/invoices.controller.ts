@@ -20,9 +20,11 @@ import {
   invoiceCreateSchema,
   invoiceUpdateSchema,
 } from '@erp/shared';
+import { RequireCapability } from '../auth/auth.decorators';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { InvoicesService } from './invoices.service';
 
+@RequireCapability('facturas.gestionar')
 @Controller('invoices')
 export class InvoicesController {
   constructor(private readonly service: InvoicesService) {}

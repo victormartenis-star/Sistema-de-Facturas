@@ -20,6 +20,7 @@ import {
   variationRejectSchema,
   variationUpdateSchema,
 } from '@erp/shared';
+import { RequireCapability } from '../auth/auth.decorators';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { VariationsService } from './variations.service';
 
@@ -43,6 +44,7 @@ export class VariationsController {
     return this.service.get(id);
   }
 
+  @RequireCapability('modificados.registrar')
   @Post()
   create(
     @Body(new ZodValidationPipe(variationCreateSchema))
@@ -51,6 +53,7 @@ export class VariationsController {
     return this.service.create(body);
   }
 
+  @RequireCapability('modificados.registrar')
   @Patch(':id')
   update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -61,6 +64,7 @@ export class VariationsController {
   }
 
   /** Registra la firma de la Dirección Facultativa o de la Propiedad. */
+  @RequireCapability('modificados.aprobar')
   @Post(':id/aprobar')
   approve(
     @Param('id', ParseUUIDPipe) id: string,
@@ -70,6 +74,7 @@ export class VariationsController {
     return this.service.approve(id, body);
   }
 
+  @RequireCapability('modificados.aprobar')
   @Post(':id/rechazar')
   reject(
     @Param('id', ParseUUIDPipe) id: string,
@@ -79,11 +84,13 @@ export class VariationsController {
     return this.service.reject(id, body);
   }
 
+  @RequireCapability('modificados.aprobar')
   @Post(':id/reabrir')
   reopen(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.reopen(id);
   }
 
+  @RequireCapability('modificados.registrar')
   @Delete(':id')
   @HttpCode(204)
   async remove(@Param('id', ParseUUIDPipe) id: string) {

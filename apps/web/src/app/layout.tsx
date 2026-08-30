@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
-import { Sidebar } from '@/components/sidebar';
+import { AppShell } from '@/components/app-shell';
 import { Providers } from './providers';
 
 export const metadata: Metadata = {
@@ -15,12 +15,7 @@ export default function RootLayout({
     <html lang="es">
       <body>
         <Providers>
-          <Sidebar />
-          <div className="min-h-screen pl-16 lg:pl-56">
-            <main className="mx-auto max-w-6xl px-4 py-8 lg:px-8">
-              {children}
-            </main>
-          </div>
+          <AppShell>{children}</AppShell>
         </Providers>
       </body>
     </html>

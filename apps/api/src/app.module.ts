@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from './auth/auth.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CertificationsModule } from './certifications/certifications.module';
 import { ComplianceModule } from './compliance/compliance.module';
@@ -18,6 +19,7 @@ import { TreasuryModule } from './treasury/treasury.module';
 @Module({
   imports: [
     DbModule,
+    AuthModule,
     ProjectsModule,
     ContactsModule,
     CategoriesModule,

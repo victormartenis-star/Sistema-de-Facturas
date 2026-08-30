@@ -15,9 +15,11 @@ import {
   certificationCreateSchema,
   certificationInvoiceSchema,
 } from '@erp/shared';
+import { RequireCapability } from '../auth/auth.decorators';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { CertificationsService } from './certifications.service';
 
+@RequireCapability('certificaciones.gestionar')
 @Controller('certifications')
 export class CertificationsController {
   constructor(private readonly service: CertificationsService) {}

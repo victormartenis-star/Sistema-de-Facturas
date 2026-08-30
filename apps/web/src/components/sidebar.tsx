@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ComponentType } from 'react';
+import { USER_ROLE_LABELS, type Capability } from '@erp/shared';
+import { clearSession, type StoredSession } from '@/lib/session';
 import {
   IconBuilding,
   IconChart,
@@ -24,6 +26,8 @@ interface NavItem {
   label: string;
   icon: ComponentType<IconProps>;
   exact?: boolean;
+  /** Capacidad necesaria para que el enlace tenga sentido. */
+  needs?: Capability;
 }
 
 const MAIN: NavItem[] = [
@@ -32,16 +36,62 @@ const MAIN: NavItem[] = [
 
 const GESTION: NavItem[] = [
   { href: '/obras', label: 'Obras', icon: IconBuilding },
-  { href: '/contactos', label: 'Contactos', icon: IconUsers },
+  {
+    href: '/contactos',
+    label: 'Contactos',
+    icon: IconUsers,
+    needs: 'contactos.gestionar',
+  },
   { href: '/documentos', label: 'Documentos', icon: IconFileText },
   { href: '/validacion', label: 'Validación IA', icon: IconSparkles },
-  { href: '/pedidos', label: 'Pedidos', icon: IconClipboard },
-  { href: '/facturas', label: 'Facturas', icon: IconReceipt },
-  { href: '/albaranes', label: 'Albaranes', icon: IconInbox },
-  { href: '/tesoreria', label: 'Tesorería', icon: IconWallet },
-  { href: '/modificados', label: 'Modificados', icon: IconFileText },
-  { href: '/economia', label: 'Economía de obra', icon: IconTrendingUp },
-  { href: '/cumplimiento', label: 'Homologación', icon: IconLock },
+  {
+    href: '/pedidos',
+    label: 'Pedidos',
+    icon: IconClipboard,
+    needs: 'pedidos.emitir',
+  },
+  {
+    href: '/facturas',
+    label: 'Facturas',
+    icon: IconReceipt,
+    needs: 'facturas.gestionar',
+  },
+  {
+    href: '/albaranes',
+    label: 'Albaranes',
+    icon: IconInbox,
+    needs: 'albaranes.validar',
+  },
+  {
+    href: '/tesoreria',
+    label: 'Tesorería',
+    icon: IconWallet,
+    needs: 'tesoreria.gestionar',
+  },
+  {
+    href: '/modificados',
+    label: 'Modificados',
+    icon: IconFileText,
+    needs: 'modificados.registrar',
+  },
+  {
+    href: '/economia',
+    label: 'Economía de obra',
+    icon: IconTrendingUp,
+    needs: 'economico.ver',
+  },
+  {
+    href: '/cumplimiento',
+    label: 'Homologación',
+    icon: IconLock,
+    needs: 'homologacion.gestionar',
+  },
+  {
+    href: '/usuarios',
+    label: 'Usuarios',
+    icon: IconUsers,
+    needs: 'usuarios.gestionar',
+  },
 ];
 
 /** Módulos previstos en la hoja de ruta que aún no están construidos. */
@@ -57,8 +107,16 @@ function SectionTitle({ children }: { children: string }) {
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ session }: { session: StoredSession }) {
   const pathname = usePathname();
+
+  /*
+   * Ocultar un enlace es comodidad, no seguridad: evita que alguien entre en
+   * una pantalla donde solo iba a encontrarse un 403. El permiso de verdad lo
+   * aplica la API, que deniega por defecto.
+   */
+  const allowed = (item: NavItem) =>
+    !item.needs || session.capabilities.includes(item.needs);
 
   const isActive = (item: NavItem) =>
     item.exact ? pathname === item.href : pathname.startsWith(item.href);
@@ -103,7 +161,9 @@ export function Sidebar() {
         <div className="space-y-1">{MAIN.map(renderItem)}</div>
 
         <SectionTitle>Gestión</SectionTitle>
-        <div className="space-y-1">{GESTION.map(renderItem)}</div>
+        <div className="space-y-1">
+          {GESTION.filter(allowed).map(renderItem)}
+        </div>
 
         <SectionTitle>Próximamente</SectionTitle>
         <div className="space-y-1">
@@ -121,12 +181,35 @@ export function Sidebar() {
         </div>
       </nav>
 
-      {/* Pie */}
-      <div className="border-t border-white/10 px-4 py-3">
-        <p className="hidden text-[11px] text-slate-500 lg:block">
-          v0.1 · Fase 1
-        </p>
-        <p className="text-center text-[11px] text-slate-600 lg:hidden">v0.1</p>
+      {/* Pie: quién está dentro y con qué papel */}
+      <div className="border-t border-white/10 px-3 py-3 lg:px-4">
+        <div className="hidden lg:block">
+          <p className="truncate text-sm font-medium text-slate-200">
+            {session.user.fullName}
+          </p>
+          <p className="truncate text-[11px] text-slate-500">
+            {USER_ROLE_LABELS[session.user.role]}
+          </p>
+          <button
+            className="mt-2 text-[11px] text-slate-400 hover:text-amber-300"
+            onClick={() => {
+              clearSession();
+              window.location.href = '/acceso';
+            }}
+          >
+            Cerrar sesión
+          </button>
+        </div>
+        <button
+          title={`${session.user.fullName} · Cerrar sesión`}
+          className="mx-auto flex h-8 w-8 items-center justify-center rounded-full bg-slate-700 text-[11px] font-semibold text-slate-200 lg:hidden"
+          onClick={() => {
+            clearSession();
+            window.location.href = '/acceso';
+          }}
+        >
+          {session.user.fullName.slice(0, 2).toUpperCase()}
+        </button>
       </div>
     </aside>
   );

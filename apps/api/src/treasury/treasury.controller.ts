@@ -15,10 +15,12 @@ import {
   MilestoneDirection,
   MilestoneStatus,
 } from '@erp/shared';
+import { RequireCapability } from '../auth/auth.decorators';
 import { TreasuryService } from './treasury.service';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+@RequireCapability('tesoreria.gestionar')
 @Controller('treasury')
 export class TreasuryController {
   constructor(private readonly service: TreasuryService) {}

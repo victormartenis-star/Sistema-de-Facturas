@@ -3,18 +3,28 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, desc, eq, ilike, isNull, or, SQL } from 'drizzle-orm';
-import { Project, projects } from '@erp/db';
+import { and, desc, eq, ilike, inArray, isNull, or, SQL } from 'drizzle-orm';
+import { Project, projects, users } from '@erp/db';
 import {
   ProjectCreateInput,
   ProjectDto,
   projectCreateSchema,
   ProjectStatus,
   ProjectUpdateInput,
+  ProjectStaffInput,
+  USER_ROLE_LABELS,
+  UserRole,
+  projectStaffSchema,
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
 
-function toDto(row: Project): ProjectDto {
+/**
+ * `withEconomics` en false vacía los importes de contrato y coste objetivo.
+ *
+ * Se hace en el servidor y no ocultando la cifra en la pantalla: quien no
+ * tiene `economico.ver` no debe recibir el dato, no basta con no pintárselo.
+ */
+function toDto(row: Project, withEconomics = true): ProjectDto {
   return {
     id: row.id,
     code: row.code,
@@ -22,9 +32,15 @@ function toDto(row: Project): ProjectDto {
     status: row.status as ProjectStatus,
     startDate: row.startDate,
     expectedEnd: row.expectedEnd,
+    groupManagerId: row.groupManagerId,
+    siteManagerId: row.siteManagerId,
+    foremanId: row.foremanId,
     contractAmount:
-      row.contractAmount === null ? null : Number(row.contractAmount),
-    targetCost: row.targetCost === null ? null : Number(row.targetCost),
+      !withEconomics || row.contractAmount === null
+        ? null
+        : Number(row.contractAmount),
+    targetCost:
+      !withEconomics || row.targetCost === null ? null : Number(row.targetCost),
     retentionPct: Number(row.retentionPct),
     notes: row.notes,
     createdAt: row.createdAt.toISOString(),
@@ -38,12 +54,78 @@ const UNIQUE_VIOLATION = '23505';
 export class ProjectsService {
   constructor(private readonly dbs: DbService) {}
 
-  async list(search?: string, status?: ProjectStatus): Promise<ProjectDto[]> {
+  /**
+   * `visibleProjectIds` limita el listado a las obras asignadas. Llega vacío
+   * en los roles transversales —Compras, Administración, Estudios y
+   * Dirección—, que trabajan con todas las obras a la vez.
+   */
+  /**
+   * Asignación de responsables (hito E1: "nombre y apellidos por escrito
+   * antes del inicio"). Además de dejarlo escrito, es lo que decide qué obras
+   * ve cada persona, así que se comprueba que el rol encaja con el puesto.
+   */
+  async setStaff(id: string, input: ProjectStaffInput): Promise<ProjectDto> {
+    await this.find(id);
+    const data = projectStaffSchema.parse(input);
+
+    await this.assertRole(data.groupManagerId, 'jefe_grupo');
+    await this.assertRole(data.siteManagerId, 'jefe_obra');
+    await this.assertRole(data.foremanId, 'encargado');
+
+    await this.dbs.db
+      .update(projects)
+      .set({
+        ...(data.groupManagerId !== undefined && {
+          groupManagerId: data.groupManagerId ?? null,
+        }),
+        ...(data.siteManagerId !== undefined && {
+          siteManagerId: data.siteManagerId ?? null,
+        }),
+        ...(data.foremanId !== undefined && {
+          foremanId: data.foremanId ?? null,
+        }),
+        updatedAt: new Date(),
+      })
+      .where(eq(projects.id, id));
+    return toDto(await this.find(id));
+  }
+
+  /** El puesto en la obra tiene que corresponderse con el rol del usuario. */
+  private async assertRole(
+    userId: string | null | undefined,
+    expected: UserRole,
+  ): Promise<void> {
+    if (!userId) return;
+    const [user] = await this.dbs.db
+      .select()
+      .from(users)
+      .where(and(eq(users.id, userId), isNull(users.deletedAt)))
+      .limit(1);
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    if (user.role !== expected) {
+      throw new ConflictException(
+        `${user.fullName} es ${USER_ROLE_LABELS[user.role as UserRole]}: no puede asignarse como ${USER_ROLE_LABELS[expected]}`,
+      );
+    }
+  }
+
+  async list(
+    search?: string,
+    status?: ProjectStatus,
+    visibleProjectIds?: string[],
+    withEconomics = true,
+  ): Promise<ProjectDto[]> {
     const companyId = await this.dbs.getDefaultCompanyId();
     const filters: SQL[] = [
       eq(projects.companyId, companyId),
       isNull(projects.deletedAt),
     ];
+    if (visibleProjectIds) {
+      // Sin obras asignadas no se ve ninguna, en lugar de verlas todas: el
+      // filtro vacío es el fallo más caro de este tipo de restricción.
+      if (visibleProjectIds.length === 0) return [];
+      filters.push(inArray(projects.id, visibleProjectIds));
+    }
     if (status) {
       filters.push(eq(projects.status, status));
     }
@@ -58,12 +140,12 @@ export class ProjectsService {
       .from(projects)
       .where(and(...filters))
       .orderBy(desc(projects.createdAt));
-    return rows.map(toDto);
+    return rows.map((r) => toDto(r, withEconomics));
   }
 
-  async get(id: string): Promise<ProjectDto> {
+  async get(id: string, withEconomics = true): Promise<ProjectDto> {
     const row = await this.find(id);
-    return toDto(row);
+    return toDto(row, withEconomics);
   }
 
   async create(input: ProjectCreateInput): Promise<ProjectDto> {

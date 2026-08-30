@@ -22,6 +22,17 @@ import {
  * de projects llegará junto con la tabla `contacts`.
  */
 
+/** Roles del organigrama (manual de procesos §1.2). */
+export const userRoleEnum = pgEnum('user_role', [
+  'direccion',
+  'jefe_grupo',
+  'jefe_obra',
+  'encargado',
+  'estudios',
+  'compras',
+  'administracion',
+]);
+
 export const projectStatusEnum = pgEnum('project_status', [
   'oferta',
   'adjudicada',
@@ -44,6 +55,39 @@ export const companies = pgTable('companies', {
     .notNull()
     .defaultNow(),
 });
+
+/**
+ * Usuarios del sistema. El rol es el puesto del organigrama, y de él salen
+ * las capacidades; el alcance por obra sale de las asignaciones de `projects`.
+ */
+export const users = pgTable(
+  'users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    email: text('email').notNull(),
+    fullName: text('full_name').notNull(),
+    role: userRoleEnum('role').notNull(),
+    /** scrypt con los parámetros incrustados en la propia cadena. */
+    passwordHash: text('password_hash').notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('users_email_unique')
+      .on(t.email)
+      .where(sql`deleted_at IS NULL`),
+  ],
+);
 
 export const projects = pgTable(
   'projects',
@@ -69,6 +113,18 @@ export const projects = pgTable(
     retentionPct: numeric('retention_pct', { precision: 5, scale: 2 })
       .notNull()
       .default('5.00'),
+    /*
+     * Asignación de responsables. El manual la marca como hito de apertura:
+     * "nombre y apellidos por escrito antes del inicio, no «ya lo veremos»".
+     * Además es lo que define qué obras ve cada persona.
+     */
+    groupManagerId: uuid('group_manager_id').references(
+      (): AnyPgColumn => users.id,
+    ),
+    siteManagerId: uuid('site_manager_id').references(
+      (): AnyPgColumn => users.id,
+    ),
+    foremanId: uuid('foreman_id').references((): AnyPgColumn => users.id),
     notes: text('notes'),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
@@ -801,6 +857,8 @@ export const extractions = pgTable('extractions', {
     .defaultNow(),
 });
 
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
 export type Company = typeof companies.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;

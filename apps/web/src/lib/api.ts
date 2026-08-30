@@ -1,5 +1,6 @@
 import { DOCUMENT_MAX_SIZE_MB } from '@erp/shared';
 import type {
+  Capability,
   CashflowGrouping,
   CashflowReportDto,
   CategoryDto,
@@ -51,7 +52,14 @@ import type {
   VariationReportDto,
   VariationUpdateInput,
   ValidationResultDto,
+  LoginInput,
+  SessionDto,
+  UserCreateInput,
+  UserDto,
+  UserUpdateInput,
 } from '@erp/shared';
+
+import { clearSession, sessionToken } from './session';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -69,13 +77,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // Con FormData el navegador fija el Content-Type (incluye el boundary)
   const isFormData =
     typeof FormData !== 'undefined' && init?.body instanceof FormData;
+  const token = sessionToken();
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
       ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init?.headers,
     },
   });
+  // Sesión caducada o revocada: se limpia y se vuelve a la pantalla de acceso
+  // en lugar de dejar la interfaz mostrando errores sueltos.
+  if (res.status === 401 && typeof window !== 'undefined') {
+    clearSession();
+    if (!window.location.pathname.startsWith('/acceso')) {
+      window.location.href = '/acceso';
+    }
+  }
   if (!res.ok) {
     let message = `Error ${res.status}`;
     let fieldErrors: { field: string; message: string }[] = [];
@@ -94,6 +112,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
+
+export const authApi = {
+  login: (input: LoginInput) =>
+    request<SessionDto>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  me: () => request<UserDto & { capabilities: Capability[] }>('/auth/me'),
+  listUsers: () => request<UserDto[]>('/auth/users'),
+  createUser: (input: UserCreateInput) =>
+    request<UserDto>('/auth/users', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateUser: (id: string, input: UserUpdateInput) =>
+    request<UserDto>(`/auth/users/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+};
 
 export const projectsApi = {
   list: (search: string, status: string) => {
@@ -463,8 +501,14 @@ export const treasuryApi = {
 };
 
 /** URL del original (visor); la sirve la API en streaming. */
+/**
+ * URL del original de un documento. Lleva el token en la query porque la
+ * abre el navegador (etiqueta `img` o pestaña nueva) y ahí no se pueden poner
+ * cabeceras. La API solo acepta esa vía en peticiones GET.
+ */
 export function documentFileUrl(id: string): string {
-  return `${API_URL}/documents/${id}/file`;
+  const token = sessionToken();
+  return `${API_URL}/documents/${id}/file${token ? `?token=${encodeURIComponent(token)}` : ''}`;
 }
 
 export function formatEur(value: number | null): string {

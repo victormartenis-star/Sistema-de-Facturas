@@ -18,9 +18,11 @@ import {
   contactCreateSchema,
   contactUpdateSchema,
 } from '@erp/shared';
+import { RequireCapability } from '../auth/auth.decorators';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { ContactsService } from './contacts.service';
 
+@RequireCapability('contactos.gestionar')
 @Controller('contacts')
 export class ContactsController {
   constructor(private readonly service: ContactsService) {}

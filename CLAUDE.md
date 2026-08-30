@@ -10,6 +10,13 @@
 - Tests: `npm test` (en desarrollo: `npm run test:watch -w @erp/shared`)
 - **Todo junto, lo mismo que ejecuta el CI: `npm run verify`**
 
+## Seguridad
+- La API **deniega por defecto**: la guarda global exige sesión y el endpoint que deba ser abierto se marca con `@Public()`. Un endpoint nuevo sin decorar queda protegido, que es el fallo barato.
+- Los permisos se comprueban por **capacidad** (`@RequireCapability`), nunca comparando roles.
+- Roles = puestos del organigrama del manual de procesos, no una escala genérica.
+- Ocultar algo en la interfaz no es una medida de seguridad: si un dato no debe verse, la API no debe devolverlo.
+- `JWT_SECRET` es obligatoria en producción (mínimo 32 caracteres).
+
 ## Calidad
 - La aritmética del dinero vive en `packages/shared/src/calculo.ts`: funciones **puras**, sin base de datos y sin leer el reloj (la fecha entra como parámetro). Toda regla nueva de cálculo se añade ahí y se prueba ahí.
 - Un cambio en el cálculo económico no se da por bueno sin un test que falle antes y pase después.

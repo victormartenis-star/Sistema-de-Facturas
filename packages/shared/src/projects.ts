@@ -81,6 +81,9 @@ export interface ProjectDto {
   status: ProjectStatus;
   startDate: string | null;
   expectedEnd: string | null;
+  groupManagerId: string | null;
+  siteManagerId: string | null;
+  foremanId: string | null;
   contractAmount: number | null;
   targetCost: number | null;
   retentionPct: number;
