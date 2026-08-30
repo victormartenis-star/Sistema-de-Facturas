@@ -33,6 +33,11 @@ import type {
   ProjectCreateInput,
   ProjectDto,
   ProjectUpdateInput,
+  PurchaseOrderCreateInput,
+  PurchaseOrderDto,
+  PurchaseOrderStatus,
+  PurchaseOrderUpdateInput,
+  TraceabilityReportDto,
   ValidationItemDto,
   ValidationResultDto,
 } from '@erp/shared';
@@ -217,6 +222,49 @@ export const certificationsApi = {
     }),
   remove: (id: string) =>
     request<void>(`/certifications/${id}`, { method: 'DELETE' }),
+};
+
+export const purchaseOrdersApi = {
+  list: (options: {
+    search?: string;
+    status?: PurchaseOrderStatus | '';
+    projectId?: string;
+    contactId?: string;
+    receiving?: boolean;
+  }) => {
+    const params = new URLSearchParams();
+    if (options.search) params.set('search', options.search);
+    if (options.status) params.set('status', options.status);
+    if (options.projectId) params.set('projectId', options.projectId);
+    if (options.contactId) params.set('contactId', options.contactId);
+    if (options.receiving) params.set('receiving', 'true');
+    const qs = params.toString();
+    return request<PurchaseOrderDto[]>(`/purchase-orders${qs ? `?${qs}` : ''}`);
+  },
+  traceability: (projectId?: string) =>
+    request<TraceabilityReportDto>(
+      `/purchase-orders/trazabilidad${projectId ? `?projectId=${projectId}` : ''}`,
+    ),
+  create: (input: PurchaseOrderCreateInput) =>
+    request<PurchaseOrderDto>('/purchase-orders', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  update: (id: string, input: PurchaseOrderUpdateInput) =>
+    request<PurchaseOrderDto>(`/purchase-orders/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  close: (id: string) =>
+    request<PurchaseOrderDto>(`/purchase-orders/${id}/cerrar`, {
+      method: 'POST',
+    }),
+  cancel: (id: string) =>
+    request<PurchaseOrderDto>(`/purchase-orders/${id}/anular`, {
+      method: 'POST',
+    }),
+  remove: (id: string) =>
+    request<void>(`/purchase-orders/${id}`, { method: 'DELETE' }),
 };
 
 export const deliveryNotesApi = {

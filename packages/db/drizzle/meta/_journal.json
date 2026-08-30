@@ -43,6 +43,13 @@
       "when": 1785014389475,
       "tag": "0005_compliance",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788087463090,
+      "tag": "0006_mute_mojo",
+      "breakpoints": true
     }
   ]
 }

@@ -8,4 +8,5 @@ export * from './phases';
 export * from './invoices';
 export * from './certifications';
 export * from './delivery-notes';
+export * from './purchase-orders';
 export * from './treasury';

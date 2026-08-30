@@ -375,6 +375,81 @@ export const deliveryNoteStatusEnum = pgEnum('delivery_note_status', [
   'facturado',
 ]);
 
+/* ─────────────────────── Pedidos de compra ───────────────────────
+ * La pieza sobre la que se apoya la regla de oro del manual de procesos:
+ *   sin pedido no hay compra · sin pedido no hay albarán validado
+ *   sin pedido + albarán no hay factura aprobada · sin factura no hay pago
+ * El pedido es además el documento que fija el coste comprometido de la
+ * obra: lo que ya se debe aunque todavía no haya llegado la factura.
+ */
+
+export const purchaseOrderStatusEnum = pgEnum('purchase_order_status', [
+  'emitido',
+  'servido_parcial',
+  'servido',
+  'facturado',
+  'cerrado',
+  'anulado',
+]);
+
+/**
+ * Pedido a proveedor. El número se compone con el código de la obra y un
+ * correlativo propio de esa obra (OBR-045-PED-0032), de forma que cualquiera
+ * identifica de inmediato a qué obra pertenece.
+ */
+export const purchaseOrders = pgTable(
+  'purchase_orders',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id),
+    /** Correlativo dentro de la obra; con el código de obra forma el número. */
+    seq: integer('seq').notNull(),
+    orderNumber: text('order_number').notNull(),
+    orderDate: date('order_date').notNull(),
+    /** Capítulo/partida de imputación: sin esto no hay coste por capítulo. */
+    phaseId: uuid('phase_id').references(() => projectPhases.id),
+    categoryId: uuid('category_id').references(() => categories.id),
+    description: text('description').notNull(),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    /** Fecha de entrega comprometida por el proveedor. */
+    expectedDate: date('expected_date'),
+    /** Quién pide (jefe de obra). Texto hasta que existan usuarios. */
+    requestedBy: text('requested_by'),
+    status: purchaseOrderStatusEnum('status').notNull().default('emitido'),
+    /**
+     * Pedido urgente autorizado verbalmente y regularizado después: es la
+     * válvula de escape de la regla de oro. Se marca para poder medir cuánta
+     * compra entra por esa vía, que es justo lo que hay que vigilar.
+     */
+    urgent: boolean('urgent').notNull().default(false),
+    notes: text('notes'),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('purchase_orders_number_unique')
+      .on(t.companyId, t.orderNumber)
+      .where(sql`deleted_at IS NULL`),
+    uniqueIndex('purchase_orders_project_seq_unique')
+      .on(t.projectId, t.seq)
+      .where(sql`deleted_at IS NULL`),
+  ],
+);
+
 /** Albaranes/partes de trabajo para el punteado de facturas de compra. */
 export const deliveryNotes = pgTable(
   'delivery_notes',
@@ -388,6 +463,12 @@ export const deliveryNotes = pgTable(
       .references(() => contacts.id),
     projectId: uuid('project_id').references(() => projects.id),
     phaseId: uuid('phase_id').references(() => projectPhases.id),
+    /**
+     * Pedido al que responde el albarán. Nullable en la base porque los
+     * albaranes anteriores a la implantación de la regla no lo tienen; la
+     * regla se aplica en la validación, no en el tipo de la columna.
+     */
+    orderId: uuid('order_id').references(() => purchaseOrders.id),
     noteNumber: text('note_number').notNull(),
     noteDate: date('note_date').notNull(),
     description: text('description'),
@@ -553,6 +634,8 @@ export type InvoiceLine = typeof invoiceLines.$inferSelect;
 export type NewInvoiceLine = typeof invoiceLines.$inferInsert;
 export type Certification = typeof certifications.$inferSelect;
 export type NewCertification = typeof certifications.$inferInsert;
+export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
+export type NewPurchaseOrder = typeof purchaseOrders.$inferInsert;
 export type DeliveryNote = typeof deliveryNotes.$inferSelect;
 export type NewDeliveryNote = typeof deliveryNotes.$inferInsert;
 export type PaymentMilestone = typeof paymentMilestones.$inferSelect;
