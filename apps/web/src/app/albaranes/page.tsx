@@ -100,7 +100,11 @@ function NoteFormModal({
   return (
     <Modal
       open={open}
-      title={note ? `Editar albarán ${note.noteNumber}` : 'Nuevo albarán / parte de trabajo'}
+      title={
+        note
+          ? `Editar albarán ${note.noteNumber}`
+          : 'Nuevo albarán / parte de trabajo'
+      }
       onClose={onClose}
     >
       <form
@@ -241,7 +245,9 @@ export default function AlbaranesPage() {
 
   const saveMutation = useMutation({
     mutationFn: (v: DeliveryNoteCreateInput) =>
-      editing ? deliveryNotesApi.update(editing.id, v) : deliveryNotesApi.create(v),
+      editing
+        ? deliveryNotesApi.update(editing.id, v)
+        : deliveryNotesApi.create(v),
     onSuccess: () => {
       toast(editing ? 'Albarán actualizado' : 'Albarán creado');
       invalidate();

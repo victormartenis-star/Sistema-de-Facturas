@@ -126,9 +126,7 @@ export class DeliveryNotesService {
   ): Promise<DeliveryNoteDto> {
     const note = await this.find(id);
     if (note.status === 'facturado') {
-      throw new ConflictException(
-        'No se puede editar un albarán ya facturado',
-      );
+      throw new ConflictException('No se puede editar un albarán ya facturado');
     }
     const data = deliveryNoteUpdateSchema.parse(input);
     try {

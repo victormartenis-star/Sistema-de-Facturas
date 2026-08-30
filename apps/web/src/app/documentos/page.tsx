@@ -100,7 +100,10 @@ export default function DocumentosPage() {
       setDeleteTarget(null);
     },
     onError: (err) => {
-      toast(err instanceof Error ? err.message : 'No se pudo eliminar', 'error');
+      toast(
+        err instanceof Error ? err.message : 'No se pudo eliminar',
+        'error',
+      );
       setDeleteTarget(null);
     },
   });

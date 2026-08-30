@@ -63,7 +63,9 @@ export const extractionPayloadSchema = z.object({
   categorySlug: z
     .enum(EXPENSE_CATEGORY_SLUGS)
     .nullable()
-    .describe('Categoría de gasto si es un documento de compra; null si no aplica'),
+    .describe(
+      'Categoría de gasto si es un documento de compra; null si no aplica',
+    ),
   projectHint: z
     .string()
     .nullable()

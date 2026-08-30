@@ -318,10 +318,7 @@ export const invoiceLines = pgTable('invoice_lines', {
   sortOrder: integer('sort_order').notNull().default(0),
 });
 
-export const certStatusEnum = pgEnum('cert_status', [
-  'borrador',
-  'facturada',
-]);
+export const certStatusEnum = pgEnum('cert_status', ['borrador', 'facturada']);
 
 /** Certificaciones de obra: % a origen y facturación por diferencia. */
 export const certifications = pgTable(
@@ -563,6 +560,5 @@ export type NewPaymentMilestone = typeof paymentMilestones.$inferInsert;
 export type Extraction = typeof extractions.$inferSelect;
 export type NewExtraction = typeof extractions.$inferInsert;
 export type ContactComplianceDoc = typeof contactComplianceDocs.$inferSelect;
-export type NewContactComplianceDoc =
-  typeof contactComplianceDocs.$inferInsert;
+export type NewContactComplianceDoc = typeof contactComplianceDocs.$inferInsert;
 export type ComplianceWaiver = typeof complianceWaivers.$inferSelect;

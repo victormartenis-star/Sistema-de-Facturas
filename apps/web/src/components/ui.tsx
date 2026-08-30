@@ -48,7 +48,9 @@ export function PageHeader({
       {subtitle && (
         <p className="w-full text-sm text-gray-500 sm:w-auto">{subtitle}</p>
       )}
-      <div className="ml-auto flex flex-wrap items-center gap-2">{children}</div>
+      <div className="ml-auto flex flex-wrap items-center gap-2">
+        {children}
+      </div>
     </div>
   );
 }
@@ -94,7 +96,9 @@ export function SortableTh({
   right?: boolean;
 }) {
   return (
-    <th className={`px-4 py-3 font-medium ${right ? 'text-right' : 'text-left'}`}>
+    <th
+      className={`px-4 py-3 font-medium ${right ? 'text-right' : 'text-left'}`}
+    >
       <button
         onClick={onClick}
         className={`group inline-flex items-center gap-1 text-xs font-medium tracking-wide uppercase transition ${

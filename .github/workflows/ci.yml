@@ -1,0 +1,87 @@
+name: CI
+
+# Se ejecuta en cada push y en cada pull request. El objetivo no es tener un
+# semáforo verde bonito: es que nadie pueda fusionar código que no compila,
+# que no pasa el lint o que rompe el cálculo del dinero.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# Un push nuevo sobre la misma rama cancela la ejecución anterior.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  calidad:
+    name: Tipos, estilo y tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      # shared y db se compilan antes: la API y la web importan su dist.
+      - name: Compilar paquetes compartidos
+        run: npm run build:packages
+
+      - name: Comprobar tipos
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Formato
+        run: npm run format:check
+
+      - name: Tests
+        run: npm test
+
+  migraciones:
+    name: Migraciones sobre PostgreSQL limpio
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: erp
+          POSTGRES_PASSWORD: erp
+          POSTGRES_DB: erp_dev
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://erp:erp@localhost:5432/erp_dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build:packages
+
+      # Aplicar las migraciones sobre una base vacía detecta el fallo más
+      # caro: una migración que funciona en el portátil de quien la escribió
+      # porque la tabla ya existía, y revienta en producción.
+      - name: Aplicar migraciones
+        run: npm run db:migrate
+
+      - name: Sembrar datos de sistema
+        run: npm run db:seed
+
+      # El seed debe poder repetirse sin duplicar nada (es idempotente).
+      - name: Repetir el seed (idempotencia)
+        run: npm run db:seed

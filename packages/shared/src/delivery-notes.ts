@@ -13,12 +13,11 @@ export const DELIVERY_NOTE_STATUSES = [
 ] as const;
 export type DeliveryNoteStatus = (typeof DELIVERY_NOTE_STATUSES)[number];
 
-export const DELIVERY_NOTE_STATUS_LABELS: Record<DeliveryNoteStatus, string> =
-  {
-    pendiente: 'Pendiente',
-    validado: 'Validado',
-    facturado: 'Facturado',
-  };
+export const DELIVERY_NOTE_STATUS_LABELS: Record<DeliveryNoteStatus, string> = {
+  pendiente: 'Pendiente',
+  validado: 'Validado',
+  facturado: 'Facturado',
+};
 
 const isoDate = z
   .string()

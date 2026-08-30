@@ -99,7 +99,9 @@ export default function FacturasPage() {
 
   const saveMutation = useMutation({
     mutationFn: (values: InvoiceCreateInput) =>
-      editing ? invoicesApi.update(editing.id, values) : invoicesApi.create(values),
+      editing
+        ? invoicesApi.update(editing.id, values)
+        : invoicesApi.create(values),
     onSuccess: () => {
       toast(editing ? 'Factura actualizada' : 'Borrador de factura creado');
       invalidate();

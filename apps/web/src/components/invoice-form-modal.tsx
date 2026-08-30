@@ -103,9 +103,7 @@ function LineRow({
         <select
           className={fieldCls}
           value={line.projectId}
-          onChange={(e) =>
-            onChange({ projectId: e.target.value, phaseId: '' })
-          }
+          onChange={(e) => onChange({ projectId: e.target.value, phaseId: '' })}
         >
           <option value="">Sin obra (gasto general)</option>
           {projects.map((p) => (
@@ -257,7 +255,10 @@ export function InvoiceFormModal({
   const vat = isp
     ? 0
     : round2(
-        lines.reduce((s, l) => s + (num(l.baseAmount) * num(l.vatPct)) / 100, 0),
+        lines.reduce(
+          (s, l) => s + (num(l.baseAmount) * num(l.vatPct)) / 100,
+          0,
+        ),
       );
   const total = round2(base + vat);
   const retention = round2((base * num(retentionPct)) / 100);
@@ -397,9 +398,7 @@ export function InvoiceFormModal({
                     ls.map((l, j) => (j === i ? { ...l, ...patch } : l)),
                   )
                 }
-                onRemove={() =>
-                  setLines((ls) => ls.filter((_, j) => j !== i))
-                }
+                onRemove={() => setLines((ls) => ls.filter((_, j) => j !== i))}
               />
             ))}
           </div>

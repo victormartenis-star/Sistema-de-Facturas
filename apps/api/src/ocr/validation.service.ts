@@ -254,7 +254,9 @@ export class ValidationService {
     const rows = await this.dbs.db
       .select({ id: projects.id, code: projects.code })
       .from(projects)
-      .where(and(eq(projects.companyId, companyId), isNull(projects.deletedAt)));
+      .where(
+        and(eq(projects.companyId, companyId), isNull(projects.deletedAt)),
+      );
     const needle = hint.toUpperCase();
     return (
       rows.find((p) => p.code.toUpperCase() === needle) ??

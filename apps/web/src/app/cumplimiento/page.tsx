@@ -242,7 +242,9 @@ export default function CumplimientoPage() {
       )}
 
       {query.isLoading && <TableSkeleton rows={4} />}
-      {query.isError && <ErrorBanner message={(query.error as Error).message} />}
+      {query.isError && (
+        <ErrorBanner message={(query.error as Error).message} />
+      )}
 
       {query.isSuccess && items.length === 0 && (
         <EmptyState
@@ -314,7 +316,10 @@ export default function CumplimientoPage() {
                 >
                   {selected.reasons.map((r, i) => (
                     <li key={i} className="flex items-start gap-2">
-                      <IconAlertTriangle size={14} className="mt-0.5 shrink-0" />
+                      <IconAlertTriangle
+                        size={14}
+                        className="mt-0.5 shrink-0"
+                      />
                       {r}
                     </li>
                   ))}
@@ -539,10 +544,7 @@ export default function CumplimientoPage() {
             />
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button
-              onClick={() => setDocModal(false)}
-              className={btnGhostCls}
-            >
+            <button onClick={() => setDocModal(false)} className={btnGhostCls}>
               Cancelar
             </button>
             <button

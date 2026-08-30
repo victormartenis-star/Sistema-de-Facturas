@@ -81,7 +81,10 @@ export default function TesoreriaPage() {
 
   return (
     <div className="animate-fade-in-up">
-      <PageHeader title="Tesorería" subtitle="Previsión de caja a 90 días y calendario de vencimientos" />
+      <PageHeader
+        title="Tesorería"
+        subtitle="Previsión de caja a 90 días y calendario de vencimientos"
+      />
 
       {cashflowQuery.isError && (
         <ErrorBanner message={errText(cashflowQuery.error)} />
@@ -225,15 +228,16 @@ export default function TesoreriaPage() {
                     </p>
                     <p
                       className={`text-[10px] font-semibold tabular-nums ${
-                        b.saldoAcumulado < 0
-                          ? 'text-red-600'
-                          : 'text-gray-700'
+                        b.saldoAcumulado < 0 ? 'text-red-600' : 'text-gray-700'
                       }`}
                     >
                       {formatEur(b.saldoAcumulado)}
                     </p>
                     {b.tension && (
-                      <IconAlertTriangle size={11} className="mt-0.5 text-red-500" />
+                      <IconAlertTriangle
+                        size={11}
+                        className="mt-0.5 text-red-500"
+                      />
                     )}
                   </div>
                 ))}
