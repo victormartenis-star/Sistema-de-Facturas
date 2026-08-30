@@ -8,6 +8,7 @@ import { clearSession, type StoredSession } from '@/lib/session';
 import {
   IconBuilding,
   IconCalendar,
+  IconCheck,
   IconChart,
   IconTrendingUp,
   IconDashboard,
@@ -37,6 +38,7 @@ const MAIN: NavItem[] = [
 
 const GESTION: NavItem[] = [
   { href: '/obras', label: 'Obras', icon: IconBuilding },
+  { href: '/apertura', label: 'Apertura de obra', icon: IconCheck },
   {
     href: '/contactos',
     label: 'Contactos',

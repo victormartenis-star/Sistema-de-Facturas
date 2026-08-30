@@ -4,6 +4,8 @@ import type {
   CashflowGrouping,
   CashflowReportDto,
   CategoryDto,
+  ChecklistDto,
+  ChecklistMarkInput,
   CertificationCreateInput,
   ComplianceDocCreateInput,
   ComplianceDocDto,
@@ -275,6 +277,15 @@ export const certificationsApi = {
     }),
   remove: (id: string) =>
     request<void>(`/certifications/${id}`, { method: 'DELETE' }),
+};
+
+export const checklistApi = {
+  get: (projectId: string) => request<ChecklistDto>(`/checklist/${projectId}`),
+  mark: (projectId: string, input: ChecklistMarkInput) =>
+    request<ChecklistDto>(`/checklist/${projectId}`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
 };
 
 export const permitsApi = {

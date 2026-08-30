@@ -661,6 +661,38 @@ export const complianceWaivers = pgTable('compliance_waivers', {
     .defaultNow(),
 });
 
+/**
+ * Confirmaciones manuales del checklist de apertura de obra.
+ *
+ * Solo se guardan los puntos que ocurren fuera del ERP —una firma, un
+ * registro presentado—. Los que el sistema puede comprobar por su cuenta se
+ * deducen y no se guardan: un dato duplicado es un dato que se contradice.
+ */
+export const projectChecklist = pgTable(
+  'project_checklist',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    /** Clave del punto en `packages/shared/src/checklist.ts`. */
+    itemKey: text('item_key').notNull(),
+    doneAt: date('done_at').notNull(),
+    markedBy: text('marked_by'),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [uniqueIndex('project_checklist_unique').on(t.projectId, t.itemKey)],
+);
+
 /* ────────────── Licencias, acometidas y suministros ──────────────
  * La etapa que marca el plazo de la obra. Lo que se controla no es solo el
  * retraso ya acumulado, sino si un trámite sin pedir todavía llega a tiempo
@@ -927,6 +959,8 @@ export type InvoiceLine = typeof invoiceLines.$inferSelect;
 export type NewInvoiceLine = typeof invoiceLines.$inferInsert;
 export type Certification = typeof certifications.$inferSelect;
 export type NewCertification = typeof certifications.$inferInsert;
+export type ProjectChecklistMark = typeof projectChecklist.$inferSelect;
+export type NewProjectChecklistMark = typeof projectChecklist.$inferInsert;
 export type Permit = typeof permits.$inferSelect;
 export type NewPermit = typeof permits.$inferInsert;
 export type Variation = typeof variations.$inferSelect;
