@@ -10,6 +10,7 @@ import { DocumentsModule } from './documents/documents.module';
 import { ForecastModule } from './forecast/forecast.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { OcrModule } from './ocr/ocr.module';
+import { PermitsModule } from './permits/permits.module';
 import { PhasesModule } from './phases/phases.module';
 import { ProjectsModule } from './projects/projects.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
@@ -30,6 +31,7 @@ import { TreasuryModule } from './treasury/treasury.module';
     PurchaseOrdersModule,
     DeliveryNotesModule,
     TreasuryModule,
+    PermitsModule,
     VariationsModule,
     ForecastModule,
     OcrModule,

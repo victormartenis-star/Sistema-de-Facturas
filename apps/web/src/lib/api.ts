@@ -36,6 +36,10 @@ import type {
   PhaseCreateInput,
   PhaseDto,
   PhaseUpdateInput,
+  PermitBoardDto,
+  PermitCreateInput,
+  PermitDto,
+  PermitUpdateInput,
   ProjectCreateInput,
   ProjectDto,
   ProjectUpdateInput,
@@ -271,6 +275,27 @@ export const certificationsApi = {
     }),
   remove: (id: string) =>
     request<void>(`/certifications/${id}`, { method: 'DELETE' }),
+};
+
+export const permitsApi = {
+  list: (projectId?: string) =>
+    request<PermitDto[]>(
+      `/permits${projectId ? `?projectId=${projectId}` : ''}`,
+    ),
+  board: (projectId: string) =>
+    request<PermitBoardDto>(`/permits/semaforo/${projectId}`),
+  alerts: () => request<PermitDto[]>('/permits/avisos'),
+  create: (input: PermitCreateInput) =>
+    request<PermitDto>('/permits', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  update: (id: string, input: PermitUpdateInput) =>
+    request<PermitDto>(`/permits/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  remove: (id: string) => request<void>(`/permits/${id}`, { method: 'DELETE' }),
 };
 
 export const variationsApi = {

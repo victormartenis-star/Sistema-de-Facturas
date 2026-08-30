@@ -7,6 +7,7 @@ import { USER_ROLE_LABELS, type Capability } from '@erp/shared';
 import { clearSession, type StoredSession } from '@/lib/session';
 import {
   IconBuilding,
+  IconCalendar,
   IconChart,
   IconTrendingUp,
   IconDashboard,
@@ -67,6 +68,12 @@ const GESTION: NavItem[] = [
     label: 'Tesorería',
     icon: IconWallet,
     needs: 'tesoreria.gestionar',
+  },
+  {
+    href: '/tramites',
+    label: 'Licencias',
+    icon: IconCalendar,
+    needs: 'tramites.gestionar',
   },
   {
     href: '/modificados',

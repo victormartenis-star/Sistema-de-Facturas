@@ -77,6 +77,8 @@ export const CAPABILITIES = [
   'modificados.aprobar',
   'contactos.gestionar',
   'homologacion.gestionar',
+  /** Licencias, acometidas y suministros. */
+  'tramites.gestionar',
   'documentos.subir',
 ] as const;
 
@@ -104,6 +106,7 @@ const ROLE_CAPABILITIES: Record<UserRole, readonly Capability[]> = {
     'certificaciones.gestionar',
     'modificados.registrar',
     'contactos.gestionar',
+    'tramites.gestionar',
     'documentos.subir',
   ],
 
@@ -113,6 +116,7 @@ const ROLE_CAPABILITIES: Record<UserRole, readonly Capability[]> = {
     'certificaciones.gestionar',
     'modificados.registrar',
     'albaranes.validar',
+    'tramites.gestionar',
     'documentos.subir',
   ],
 
@@ -144,6 +148,8 @@ const ROLE_CAPABILITIES: Record<UserRole, readonly Capability[]> = {
     'certificaciones.gestionar',
     'tesoreria.gestionar',
     'contactos.gestionar',
+    // Tasas y avales de los trámites los lleva Administración
+    'tramites.gestionar',
     'documentos.subir',
   ],
 };

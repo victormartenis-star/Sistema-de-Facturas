@@ -661,6 +661,58 @@ export const complianceWaivers = pgTable('compliance_waivers', {
     .defaultNow(),
 });
 
+/* ────────────── Licencias, acometidas y suministros ──────────────
+ * La etapa que marca el plazo de la obra. Lo que se controla no es solo el
+ * retraso ya acumulado, sino si un trámite sin pedir todavía llega a tiempo
+ * dado su plazo de tramitación habitual.
+ */
+
+export const permitKindEnum = pgEnum('permit_kind', [
+  'licencia_obra',
+  'licencia_cala',
+  'ocupacion_via_publica',
+  'acometida_agua_provisional',
+  'acometida_agua',
+  'acometida_electrica_provisional',
+  'acometida_electrica',
+  'potencia_definitiva',
+  'tasas_avales',
+  'licencia_primera_ocupacion',
+  'otro',
+]);
+
+export const permits = pgTable('permits', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id),
+  kind: permitKindEnum('kind').notNull(),
+  /** Organismo o compañía con quien se tramita. */
+  counterparty: text('counterparty'),
+  /** Número de expediente. */
+  reference: text('reference'),
+  requestedAt: date('requested_at'),
+  /** Fecha que comprometió el organismo. */
+  committedAt: date('committed_at'),
+  grantedAt: date('granted_at'),
+  /** Fecha en la que hace falta resuelto; si falta, se usa el fin de obra. */
+  neededBy: date('needed_by'),
+  /** Tasas y avales: se presupuestan, no son un extra imprevisto. */
+  cost: numeric('cost', { precision: 14, scale: 2 }),
+  notApplicable: boolean('not_applicable').notNull().default(false),
+  notes: text('notes'),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 /* ─────────── Modificados, contradictorios y presupuesto ───────────
  * Solo se consideran consolidadas —e incorporadas al presupuesto de venta
  * actualizado— las modificaciones con aprobación expresa de la Dirección
@@ -875,6 +927,8 @@ export type InvoiceLine = typeof invoiceLines.$inferSelect;
 export type NewInvoiceLine = typeof invoiceLines.$inferInsert;
 export type Certification = typeof certifications.$inferSelect;
 export type NewCertification = typeof certifications.$inferInsert;
+export type Permit = typeof permits.$inferSelect;
+export type NewPermit = typeof permits.$inferInsert;
 export type Variation = typeof variations.$inferSelect;
 export type NewVariation = typeof variations.$inferInsert;
 export type ProjectMonthlyPlan = typeof projectMonthlyPlan.$inferSelect;

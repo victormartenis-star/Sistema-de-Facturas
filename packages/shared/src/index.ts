@@ -12,4 +12,5 @@ export * from './delivery-notes';
 export * from './purchase-orders';
 export * from './forecast';
 export * from './variations';
+export * from './permits';
 export * from './treasury';
