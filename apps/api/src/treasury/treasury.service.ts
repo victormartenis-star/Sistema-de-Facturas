@@ -12,39 +12,15 @@ import {
   MilestoneDirection,
   MilestoneDto,
   MilestoneStatus,
+  addDays,
+  addMonths,
+  round2,
+  startOfMonth,
+  startOfWeek,
+  todayIso,
 } from '@erp/shared';
 import { ComplianceService } from '../compliance/compliance.service';
 import { DbService } from '../db/db.service';
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function addDays(iso: string, days: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-/** Lunes de la semana de la fecha dada. */
-function startOfWeek(iso: string): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  const dow = (d.getUTCDay() + 6) % 7; // 0 = lunes
-  d.setUTCDate(d.getUTCDate() - dow);
-  return d.toISOString().slice(0, 10);
-}
-
-function startOfMonth(iso: string): string {
-  return `${iso.slice(0, 7)}-01`;
-}
-
-function addMonths(iso: string, months: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCMonth(d.getUTCMonth() + months);
-  return d.toISOString().slice(0, 10);
-}
 
 const MONTHS_ES = [
   'enero',
@@ -95,7 +71,8 @@ export class TreasuryService {
     if (options.status) {
       filters.push(eq(paymentMilestones.status, options.status));
     }
-    if (options.from) filters.push(gte(paymentMilestones.dueDate, options.from));
+    if (options.from)
+      filters.push(gte(paymentMilestones.dueDate, options.from));
     if (options.to) filters.push(lte(paymentMilestones.dueDate, options.to));
 
     const rows = await this.dbs.db
@@ -211,11 +188,7 @@ export class TreasuryService {
 
     // Construye todos los periodos del horizonte, aunque estén vacíos
     const totals = new Map<string, { cobros: number; pagos: number }>();
-    for (
-      let cursor = keyOf(start);
-      cursor <= end;
-      cursor = step(cursor)
-    ) {
+    for (let cursor = keyOf(start); cursor <= end; cursor = step(cursor)) {
       totals.set(cursor, { cobros: 0, pagos: 0 });
     }
     for (const item of items) {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { daysBetween } from './calculo';
 
 /**
  * Homologación de subcontratas y cumplimiento de PRL.
@@ -59,16 +60,14 @@ export const COMPLIANCE_DOC_STATUSES = [
 
 export type ComplianceDocStatus = (typeof COMPLIANCE_DOC_STATUSES)[number];
 
-export const COMPLIANCE_DOC_STATUS_LABELS: Record<
-  ComplianceDocStatus,
-  string
-> = {
-  vigente: 'Vigente',
-  proximo_vencimiento: 'Vence pronto',
-  vencido: 'Vencido',
-  no_aportado: 'No aportado',
-  rechazado: 'Rechazado',
-};
+export const COMPLIANCE_DOC_STATUS_LABELS: Record<ComplianceDocStatus, string> =
+  {
+    vigente: 'Vigente',
+    proximo_vencimiento: 'Vence pronto',
+    vencido: 'Vencido',
+    no_aportado: 'No aportado',
+    rechazado: 'Rechazado',
+  };
 
 /** Estado global de un contacto de cara a poder operar con él. */
 export const COMPLIANCE_STATUSES = [
@@ -90,6 +89,26 @@ export const COMPLIANCE_STATUS_LABELS: Record<ComplianceStatus, string> = {
   bloqueado_manual: 'Bloqueado manualmente',
   exento: 'Operando con exención',
 };
+
+/**
+ * Estado de un documento de homologación en una fecha dada.
+ *
+ * La fecha de referencia se pasa como parámetro en lugar de leer el reloj:
+ * así el estado es reproducible y comprobable, y no cambia según el momento
+ * en que se ejecute el cálculo.
+ */
+export function complianceDocStatus(
+  doc: { rejected: boolean; expiresAt: string | null },
+  today: string,
+): ComplianceDocStatus {
+  if (doc.rejected) return 'rechazado';
+  // Sin fecha de caducidad el documento se considera permanente
+  if (!doc.expiresAt) return 'vigente';
+  const days = daysBetween(today, doc.expiresAt);
+  if (days < 0) return 'vencido';
+  if (days <= COMPLIANCE_WARNING_DAYS) return 'proximo_vencimiento';
+  return 'vigente';
+}
 
 const isoDate = z
   .string()

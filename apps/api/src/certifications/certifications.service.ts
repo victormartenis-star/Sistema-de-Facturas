@@ -11,11 +11,11 @@ import {
   CertificationInvoiceInput,
   certificationCreateSchema,
   certificationInvoiceSchema,
+  computeCertification,
+  round2,
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
 import { InvoicesService } from '../invoices/invoices.service';
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
 
 function toDto(row: Certification): CertificationDto {
   const cumulative = Number(row.cumulativeAmount);
@@ -95,11 +95,14 @@ export class CertificationsService {
       );
     }
 
-    const contract = Number(project.contractAmount);
-    const cumulativeAmount = round2((contract * data.cumulativePct) / 100);
-    const periodAmount = round2(cumulativeAmount - prevCumulative);
     const retentionPct = data.retentionPct ?? Number(project.retentionPct);
-    const retentionAmount = round2((periodAmount * retentionPct) / 100);
+    const { cumulativeAmount, periodAmount, retentionAmount } =
+      computeCertification(
+        Number(project.contractAmount),
+        data.cumulativePct,
+        prevCumulative,
+        retentionPct,
+      );
 
     const [row] = await this.dbs.db
       .insert(certifications)
