@@ -20,6 +20,7 @@ import {
   userCreateSchema,
   userUpdateSchema,
 } from '@erp/shared';
+import { AuditService } from '../audit/audit.service';
 import { DbService } from '../db/db.service';
 import type { AuthUser } from './auth.decorators';
 import { hashPassword, verifyPassword } from './password';
@@ -35,9 +36,10 @@ export class AuthService {
   constructor(
     private readonly dbs: DbService,
     private readonly tokens: TokenService,
+    private readonly audit: AuditService,
   ) {}
 
-  async login(input: LoginInput): Promise<SessionDto> {
+  async login(input: LoginInput, ip?: string): Promise<SessionDto> {
     const email = String(input.email).trim().toLowerCase();
     const [user] = await this.dbs.db
       .select()
@@ -52,6 +54,21 @@ export class AuthService {
         ? await verifyPassword(input.password, user.passwordHash)
         : await verifyPassword(input.password, await this.dummyHash());
     if (!user || !user.isActive || !ok) {
+      // Los intentos fallidos también se registran: varios seguidos contra la
+      // misma cuenta son la señal que se busca al revisar el log.
+      await this.audit.record({
+        companyId: user?.companyId ?? null,
+        userId: user?.id ?? null,
+        userEmail: email,
+        userName: user?.fullName ?? null,
+        userRole: user?.role ?? null,
+        action: 'POST /auth/login',
+        entity: 'auth',
+        entityId: null,
+        payload: { resultado: 'denegado' },
+        statusCode: 401,
+        ip: ip ?? null,
+      });
       throw new UnauthorizedException('Email o contraseña incorrectos');
     }
 
@@ -61,6 +78,19 @@ export class AuthService {
       .where(eq(users.id, user.id));
 
     this.logger.log(`Sesión iniciada por ${user.email} (${user.role})`);
+    await this.audit.record({
+      companyId: user.companyId,
+      userId: user.id,
+      userEmail: user.email,
+      userName: user.fullName,
+      userRole: user.role,
+      action: 'POST /auth/login',
+      entity: 'auth',
+      entityId: null,
+      payload: { resultado: 'concedido' },
+      statusCode: 200,
+      ip: ip ?? null,
+    });
     return {
       token: this.tokens.sign({
         sub: user.id,

@@ -7,7 +7,11 @@ import {
   Post,
 } from '@nestjs/common';
 import { ChecklistMarkInput, checklistMarkSchema } from '@erp/shared';
-import { RequireCapability } from '../auth/auth.decorators';
+import {
+  CurrentUser,
+  RequireCapability,
+  type AuthUser,
+} from '../auth/auth.decorators';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { ChecklistService } from './checklist.service';
 
@@ -24,9 +28,13 @@ export class ChecklistController {
   @RequireCapability('obras.gestionar')
   @Post(':projectId')
   mark(
+    @CurrentUser() user: AuthUser,
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Body(new ZodValidationPipe(checklistMarkSchema)) body: ChecklistMarkInput,
   ) {
-    return this.service.mark(projectId, body);
+    return this.service.mark(projectId, {
+      ...body,
+      markedBy: body.markedBy ?? user.fullName,
+    });
   }
 }

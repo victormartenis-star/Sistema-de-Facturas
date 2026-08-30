@@ -1,5 +1,7 @@
 import { DOCUMENT_MAX_SIZE_MB } from '@erp/shared';
 import type {
+  AuditEntryDto,
+  AuditQuery,
   Capability,
   CashflowGrouping,
   CashflowReportDto,
@@ -118,6 +120,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
+
+export const auditApi = {
+  list: (query: AuditQuery) => {
+    const params = new URLSearchParams();
+    if (query.entity) params.set('entity', query.entity);
+    if (query.entityId) params.set('entityId', query.entityId);
+    if (query.userId) params.set('userId', query.userId);
+    if (query.from) params.set('from', query.from);
+    if (query.to) params.set('to', query.to);
+    if (query.limit) params.set('limit', String(query.limit));
+    const qs = params.toString();
+    return request<AuditEntryDto[]>(`/audit${qs ? `?${qs}` : ''}`);
+  },
+};
 
 export const authApi = {
   login: (input: LoginInput) =>

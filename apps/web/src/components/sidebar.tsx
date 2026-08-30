@@ -96,6 +96,12 @@ const GESTION: NavItem[] = [
     needs: 'homologacion.gestionar',
   },
   {
+    href: '/auditoria',
+    label: 'Auditoría',
+    icon: IconLock,
+    needs: 'auditoria.ver',
+  },
+  {
     href: '/usuarios',
     label: 'Usuarios',
     icon: IconUsers,

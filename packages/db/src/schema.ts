@@ -89,6 +89,41 @@ export const users = pgTable(
   ],
 );
 
+/**
+ * Registro de auditoría: quién hizo qué y cuándo.
+ *
+ * Dos decisiones que lo hacen útil:
+ *
+ * - **Los datos del autor se copian, no se referencian.** Si mañana se borra
+ *   o se renombra al usuario, el registro tiene que seguir diciendo quién era
+ *   y con qué puesto actuaba. Un log que cambia cuando cambian los maestros
+ *   no sirve como prueba de nada.
+ * - **Es de solo inserción.** No hay ningún camino en el código que actualice
+ *   o borre una fila, y la migración añade además un disparador que lo impide
+ *   en la propia base de datos.
+ */
+export const auditLog = pgTable('audit_log', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id').references(() => companies.id),
+  /** Referencia informativa; los datos del autor van copiados abajo. */
+  userId: uuid('user_id'),
+  userEmail: text('user_email'),
+  userName: text('user_name'),
+  userRole: text('user_role'),
+  /** Verbo y ruta: `POST /variations/:id/aprobar`. */
+  action: text('action').notNull(),
+  /** Módulo afectado: `variations`, `purchase-orders`… */
+  entity: text('entity').notNull(),
+  entityId: text('entity_id'),
+  /** Cuerpo de la petición, con los campos sensibles ya ocultos. */
+  payload: jsonb('payload'),
+  statusCode: integer('status_code').notNull(),
+  ip: text('ip'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export const projects = pgTable(
   'projects',
   {
@@ -941,6 +976,8 @@ export const extractions = pgTable('extractions', {
     .defaultNow(),
 });
 
+export type AuditEntry = typeof auditLog.$inferSelect;
+export type NewAuditEntry = typeof auditLog.$inferInsert;
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Company = typeof companies.$inferSelect;

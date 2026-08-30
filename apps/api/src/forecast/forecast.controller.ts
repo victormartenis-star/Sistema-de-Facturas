@@ -13,7 +13,11 @@ import {
   costForecastSchema,
   monthlyPlanSaveSchema,
 } from '@erp/shared';
-import { RequireCapability } from '../auth/auth.decorators';
+import {
+  CurrentUser,
+  RequireCapability,
+  type AuthUser,
+} from '../auth/auth.decorators';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { ForecastService } from './forecast.service';
 
@@ -52,9 +56,13 @@ export class ForecastController {
   @RequireCapability('prevision.declarar')
   @Post(':projectId/previsiones')
   saveForecast(
+    @CurrentUser() user: AuthUser,
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Body(new ZodValidationPipe(costForecastSchema)) body: CostForecastInput,
   ) {
-    return this.service.saveForecast(projectId, body);
+    return this.service.saveForecast(projectId, {
+      ...body,
+      reportedBy: body.reportedBy ?? user.fullName,
+    });
   }
 }

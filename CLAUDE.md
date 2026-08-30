@@ -16,6 +16,8 @@
 - Roles = puestos del organigrama del manual de procesos, no una escala genérica.
 - Ocultar algo en la interfaz no es una medida de seguridad: si un dato no debe verse, la API no debe devolverlo.
 - `JWT_SECRET` es obligatoria en producción (mínimo 32 caracteres).
+- Toda escritura queda auditada por el interceptor global: no hay que llamar a nada. Si un campo nuevo lleva un secreto, añádelo a `CAMPOS_OCULTOS` en `apps/api/src/audit/audit.service.ts`.
+- `audit_log` es de solo inserción y la base de datos lo impone con un disparador. No escribas código que lo actualice o lo borre.
 
 ## Calidad
 - La aritmética del dinero vive en `packages/shared/src/calculo.ts`: funciones **puras**, sin base de datos y sin leer el reloj (la fecha entra como parámetro). Toda regla nueva de cálculo se añade ahí y se prueba ahí.

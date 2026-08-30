@@ -55,6 +55,8 @@ export const USER_ROLE_DESCRIPTIONS: Record<UserRole, string> = {
  */
 export const CAPABILITIES = [
   'usuarios.gestionar',
+  /** Consultar el registro de auditoría. */
+  'auditoria.ver',
   /** Ver márgenes, coste probable y desviaciones. */
   'economico.ver',
   /** Ver todas las obras de la empresa, no solo las asignadas. */

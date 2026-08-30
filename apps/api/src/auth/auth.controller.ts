@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Req,
 } from '@nestjs/common';
 import {
   LoginInput,
@@ -16,6 +17,7 @@ import {
   userCreateSchema,
   userUpdateSchema,
 } from '@erp/shared';
+import type { Request } from 'express';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { AuthService } from './auth.service';
 import {
@@ -32,8 +34,11 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(200)
-  login(@Body(new ZodValidationPipe(loginSchema)) body: LoginInput) {
-    return this.service.login(body);
+  login(
+    @Body(new ZodValidationPipe(loginSchema)) body: LoginInput,
+    @Req() request: Request,
+  ) {
+    return this.service.login(body, request.ip);
   }
 
   /** Quién soy y qué puedo hacer; lo usa la interfaz al recargar. */

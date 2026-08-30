@@ -18,7 +18,11 @@ import {
   purchaseOrderCreateSchema,
   purchaseOrderUpdateSchema,
 } from '@erp/shared';
-import { RequireCapability } from '../auth/auth.decorators';
+import {
+  CurrentUser,
+  RequireCapability,
+  type AuthUser,
+} from '../auth/auth.decorators';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { PurchaseOrdersService } from './purchase-orders.service';
 
@@ -65,10 +69,16 @@ export class PurchaseOrdersController {
   @RequireCapability('pedidos.emitir')
   @Post()
   create(
+    @CurrentUser() user: AuthUser,
     @Body(new ZodValidationPipe(purchaseOrderCreateSchema))
     body: PurchaseOrderCreateInput,
   ) {
-    return this.service.create(body);
+    // Si no se indica solicitante, queda quien emite el pedido: mejor un
+    // nombre real que un campo vacío que nadie rellena.
+    return this.service.create({
+      ...body,
+      requestedBy: body.requestedBy ?? user.fullName,
+    });
   }
 
   @RequireCapability('pedidos.emitir')
