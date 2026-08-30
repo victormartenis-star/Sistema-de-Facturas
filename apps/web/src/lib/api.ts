@@ -15,11 +15,16 @@ import type {
   ContactCreateInput,
   ContactDto,
   ContactUpdateInput,
+  CostForecastDto,
+  CostForecastInput,
   DeliveryNoteCreateInput,
   DeliveryNoteDto,
   DeliveryNoteStatus,
   DeliveryNoteUpdateInput,
   DeviationReportDto,
+  MonthlyPlanRowDto,
+  MonthlyPlanSaveInput,
+  ProjectEconomicsDto,
   DocumentDto,
   DocumentUpdateInput,
   ExtractionValidateInput,
@@ -222,6 +227,25 @@ export const certificationsApi = {
     }),
   remove: (id: string) =>
     request<void>(`/certifications/${id}`, { method: 'DELETE' }),
+};
+
+export const forecastApi = {
+  economics: (projectId: string) =>
+    request<ProjectEconomicsDto>(`/forecast/${projectId}/economia`),
+  getPlan: (projectId: string) =>
+    request<MonthlyPlanRowDto[]>(`/forecast/${projectId}/plan`),
+  savePlan: (projectId: string, input: MonthlyPlanSaveInput) =>
+    request<MonthlyPlanRowDto[]>(`/forecast/${projectId}/plan`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  listForecasts: (projectId: string) =>
+    request<CostForecastDto[]>(`/forecast/${projectId}/previsiones`),
+  saveForecast: (projectId: string, input: CostForecastInput) =>
+    request<CostForecastDto>(`/forecast/${projectId}/previsiones`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
 };
 
 export const purchaseOrdersApi = {

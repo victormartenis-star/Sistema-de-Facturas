@@ -6,6 +6,7 @@ import { ContactsModule } from './contacts/contacts.module';
 import { DbModule } from './db/db.module';
 import { DeliveryNotesModule } from './delivery-notes/delivery-notes.module';
 import { DocumentsModule } from './documents/documents.module';
+import { ForecastModule } from './forecast/forecast.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { OcrModule } from './ocr/ocr.module';
 import { PhasesModule } from './phases/phases.module';
@@ -26,6 +27,7 @@ import { TreasuryModule } from './treasury/treasury.module';
     PurchaseOrdersModule,
     DeliveryNotesModule,
     TreasuryModule,
+    ForecastModule,
     OcrModule,
     ComplianceModule,
   ],

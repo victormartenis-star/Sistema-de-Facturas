@@ -6,6 +6,7 @@ import type { ComponentType } from 'react';
 import {
   IconBuilding,
   IconChart,
+  IconTrendingUp,
   IconDashboard,
   IconFileText,
   IconClipboard,
@@ -38,6 +39,7 @@ const GESTION: NavItem[] = [
   { href: '/facturas', label: 'Facturas', icon: IconReceipt },
   { href: '/albaranes', label: 'Albaranes', icon: IconInbox },
   { href: '/tesoreria', label: 'Tesorería', icon: IconWallet },
+  { href: '/economia', label: 'Economía de obra', icon: IconTrendingUp },
   { href: '/cumplimiento', label: 'Homologación', icon: IconLock },
 ];
 

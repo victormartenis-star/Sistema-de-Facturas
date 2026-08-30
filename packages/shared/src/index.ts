@@ -9,4 +9,5 @@ export * from './invoices';
 export * from './certifications';
 export * from './delivery-notes';
 export * from './purchase-orders';
+export * from './forecast';
 export * from './treasury';

@@ -50,6 +50,13 @@
       "when": 1788087463090,
       "tag": "0006_mute_mojo",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788088245814,
+      "tag": "0007_eager_maelstrom",
+      "breakpoints": true
     }
   ]
 }

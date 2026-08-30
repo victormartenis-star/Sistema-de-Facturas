@@ -57,7 +57,15 @@ export const projects = pgTable(
     status: projectStatusEnum('status').notNull().default('en_curso'),
     startDate: date('start_date'),
     expectedEnd: date('expected_end'),
+    /** Presupuesto de venta: lo que se factura al cliente. */
     contractAmount: numeric('contract_amount', { precision: 14, scale: 2 }),
+    /**
+     * Coste objetivo: la meta interna de coste, distinta del precio ofertado
+     * y con la contingencia de los riesgos detectados dentro. Confundirlo con
+     * el presupuesto de venta es lo que hace que una obra parezca ir bien
+     * hasta el mes en que deja de ir bien.
+     */
+    targetCost: numeric('target_cost', { precision: 14, scale: 2 }),
     retentionPct: numeric('retention_pct', { precision: 5, scale: 2 })
       .notNull()
       .default('5.00'),
@@ -597,6 +605,96 @@ export const complianceWaivers = pgTable('compliance_waivers', {
     .defaultNow(),
 });
 
+/* ──────────── Planificación económica y coste probable ────────────
+ * Lo que se revisa en la reunión mensual: tres curvas sobre el mismo eje de
+ * meses —venta, coste objetivo y coste real—. En cuanto la curva de coste
+ * real se separa de la de objetivo hay desviación, y el mes en que se
+ * separan dice dónde buscar la causa.
+ */
+
+/**
+ * Periodificación: reparto por meses de la producción y el coste previstos
+ * hasta fin de obra. Sin este reparto no existe el corte mensual y "vamos
+ * bien" es una opinión en lugar de una cifra.
+ */
+export const projectMonthlyPlan = pgTable(
+  'project_monthly_plan',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    /** Siempre el día 1 del mes al que corresponde. */
+    month: date('month').notNull(),
+    plannedProduction: numeric('planned_production', {
+      precision: 14,
+      scale: 2,
+    })
+      .notNull()
+      .default('0'),
+    plannedCost: numeric('planned_cost', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('project_monthly_plan_unique')
+      .on(t.projectId, t.month)
+      .where(sql`deleted_at IS NULL`),
+  ],
+);
+
+/**
+ * Estimación mensual del coste que todavía queda por contratar y ejecutar.
+ *
+ * Es el único sumando del coste probable que no se puede deducir de ningún
+ * documento: lo pone el jefe de obra. Se guarda el histórico a propósito, no
+ * solo el último valor, porque comparar lo que se estimó cada mes con lo que
+ * acabó costando es la única forma de detectar la previsión complaciente.
+ */
+export const costForecasts = pgTable(
+  'cost_forecasts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    /** Mes al que se refiere la previsión (día 1). */
+    asOfMonth: date('as_of_month').notNull(),
+    pendingToContract: numeric('pending_to_contract', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    notes: text('notes'),
+    /** Quién la firma. Texto hasta que existan usuarios. */
+    reportedBy: text('reported_by'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('cost_forecasts_unique')
+      .on(t.projectId, t.asOfMonth)
+      .where(sql`deleted_at IS NULL`),
+  ],
+);
+
 /**
  * Resultado bruto del pipeline OCR/IA (02-base-de-datos.md §2.4).
  * Versionable: cada pasada del modelo deja una fila, la más reciente es la
@@ -634,6 +732,10 @@ export type InvoiceLine = typeof invoiceLines.$inferSelect;
 export type NewInvoiceLine = typeof invoiceLines.$inferInsert;
 export type Certification = typeof certifications.$inferSelect;
 export type NewCertification = typeof certifications.$inferInsert;
+export type ProjectMonthlyPlan = typeof projectMonthlyPlan.$inferSelect;
+export type NewProjectMonthlyPlan = typeof projectMonthlyPlan.$inferInsert;
+export type CostForecast = typeof costForecasts.$inferSelect;
+export type NewCostForecast = typeof costForecasts.$inferInsert;
 export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
 export type NewPurchaseOrder = typeof purchaseOrders.$inferInsert;
 export type DeliveryNote = typeof deliveryNotes.$inferSelect;

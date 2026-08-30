@@ -24,6 +24,7 @@ function toDto(row: Project): ProjectDto {
     expectedEnd: row.expectedEnd,
     contractAmount:
       row.contractAmount === null ? null : Number(row.contractAmount),
+    targetCost: row.targetCost === null ? null : Number(row.targetCost),
     retentionPct: Number(row.retentionPct),
     notes: row.notes,
     createdAt: row.createdAt.toISOString(),
@@ -79,6 +80,7 @@ export class ProjectsService {
           startDate: data.startDate ?? null,
           expectedEnd: data.expectedEnd ?? null,
           contractAmount: data.contractAmount?.toFixed(2) ?? null,
+          targetCost: data.targetCost?.toFixed(2) ?? null,
           retentionPct: data.retentionPct.toFixed(2),
           notes: data.notes ?? null,
         })
@@ -106,6 +108,9 @@ export class ProjectsService {
           }),
           ...(input.contractAmount !== undefined && {
             contractAmount: input.contractAmount?.toFixed(2) ?? null,
+          }),
+          ...(input.targetCost !== undefined && {
+            targetCost: input.targetCost?.toFixed(2) ?? null,
           }),
           ...(input.retentionPct !== undefined && {
             retentionPct: input.retentionPct.toFixed(2),
