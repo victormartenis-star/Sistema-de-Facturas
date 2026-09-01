@@ -15,11 +15,9 @@ import {
 import {
   BLOCKING_COMPLIANCE_DOC_TYPES,
   COMPLIANCE_DOC_TYPE_LABELS,
-  COMPLIANCE_WARNING_DAYS,
   ComplianceBlockInput,
   ComplianceDocCreateInput,
   ComplianceDocDto,
-  ComplianceDocStatus,
   ComplianceDocType,
   ComplianceDocUpdateInput,
   ComplianceStatus,
@@ -28,35 +26,17 @@ import {
   ComplianceWaiverInput,
   complianceBlockSchema,
   complianceDocCreateSchema,
+  complianceDocStatus,
   complianceDocUpdateSchema,
   complianceWaiverSchema,
+  daysBetween,
+  todayIso,
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
 
 /** Días naturales entre hoy y una fecha ISO (negativo si ya pasó). */
 function daysUntil(iso: string): number {
-  const target = Date.UTC(
-    Number(iso.slice(0, 4)),
-    Number(iso.slice(5, 7)) - 1,
-    Number(iso.slice(8, 10)),
-  );
-  const now = new Date();
-  const today = Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate(),
-  );
-  return Math.round((target - today) / 86_400_000);
-}
-
-function docStatus(doc: ContactComplianceDoc): ComplianceDocStatus {
-  if (doc.rejected) return 'rechazado';
-  // Sin fecha de caducidad el documento se considera permanente
-  if (!doc.expiresAt) return 'vigente';
-  const days = daysUntil(doc.expiresAt);
-  if (days < 0) return 'vencido';
-  if (days <= COMPLIANCE_WARNING_DAYS) return 'proximo_vencimiento';
-  return 'vigente';
+  return daysBetween(todayIso(), iso);
 }
 
 function toDocDto(doc: ContactComplianceDoc): ComplianceDocDto {
@@ -67,7 +47,7 @@ function toDocDto(doc: ContactComplianceDoc): ComplianceDocDto {
     documentId: doc.documentId,
     issuedAt: doc.issuedAt,
     expiresAt: doc.expiresAt,
-    status: docStatus(doc),
+    status: complianceDocStatus(doc, todayIso()),
     daysToExpiry: doc.expiresAt ? daysUntil(doc.expiresAt) : null,
     blocking: BLOCKING_COMPLIANCE_DOC_TYPES.includes(
       doc.docType as ComplianceDocType,

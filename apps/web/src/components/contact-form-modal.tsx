@@ -188,7 +188,9 @@ export function ContactFormModal({
                 value={form.taxId}
                 onChange={(e) => set('taxId')(e.target.value)}
               />
-              {errorFor('taxId') && <p className={errCls}>{errorFor('taxId')}</p>}
+              {errorFor('taxId') && (
+                <p className={errCls}>{errorFor('taxId')}</p>
+              )}
             </div>
           </div>
 
@@ -204,7 +206,9 @@ export function ContactFormModal({
                 value={form.email}
                 onChange={(e) => set('email')(e.target.value)}
               />
-              {errorFor('email') && <p className={errCls}>{errorFor('email')}</p>}
+              {errorFor('email') && (
+                <p className={errCls}>{errorFor('email')}</p>
+              )}
             </div>
             <div>
               <label className={labelCls} htmlFor="phone">

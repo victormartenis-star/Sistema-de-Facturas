@@ -48,7 +48,11 @@ function PhaseModal({
   phase: PhaseDto | null;
   saving: boolean;
   error: Error | null;
-  onSave: (v: { code: string; name: string; budgetAmount: number | null }) => void;
+  onSave: (v: {
+    code: string;
+    name: string;
+    budgetAmount: number | null;
+  }) => void;
   onClose: () => void;
 }) {
   const [code, setCode] = useState('');
@@ -241,7 +245,8 @@ function NewCertModal({
           Ya certificado: {prevPct.toFixed(2)} % · {formatEur(prevCumulative)}.
           {preview !== null && (
             <span className="mt-0.5 block font-medium text-gray-800">
-              Importe de este periodo: {formatEur(Math.round(preview * 100) / 100)}
+              Importe de este periodo:{' '}
+              {formatEur(Math.round(preview * 100) / 100)}
             </span>
           )}
         </div>
@@ -478,7 +483,11 @@ export default function ObraDetallePage() {
   };
 
   const savePhase = useMutation({
-    mutationFn: (v: { code: string; name: string; budgetAmount: number | null }) =>
+    mutationFn: (v: {
+      code: string;
+      name: string;
+      budgetAmount: number | null;
+    }) =>
       editingPhase
         ? phasesApi.update(editingPhase.id, v)
         : phasesApi.create(id, v),
@@ -653,7 +662,11 @@ export default function ObraDetallePage() {
                       <td className="px-3 py-2.5">
                         <div className="h-2 overflow-hidden rounded-full bg-gray-100">
                           <div
-                            className={over ? 'h-full bg-red-500' : 'h-full bg-emerald-500'}
+                            className={
+                              over
+                                ? 'h-full bg-red-500'
+                                : 'h-full bg-emerald-500'
+                            }
                             style={{ width: `${Math.round(ratio * 100)}%` }}
                           />
                         </div>

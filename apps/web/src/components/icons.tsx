@@ -200,6 +200,15 @@ export const IconInbox = (p: IconProps) => (
   </Base>
 );
 
+export const IconClipboard = (p: IconProps) => (
+  <Base {...p}>
+    <rect width="8" height="4" x="8" y="2" rx="1" ry="1" />
+    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+    <path d="M9 12h6" />
+    <path d="M9 16h6" />
+  </Base>
+);
+
 export const IconLock = (p: IconProps) => (
   <Base {...p}>
     <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />

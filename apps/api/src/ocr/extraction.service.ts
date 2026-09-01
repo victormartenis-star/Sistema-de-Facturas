@@ -1,12 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { Injectable, Logger } from '@nestjs/common';
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
-import {
-  Document,
-  documents,
-  extractions,
-  projects,
-} from '@erp/db';
+import { Document, documents, extractions, projects } from '@erp/db';
 import {
   DOCUMENT_ACCEPTED_MIME_TYPES,
   ExtractionConfidence,
@@ -95,9 +90,7 @@ export class ExtractionService {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.error(
-        `Fallo al extraer "${document.fileName}": ${message}`,
-      );
+      this.logger.error(`Fallo al extraer "${document.fileName}": ${message}`);
       await this.setStatus(document.id, 'error');
       throw err;
     }
@@ -331,7 +324,8 @@ export function isValidSpanishTaxId(raw: string): boolean {
     for (let i = 0; i < digits.length; i++) {
       const digit = Number(digits[i]);
       // Posiciones impares (1-indexadas) se duplican y se suman sus cifras
-      sum += i % 2 === 0 ? ((digit * 2) % 10) + Math.floor((digit * 2) / 10) : digit;
+      sum +=
+        i % 2 === 0 ? ((digit * 2) % 10) + Math.floor((digit * 2) / 10) : digit;
     }
     const control = (10 - (sum % 10)) % 10;
     return cif[3] === String(control) || cif[3] === 'JABCDEFGHI'[control];

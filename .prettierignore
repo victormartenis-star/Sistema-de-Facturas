@@ -1,0 +1,10 @@
+dist
+.next
+node_modules
+package-lock.json
+packages/db/drizzle
+
+# La documentación de diseño es el contrato de alcance: se edita a mano y no
+# la repagina una herramienta (Prettier ensancha las tablas y llena el diff
+# de cambios que nadie ha decidido).
+*.md

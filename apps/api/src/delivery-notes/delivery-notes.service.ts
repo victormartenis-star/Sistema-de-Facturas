@@ -2,18 +2,28 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { and, desc, eq, ilike, isNull, or, SQL } from 'drizzle-orm';
-import { DeliveryNote, contacts, deliveryNotes, projects } from '@erp/db';
+import {
+  DeliveryNote,
+  contacts,
+  deliveryNotes,
+  projects,
+  purchaseOrders,
+} from '@erp/db';
 import {
   DeliveryNoteCreateInput,
   DeliveryNoteDto,
   DeliveryNoteStatus,
   DeliveryNoteUpdateInput,
+  PurchaseOrderStatus,
+  deliveryNoteBlockReason,
   deliveryNoteCreateSchema,
   deliveryNoteUpdateSchema,
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
+import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
 
 const UNIQUE_VIOLATION = '23505';
 
@@ -21,6 +31,8 @@ type Row = {
   note: DeliveryNote;
   contactName: string;
   projectCode: string | null;
+  orderNumber: string | null;
+  orderStatus: string | null;
 };
 
 function toDto(row: Row): DeliveryNoteDto {
@@ -32,6 +44,12 @@ function toDto(row: Row): DeliveryNoteDto {
     projectId: note.projectId,
     projectCode: row.projectCode,
     phaseId: note.phaseId,
+    orderId: note.orderId,
+    orderNumber: row.orderNumber,
+    blockReason: deliveryNoteBlockReason({
+      orderNumber: row.orderNumber,
+      orderStatus: row.orderStatus as PurchaseOrderStatus | null,
+    }),
     noteNumber: note.noteNumber,
     noteDate: note.noteDate,
     description: note.description,
@@ -46,7 +64,10 @@ function toDto(row: Row): DeliveryNoteDto {
 
 @Injectable()
 export class DeliveryNotesService {
-  constructor(private readonly dbs: DbService) {}
+  constructor(
+    private readonly dbs: DbService,
+    private readonly orders: PurchaseOrdersService,
+  ) {}
 
   /**
    * Listado con filtros. `availableForContact` devuelve solo los albaranes
@@ -88,10 +109,13 @@ export class DeliveryNotesService {
         note: deliveryNotes,
         contactName: contacts.legalName,
         projectCode: projects.code,
+        orderNumber: purchaseOrders.orderNumber,
+        orderStatus: purchaseOrders.status,
       })
       .from(deliveryNotes)
       .innerJoin(contacts, eq(deliveryNotes.contactId, contacts.id))
       .leftJoin(projects, eq(deliveryNotes.projectId, projects.id))
+      .leftJoin(purchaseOrders, eq(deliveryNotes.orderId, purchaseOrders.id))
       .where(and(...filters))
       .orderBy(desc(deliveryNotes.noteDate), desc(deliveryNotes.createdAt));
     return rows.map(toDto);
@@ -108,12 +132,14 @@ export class DeliveryNotesService {
           contactId: data.contactId,
           projectId: data.projectId ?? null,
           phaseId: data.phaseId ?? null,
+          orderId: data.orderId ?? null,
           noteNumber: data.noteNumber,
           noteDate: data.noteDate,
           description: data.description ?? null,
           amount: data.amount.toFixed(2),
         })
         .returning();
+      if (row.orderId) await this.orders.refreshStatus(row.orderId);
       return this.get(row.id);
     } catch (err) {
       this.rethrowDuplicateNumber(err, data.noteNumber);
@@ -126,9 +152,7 @@ export class DeliveryNotesService {
   ): Promise<DeliveryNoteDto> {
     const note = await this.find(id);
     if (note.status === 'facturado') {
-      throw new ConflictException(
-        'No se puede editar un albarán ya facturado',
-      );
+      throw new ConflictException('No se puede editar un albarán ya facturado');
     }
     const data = deliveryNoteUpdateSchema.parse(input);
     try {
@@ -140,6 +164,7 @@ export class DeliveryNotesService {
             projectId: data.projectId ?? null,
           }),
           ...(data.phaseId !== undefined && { phaseId: data.phaseId ?? null }),
+          ...(data.orderId !== undefined && { orderId: data.orderId ?? null }),
           ...(data.noteNumber !== undefined && {
             noteNumber: data.noteNumber,
           }),
@@ -159,12 +184,26 @@ export class DeliveryNotesService {
     return this.get(id);
   }
 
-  /** El jefe de obra da por bueno el albarán: pasa a "validado". */
+  /**
+   * El encargado da por bueno el albarán: pasa a "validado".
+   *
+   * Aquí se aplica la regla de oro del procedimiento de compras: sin número
+   * de pedido no hay albarán validado. Es el único punto en el que todavía se
+   * puede parar una compra no controlada —antes de que el material se dé por
+   * bueno—, y no cuando la factura ya está registrada.
+   */
   async validate(id: string): Promise<DeliveryNoteDto> {
     const note = await this.find(id);
     if (note.status !== 'pendiente') {
       throw new ConflictException('Solo se validan albaranes pendientes');
     }
+
+    const dto = await this.get(id);
+    if (dto.blockReason) {
+      // 422: la petición es correcta, la regla de negocio no se cumple.
+      throw new UnprocessableEntityException(dto.blockReason);
+    }
+
     await this.dbs.db
       .update(deliveryNotes)
       .set({
@@ -173,6 +212,7 @@ export class DeliveryNotesService {
         updatedAt: new Date(),
       })
       .where(eq(deliveryNotes.id, id));
+    if (note.orderId) await this.orders.refreshStatus(note.orderId);
     return this.get(id);
   }
 
@@ -195,10 +235,13 @@ export class DeliveryNotesService {
         note: deliveryNotes,
         contactName: contacts.legalName,
         projectCode: projects.code,
+        orderNumber: purchaseOrders.orderNumber,
+        orderStatus: purchaseOrders.status,
       })
       .from(deliveryNotes)
       .innerJoin(contacts, eq(deliveryNotes.contactId, contacts.id))
       .leftJoin(projects, eq(deliveryNotes.projectId, projects.id))
+      .leftJoin(purchaseOrders, eq(deliveryNotes.orderId, purchaseOrders.id))
       .where(and(eq(deliveryNotes.id, id), isNull(deliveryNotes.deletedAt)))
       .limit(1);
     if (!row) {

@@ -13,12 +13,11 @@ export const DELIVERY_NOTE_STATUSES = [
 ] as const;
 export type DeliveryNoteStatus = (typeof DELIVERY_NOTE_STATUSES)[number];
 
-export const DELIVERY_NOTE_STATUS_LABELS: Record<DeliveryNoteStatus, string> =
-  {
-    pendiente: 'Pendiente',
-    validado: 'Validado',
-    facturado: 'Facturado',
-  };
+export const DELIVERY_NOTE_STATUS_LABELS: Record<DeliveryNoteStatus, string> = {
+  pendiente: 'Pendiente',
+  validado: 'Validado',
+  facturado: 'Facturado',
+};
 
 const isoDate = z
   .string()
@@ -28,6 +27,12 @@ export const deliveryNoteCreateSchema = z.object({
   contactId: z.string().uuid('Proveedor no válido'),
   projectId: z.string().uuid('Obra no válida').nullish(),
   phaseId: z.string().uuid('Partida no válida').nullish(),
+  /**
+   * Pedido al que responde el albarán. Opcional al darlo de alta —el albarán
+   * puede llegar sin número de pedido, que es precisamente la incidencia—,
+   * pero obligatorio para validarlo.
+   */
+  orderId: z.string().uuid('Pedido no válido').nullish(),
   noteNumber: z
     .string()
     .trim()
@@ -53,6 +58,10 @@ export interface DeliveryNoteDto {
   projectId: string | null;
   projectCode: string | null;
   phaseId: string | null;
+  orderId: string | null;
+  orderNumber: string | null;
+  /** Motivo por el que no se puede validar todavía; null si se puede. */
+  blockReason: string | null;
   noteNumber: string;
   noteDate: string;
   description: string | null;

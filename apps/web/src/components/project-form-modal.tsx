@@ -268,7 +268,11 @@ export function ProjectFormModal({
               disabled={saving}
               className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
             >
-              {saving ? 'Guardando…' : project ? 'Guardar cambios' : 'Crear obra'}
+              {saving
+                ? 'Guardando…'
+                : project
+                  ? 'Guardar cambios'
+                  : 'Crear obra'}
             </button>
           </div>
         </form>

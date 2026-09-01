@@ -29,10 +29,7 @@ import {
   documentUploadMetaSchema,
 } from '@erp/shared';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
-import {
-  DocumentsService,
-  UploadedDocumentFile,
-} from './documents.service';
+import { DocumentsService, UploadedDocumentFile } from './documents.service';
 
 /** Codifica el nombre de archivo para Content-Disposition (RFC 5987). */
 function rfc5987(value: string): string {

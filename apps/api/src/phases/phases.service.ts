@@ -18,6 +18,7 @@ import {
   PhaseDto,
   PhaseUpdateInput,
   phaseCreateSchema,
+  round2,
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
 
@@ -33,7 +34,6 @@ function toDto(row: ProjectPhase): PhaseDto {
   };
 }
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
 const UNIQUE_VIOLATION = '23505';
 
 @Injectable()
@@ -173,9 +173,7 @@ export class PhasesService {
     return {
       projectId,
       contractAmount:
-        project.contractAmount === null
-          ? null
-          : Number(project.contractAmount),
+        project.contractAmount === null ? null : Number(project.contractAmount),
       budgetTotal,
       actualTotal,
       deviation: round2(actualTotal - budgetTotal),

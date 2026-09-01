@@ -279,21 +279,32 @@ export default function ValidacionPage() {
           onChange={(e) => setStatus(e.target.value)}
         >
           <option value="">Pendientes de validar</option>
-          {(['extraido', 'procesando', 'error', 'validado', 'rechazado'] as DocStatus[]).map(
-            (s) => (
-              <option key={s} value={s}>
-                {DOC_STATUS_LABELS[s]}
-              </option>
-            ),
-          )}
+          {(
+            [
+              'extraido',
+              'procesando',
+              'error',
+              'validado',
+              'rechazado',
+            ] as DocStatus[]
+          ).map((s) => (
+            <option key={s} value={s}>
+              {DOC_STATUS_LABELS[s]}
+            </option>
+          ))}
         </select>
       </PageHeader>
 
       {pipelineOff && (
         <div className="mb-6 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
-          <IconAlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" />
+          <IconAlertTriangle
+            size={16}
+            className="mt-0.5 shrink-0 text-amber-600"
+          />
           <div className="text-amber-800">
-            <p className="font-medium">El pipeline de lectura está desactivado</p>
+            <p className="font-medium">
+              El pipeline de lectura está desactivado
+            </p>
             <p className="mt-0.5">
               Falta <code className="font-mono text-xs">ANTHROPIC_API_KEY</code>{' '}
               en el archivo <code className="font-mono text-xs">.env</code>. Los
@@ -401,9 +412,7 @@ export default function ValidacionPage() {
                   Abrir original
                 </a>
                 <button
-                  onClick={() =>
-                    reprocessMutation.mutate(selected.documentId)
-                  }
+                  onClick={() => reprocessMutation.mutate(selected.documentId)}
                   disabled={reprocessMutation.isPending || pipelineOff}
                   className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-amber-600 transition hover:bg-amber-50 disabled:opacity-40"
                 >
@@ -425,8 +434,8 @@ export default function ValidacionPage() {
 
               {!selected.extraction && selected.status !== 'procesando' && (
                 <p className="mb-4 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-600">
-                  Este documento todavía no tiene ninguna lectura. Pulsa
-                  «Releer con IA» para procesarlo.
+                  Este documento todavía no tiene ninguna lectura. Pulsa «Releer
+                  con IA» para procesarlo.
                 </p>
               )}
 
@@ -462,7 +471,8 @@ export default function ValidacionPage() {
                         className="h-96 w-full"
                       />
                     ) : (
-                      // eslint-disable-next-line @next/next/no-img-element
+                      // Imagen del documento subido: no pasa por next/image
+                      // porque la sirve la API con su propia autorización.
                       <img
                         src={documentFileUrl(selected.documentId)}
                         alt={selected.fileName}
@@ -532,9 +542,7 @@ export default function ValidacionPage() {
                       label="Nº factura"
                       value={form.invoiceNumber}
                       confidence={confidence.invoiceNumber}
-                      onChange={(v) =>
-                        setForm({ ...form, invoiceNumber: v })
-                      }
+                      onChange={(v) => setForm({ ...form, invoiceNumber: v })}
                     />
                     <EditableField
                       label="Fecha de emisión"

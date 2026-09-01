@@ -12,12 +12,7 @@ import { ApiError, categoriesApi, contactsApi } from '@/lib/api';
 import { useDebouncedValue } from '@/lib/hooks';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { useToast } from '@/components/toast';
-import {
-  IconPencil,
-  IconPlus,
-  IconTrash,
-  IconUsers,
-} from '@/components/icons';
+import { IconPencil, IconPlus, IconTrash, IconUsers } from '@/components/icons';
 import {
   EmptyState,
   ErrorBanner,
@@ -100,7 +95,10 @@ export default function ContactosPage() {
       setDeleteTarget(null);
     },
     onError: (err) => {
-      toast(err instanceof Error ? err.message : 'No se pudo eliminar', 'error');
+      toast(
+        err instanceof Error ? err.message : 'No se pudo eliminar',
+        'error',
+      );
       setDeleteTarget(null);
     },
   });

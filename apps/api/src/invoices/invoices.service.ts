@@ -33,9 +33,15 @@ import {
   InvoiceKind,
   InvoiceLineDto,
   InvoiceStatus,
+  amountsMatch,
+  computeInvoiceAmounts,
   invoiceCreateSchema,
   invoiceUpdateSchema,
   InvoiceUpdateInput,
+  payableAmount,
+  planMilestones,
+  round2,
+  todayIso,
 } from '@erp/shared';
 import { ComplianceService } from '../compliance/compliance.service';
 import { DbService } from '../db/db.service';
@@ -43,42 +49,7 @@ import { DbService } from '../db/db.service';
 /** Cliente de transacción de drizzle (el callback de db.transaction). */
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
 const UNIQUE_VIOLATION = '23505';
-/** Tolerancia de cuadre factura ↔ albaranes (céntimos de redondeo). */
-const MATCHING_TOLERANCE = 0.01;
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function addDays(iso: string, days: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-interface ComputedAmounts {
-  baseAmount: number;
-  vatAmount: number;
-  totalAmount: number;
-  retentionAmount: number;
-}
-
-function computeAmounts(
-  lines: { baseAmount: number; vatPct: number }[],
-  isp: boolean,
-  retentionPct: number,
-): ComputedAmounts {
-  const baseAmount = round2(lines.reduce((s, l) => s + l.baseAmount, 0));
-  // ISP: el IVA lo autoliquida el destinatario ⇒ cuota 0 en la factura
-  const vatAmount = isp
-    ? 0
-    : round2(lines.reduce((s, l) => s + (l.baseAmount * l.vatPct) / 100, 0));
-  const totalAmount = round2(baseAmount + vatAmount);
-  const retentionAmount = round2((baseAmount * retentionPct) / 100);
-  return { baseAmount, vatAmount, totalAmount, retentionAmount };
-}
 
 @Injectable()
 export class InvoicesService {
@@ -127,7 +98,11 @@ export class InvoicesService {
     const companyId = await this.dbs.getDefaultCompanyId();
     const data = invoiceCreateSchema.parse(input);
     await this.findContact(data.contactId);
-    const amounts = computeAmounts(data.lines, data.isp, data.retentionPct);
+    const amounts = computeInvoiceAmounts(
+      data.lines,
+      data.isp,
+      data.retentionPct,
+    );
 
     const invoiceId = await this.dbs.db.transaction(async (tx) => {
       let row: Invoice;
@@ -201,7 +176,7 @@ export class InvoicesService {
       }));
     const isp = data.isp ?? invoice.isp;
     const retentionPct = data.retentionPct ?? Number(invoice.retentionPct);
-    const amounts = computeAmounts(
+    const amounts = computeInvoiceAmounts(
       lines.map((l) => ({
         baseAmount: l.baseAmount,
         vatPct: l.vatPct ?? 21,
@@ -316,7 +291,7 @@ export class InvoicesService {
           notes.reduce((s, n) => s + Number(n.amount), 0),
         );
         const base = Number(invoice.baseAmount);
-        if (Math.abs(notesTotal - base) > MATCHING_TOLERANCE) {
+        if (!amountsMatch(notesTotal, base)) {
           throw new ConflictException(
             `No se puede aprobar: la base de la factura (${base.toFixed(2)} €) no cuadra con la suma de los albaranes (${notesTotal.toFixed(2)} €)`,
           );
@@ -341,9 +316,7 @@ export class InvoicesService {
   async markPaid(id: string): Promise<InvoiceDto> {
     const { invoice } = await this.findWithContact(id);
     if (invoice.status !== 'aprobada') {
-      throw new ConflictException(
-        'Solo se pueden liquidar facturas aprobadas',
-      );
+      throw new ConflictException('Solo se pueden liquidar facturas aprobadas');
     }
     await this.dbs.db.transaction(async (tx) => {
       await tx
@@ -425,38 +398,28 @@ export class InvoicesService {
     invoice: Invoice,
     contact: Contact,
   ): Promise<void> {
-    const direction = invoice.kind === 'compra' ? 'pago' : 'cobro';
-    const total = Number(invoice.totalAmount);
-    const retention = Number(invoice.retentionAmount);
-    const ordinary = round2(total - retention);
-    const ordinaryDue =
-      invoice.dueDate ?? addDays(invoice.issueDate, contact.paymentTermsDays);
-
-    const values = [];
-    if (ordinary !== 0) {
-      values.push({
-        companyId: invoice.companyId,
-        invoiceId: invoice.id,
-        direction: direction as 'cobro' | 'pago',
-        kind: 'ordinario' as const,
-        dueDate: ordinaryDue,
-        amount: ordinary.toFixed(2),
-      });
-    }
-    if (retention > 0) {
-      // La retención de garantía queda como cuenta a cobrar/pagar diferida
-      values.push({
-        companyId: invoice.companyId,
-        invoiceId: invoice.id,
-        direction: direction as 'cobro' | 'pago',
-        kind: 'retencion' as const,
-        dueDate:
-          invoice.retentionReleaseDate ?? addDays(invoice.issueDate, 365),
-        amount: retention.toFixed(2),
-      });
-    }
-    if (values.length > 0) {
-      await tx.insert(paymentMilestones).values(values);
+    // El reparto (ordinario + retención diferida) vive en @erp/shared para
+    // poder comprobarlo con tests sin base de datos.
+    const plan = planMilestones({
+      kind: invoice.kind as 'compra' | 'venta',
+      issueDate: invoice.issueDate,
+      dueDate: invoice.dueDate,
+      totalAmount: Number(invoice.totalAmount),
+      retentionAmount: Number(invoice.retentionAmount),
+      retentionReleaseDate: invoice.retentionReleaseDate,
+      paymentTermsDays: contact.paymentTermsDays,
+    });
+    if (plan.length > 0) {
+      await tx.insert(paymentMilestones).values(
+        plan.map((m) => ({
+          companyId: invoice.companyId,
+          invoiceId: invoice.id,
+          direction: m.direction,
+          kind: m.kind,
+          dueDate: m.dueDate,
+          amount: m.amount.toFixed(2),
+        })),
+      );
     }
   }
 
@@ -496,9 +459,9 @@ export class InvoicesService {
       .where(inArray(deliveryNotes.id, noteIds));
   }
 
-  private async loadLines(invoiceIds: string[]): Promise<
-    (InvoiceLineDto & { invoiceId: string })[]
-  > {
+  private async loadLines(
+    invoiceIds: string[],
+  ): Promise<(InvoiceLineDto & { invoiceId: string })[]> {
     if (invoiceIds.length === 0) return [];
     const rows = await this.dbs.db
       .select({
@@ -584,7 +547,7 @@ export class InvoicesService {
         isp: invoice.isp,
         retentionPct: Number(invoice.retentionPct),
         retentionAmount: retention,
-        payableAmount: round2(total - retention),
+        payableAmount: payableAmount(total, retention),
         retentionReleaseDate: invoice.retentionReleaseDate,
         certificationId: certByInvoice.get(invoice.id) ?? null,
         notes: invoice.notes,
