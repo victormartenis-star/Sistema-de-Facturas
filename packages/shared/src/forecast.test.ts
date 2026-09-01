@@ -5,6 +5,7 @@ import {
   computeProbableCost,
   deviationLight,
   forecastBias,
+  reconcilePlan,
 } from './forecast';
 
 describe('computeProbableCost', () => {
@@ -79,10 +80,19 @@ describe('computeMarginAtCompletion', () => {
     expect(m.costDeviation).toBeNull();
   });
 
+  it('sin coste registrado tampoco hay un desvío del −100 % sobre el objetivo', () => {
+    // El porcentaje se calculaba aunque el importe se ocultara: la ficha
+    // decía «desvío sobre objetivo — −100 %», es decir, la obra más barata de
+    // la historia. No hay ahorro: no hay nada anotado.
+    const m = computeMarginAtCompletion(1_850_000, 1_520_000, 0);
+    expect(m.costDeviationPct).toBeNull();
+  });
+
   it('en cuanto hay un euro de coste, el margen se calcula', () => {
     const m = computeMarginAtCompletion(1_850_000, 1_520_000, 1);
     expect(m.costKnown).toBe(true);
     expect(m.margin).toBe(1_849_999);
+    expect(m.costDeviationPct).toBe(-100);
   });
 
   it('una obra en pérdidas da margen negativo, no cero', () => {
@@ -112,8 +122,8 @@ describe('deviationLight', () => {
     expect(deviationLight(-12)).toBe('verde');
   });
 
-  it('sin plan no hay semáforo que encender', () => {
-    expect(deviationLight(null)).toBe('verde');
+  it('sin desvío que mirar el semáforo queda sin datos, no en verde', () => {
+    expect(deviationLight(null)).toBe('sin_datos');
   });
 });
 
@@ -220,8 +230,77 @@ describe('buildMonthlyEvolution', () => {
       },
     ]);
     expect(rows[0].costDeviationPct).toBeNull();
-    expect(rows[0].light).toBe('verde');
+    expect(rows[0].light).toBe('sin_datos');
     expect(rows[0].monthMargin).toBe(10_000);
+  });
+
+  it('un mes con plan y sin nada anotado no está en objetivo, está sin datos', () => {
+    // La obra recién abierta: los 15 meses del reparto cargados y ni un euro
+    // real. Salía «desvío −100 %» y el semáforo verde en los quince.
+    const { rows, firstDivergenceMonth } = buildMonthlyEvolution([
+      {
+        month: '2026-03-01',
+        plannedProduction: 37_000,
+        plannedCost: 30_400,
+        realProduction: 0,
+        realCost: 0,
+      },
+      {
+        month: '2026-04-01',
+        plannedProduction: 74_000,
+        plannedCost: 60_800,
+        realProduction: 0,
+        realCost: 0,
+      },
+    ]);
+    expect(rows.every((r) => r.hasRealData === false)).toBe(true);
+    expect(rows.every((r) => r.costDeviationPct === null)).toBe(true);
+    expect(rows.every((r) => r.productionDeviationPct === null)).toBe(true);
+    expect(rows.every((r) => r.light === 'sin_datos')).toBe(true);
+    // Y no hay mes de divergencia: no cerrar los meses es un problema, pero
+    // no es una desviación económica.
+    expect(firstDivergenceMonth).toBeNull();
+  });
+
+  it('en cuanto un mes trae dato real, los siguientes vuelven a medirse', () => {
+    // Marzo sin cerrar, abril cerrado: a partir de abril el acumulado real ya
+    // significa algo y el semáforo vuelve a funcionar.
+    const { rows } = buildMonthlyEvolution([
+      {
+        month: '2026-03-01',
+        plannedProduction: 100_000,
+        plannedCost: 80_000,
+        realProduction: 0,
+        realCost: 0,
+      },
+      {
+        month: '2026-04-01',
+        plannedProduction: 100_000,
+        plannedCost: 80_000,
+        realProduction: 95_000,
+        realCost: 90_000,
+      },
+    ]);
+    expect(rows[0].light).toBe('sin_datos');
+    expect(rows[1].hasRealData).toBe(true);
+    // 90.000 de coste real frente a 160.000 de plan acumulado: se ha gastado
+    // menos, y eso sí es verde.
+    expect(rows[1].costDeviationPct).toBe(-43.75);
+    expect(rows[1].light).toBe('verde');
+  });
+
+  it('gastar de verdad menos de lo previsto sigue siendo verde', () => {
+    const { rows } = buildMonthlyEvolution([
+      {
+        month: '2026-01-01',
+        plannedProduction: 100_000,
+        plannedCost: 85_000,
+        realProduction: 90_000,
+        realCost: 70_000,
+      },
+    ]);
+    expect(rows[0].hasRealData).toBe(true);
+    expect(rows[0].light).toBe('verde');
   });
 });
 
@@ -250,5 +329,49 @@ describe('forecastBias', () => {
     expect(
       forecastBias([{ forecastTotal: 0, laterTotal: 5 }]).averageBiasPct,
     ).toBeNull();
+  });
+});
+
+describe('reconcilePlan', () => {
+  const plan = (meses: number, produccion: number, coste: number) =>
+    Array.from({ length: meses }, () => ({
+      plannedProduction: produccion,
+      plannedCost: coste,
+    }));
+
+  it('un reparto que suma el presupuesto cuadra', () => {
+    const r = reconcilePlan(plan(10, 185_000, 152_000), 1_850_000, 1_520_000);
+    expect(r.matches).toBe(true);
+    expect(r.productionGap).toBe(0);
+    expect(r.costGap).toBe(0);
+  });
+
+  it('detecta el reparto que se queda corto', () => {
+    // Doce meses repartidos y quince de obra: falta un trimestre entero
+    const r = reconcilePlan(plan(12, 123_333, 101_333), 1_850_000, 1_520_000);
+    expect(r.matches).toBe(false);
+    expect(r.productionGap).toBeLessThan(0);
+  });
+
+  it('tolera el redondeo de repartir entre meses', () => {
+    // 1.850.000 / 15 no es exacto: el céntimo que sobra no es un descuadre
+    const r = reconcilePlan(
+      plan(15, 123_333.33, 101_333.33),
+      1_850_000,
+      1_520_000,
+    );
+    expect(r.matches).toBe(true);
+  });
+
+  it('un reparto vacío no cuadra, aunque el hueco sea todo', () => {
+    const r = reconcilePlan([], 1_850_000, 1_520_000);
+    expect(r.matches).toBe(false);
+    expect(r.plannedProductionTotal).toBe(0);
+  });
+
+  it('sin coste objetivo solo comprueba la producción', () => {
+    const r = reconcilePlan(plan(10, 185_000, 152_000), 1_850_000, null);
+    expect(r.matches).toBe(true);
+    expect(r.costGap).toBeNull();
   });
 });

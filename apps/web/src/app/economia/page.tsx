@@ -26,6 +26,8 @@ const errText = (e: unknown) =>
   e instanceof Error ? e.message : 'Error inesperado';
 
 const LIGHT_TONE: Record<TrafficLight, string> = {
+  // Gris, no verde: el mes sin cerrar tiene que verse distinto del mes bueno.
+  sin_datos: 'bg-gray-100 text-gray-500',
   verde: 'bg-emerald-100 text-emerald-700',
   ambar: 'bg-amber-100 text-amber-700',
   rojo: 'bg-red-100 text-red-700',
@@ -251,17 +253,23 @@ export default function EconomiaPage() {
               </p>
               <p
                 className={`mt-1 text-lg font-bold tabular-nums ${
-                  (e.atCompletion.costDeviation ?? 0) > 0
-                    ? 'text-red-600'
-                    : 'text-emerald-600'
+                  e.atCompletion.costDeviation === null
+                    ? 'text-gray-400'
+                    : e.atCompletion.costDeviation > 0
+                      ? 'text-red-600'
+                      : 'text-emerald-600'
                 }`}
               >
-                {e.atCompletion.costDeviation === null
-                  ? '—'
-                  : formatEur(e.atCompletion.costDeviation)}
-                <span className="ml-1 text-xs font-medium">
-                  {pct(e.atCompletion.costDeviationPct)}
-                </span>
+                {e.atCompletion.costDeviation === null ? (
+                  '—'
+                ) : (
+                  <>
+                    {formatEur(e.atCompletion.costDeviation)}
+                    <span className="ml-1 text-xs font-medium">
+                      {pct(e.atCompletion.costDeviationPct)}
+                    </span>
+                  </>
+                )}
               </p>
             </div>
             <div>
@@ -288,6 +296,34 @@ export default function EconomiaPage() {
               )}
             </div>
           </div>
+
+          {/* Cuadre del reparto: si no suma el presupuesto, la evolución
+              compara contra un plan que no es el plan. */}
+          {e.evolution.rows.length > 0 && (
+            <div
+              className={`mb-4 rounded-xl border px-4 py-3 text-xs ${
+                e.planReconciliation.matches
+                  ? 'border-gray-200 bg-white text-gray-600'
+                  : 'border-red-200 bg-red-50 text-red-800'
+              }`}
+            >
+              Reparto mensual:{' '}
+              <strong>
+                {formatEur(e.planReconciliation.plannedProductionTotal)}
+              </strong>{' '}
+              de producción sobre {formatEur(e.planReconciliation.salesBudget)}{' '}
+              de presupuesto ·{' '}
+              <strong>
+                {formatEur(e.planReconciliation.plannedCostTotal)}
+              </strong>{' '}
+              de coste sobre{' '}
+              {e.planReconciliation.targetCost === null
+                ? '—'
+                : formatEur(e.planReconciliation.targetCost)}{' '}
+              de objetivo
+              {e.planReconciliation.matches ? ' · cuadra' : ' · NO CUADRA'}
+            </div>
+          )}
 
           {/* Evolución mensual: las tres curvas sobre el mismo eje de meses */}
           <div className="mb-2 flex items-center gap-3">
@@ -389,7 +425,7 @@ export default function EconomiaPage() {
                       </td>
                       <td className="px-4 py-3">
                         <span
-                          className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${LIGHT_TONE[r.light]}`}
+                          className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap ${LIGHT_TONE[r.light]}`}
                         >
                           {TRAFFIC_LIGHT_LABELS[r.light]}
                         </span>

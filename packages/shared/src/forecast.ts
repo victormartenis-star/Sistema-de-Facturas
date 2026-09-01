@@ -101,19 +101,83 @@ export function computeMarginAtCompletion(
         ? round2((margin / salesBudget) * 100)
         : null,
     costDeviation,
+    // Sin coste registrado, el desvío daría −100 %: la obra más barata de la
+    // historia. No es un ahorro, es que todavía no hay nada anotado.
     costDeviationPct:
-      targetCost !== null && targetCost > 0
+      targetCost !== null && targetCost > 0 && costKnown
         ? round2(((probableCost - targetCost) / targetCost) * 100)
         : null,
   };
 }
 
+/* ────────────────── cuadre del reparto mensual ────────────────── */
+
+export interface PlanReconciliation {
+  plannedProductionTotal: number;
+  plannedCostTotal: number;
+  salesBudget: number;
+  targetCost: number | null;
+  /** Reparto menos presupuesto de venta. Negativo = falta por repartir. */
+  productionGap: number;
+  /** Reparto menos coste objetivo; null si no hay objetivo. */
+  costGap: number | null;
+  matches: boolean;
+}
+
+/** Tolerancia del cuadre: por debajo de esto es redondeo, no descuadre. */
+export const PLAN_TOLERANCE_PCT = 1;
+
+/**
+ * ¿Suma el reparto mensual lo que dice el presupuesto?
+ *
+ * Es la comprobación que evita el error más silencioso de todos: repartir por
+ * meses una cifra distinta de la presupuestada. La evolución seguiría
+ * pintándose igual de bien, pero estaría comparando el coste real contra un
+ * plan que no es el plan, y el semáforo diría lo que no es.
+ */
+export function reconcilePlan(
+  rows: { plannedProduction: number; plannedCost: number }[],
+  salesBudget: number,
+  targetCost: number | null,
+): PlanReconciliation {
+  const plannedProductionTotal = round2(
+    rows.reduce((s, r) => s + r.plannedProduction, 0),
+  );
+  const plannedCostTotal = round2(rows.reduce((s, r) => s + r.plannedCost, 0));
+
+  const productionGap = round2(plannedProductionTotal - salesBudget);
+  const costGap =
+    targetCost === null ? null : round2(plannedCostTotal - targetCost);
+
+  const dentroDeTolerancia = (gap: number, total: number) =>
+    total === 0 ? gap === 0 : Math.abs(gap / total) * 100 <= PLAN_TOLERANCE_PCT;
+
+  return {
+    plannedProductionTotal,
+    plannedCostTotal,
+    salesBudget,
+    targetCost,
+    productionGap,
+    costGap,
+    matches:
+      rows.length > 0 &&
+      dentroDeTolerancia(productionGap, salesBudget) &&
+      (costGap === null || dentroDeTolerancia(costGap, targetCost ?? 0)),
+  };
+}
+
 /* ─────────────────────────── semáforo ─────────────────────────── */
 
-export const TRAFFIC_LIGHTS = ['verde', 'ambar', 'rojo'] as const;
+/**
+ * `sin_datos` no es un semáforo apagado por comodidad: es el cuarto estado
+ * real. Un mes sin coste anotado no está "en objetivo", está sin cerrar, y
+ * pintarlo de verde es exactamente lo que hace que nadie lo cierre.
+ */
+export const TRAFFIC_LIGHTS = ['sin_datos', 'verde', 'ambar', 'rojo'] as const;
 export type TrafficLight = (typeof TRAFFIC_LIGHTS)[number];
 
 export const TRAFFIC_LIGHT_LABELS: Record<TrafficLight, string> = {
+  sin_datos: 'Sin datos',
   verde: 'En objetivo',
   ambar: 'Vigilar',
   rojo: 'Desviado',
@@ -129,9 +193,12 @@ export const DEVIATION_THRESHOLDS = { ambar: 2, rojo: 5 };
  * el semáforo solo se enciende por exceso. Un ahorro grande sí merece mirarse
  * —suele significar producción no ejecutada—, pero eso lo delata la curva de
  * producción, no la de coste.
+ *
+ * Sin desvío que mirar (`null`) el semáforo queda en `sin_datos`, no en verde:
+ * no saber y estar bien no son lo mismo.
  */
 export function deviationLight(deviationPct: number | null): TrafficLight {
-  if (deviationPct === null) return 'verde';
+  if (deviationPct === null) return 'sin_datos';
   if (deviationPct > DEVIATION_THRESHOLDS.rojo) return 'rojo';
   if (deviationPct > DEVIATION_THRESHOLDS.ambar) return 'ambar';
   return 'verde';
@@ -156,6 +223,12 @@ export interface MonthlyRow extends MonthlyInput {
   cumulativeRealProduction: number;
   cumulativeRealCost: number;
   cumulativeMargin: number;
+  /**
+   * ¿Hay algo real anotado hasta este mes? Mientras no lo haya, los desvíos
+   * se devuelven en null: el acumulado real es cero porque nadie ha cerrado
+   * el mes, no porque la obra se esté ejecutando gratis.
+   */
+  hasRealData: boolean;
   /** Desvío acumulado de coste frente al plan, en porcentaje. */
   costDeviationPct: number | null;
   /** Desvío acumulado de producción frente al plan, en porcentaje. */
@@ -196,12 +269,18 @@ export function buildMonthlyEvolution(
     cumRealProduction = round2(cumRealProduction + m.realProduction);
     cumRealCost = round2(cumRealCost + m.realCost);
 
+    // Un mes sin nada anotado da −100 % de desvío de coste, y −100 % es
+    // "gastar menos", que el semáforo pinta de verde. Así es como una obra
+    // recién abierta aparece entera en objetivo sin que nadie haya cerrado un
+    // solo mes. Mientras no haya un euro real, no hay desvío que enseñar.
+    const hasRealData = cumRealProduction > 0 || cumRealCost > 0;
+
     const costDeviationPct =
-      cumPlannedCost > 0
+      hasRealData && cumPlannedCost > 0
         ? round2(((cumRealCost - cumPlannedCost) / cumPlannedCost) * 100)
         : null;
     const productionDeviationPct =
-      cumPlannedProduction > 0
+      hasRealData && cumPlannedProduction > 0
         ? round2(
             ((cumRealProduction - cumPlannedProduction) /
               cumPlannedProduction) *
@@ -210,7 +289,10 @@ export function buildMonthlyEvolution(
         : null;
 
     const light = deviationLight(costDeviationPct);
-    if (light !== 'verde' && firstDivergenceMonth === null) {
+    if (
+      (light === 'ambar' || light === 'rojo') &&
+      firstDivergenceMonth === null
+    ) {
       firstDivergenceMonth = m.month;
     }
 
@@ -222,6 +304,7 @@ export function buildMonthlyEvolution(
       cumulativeRealProduction: cumRealProduction,
       cumulativeRealCost: cumRealCost,
       cumulativeMargin: round2(cumRealProduction - cumRealCost),
+      hasRealData,
       costDeviationPct,
       productionDeviationPct,
       light,
@@ -316,6 +399,8 @@ export interface ProjectEconomicsDto {
   atCompletion: MarginAtCompletion;
   /** Cuadro de impacto de las modificaciones sobre el presupuesto. */
   budgetImpact: BudgetImpactDto;
+  /** ¿Suma el reparto mensual lo que dice el presupuesto? */
+  planReconciliation: PlanReconciliation;
   evolution: MonthlyEvolution;
   /** Última estimación de coste pendiente de contratar, si la hay. */
   lastForecast: CostForecastDto | null;

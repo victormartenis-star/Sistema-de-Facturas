@@ -25,6 +25,7 @@ import {
   computeBudgetImpact,
   computeMarginAtCompletion,
   computeProbableCost,
+  reconcilePlan,
   formatEuros,
   costForecastSchema,
   monthlyPlanSaveSchema,
@@ -207,6 +208,14 @@ export class ForecastService {
       mergeMonths(plan, realProduction, realCost),
     );
 
+    // El reparto tiene que sumar el presupuesto; si no, la evolución compara
+    // el coste real contra un plan que no es el plan.
+    const planReconciliation = reconcilePlan(
+      plan,
+      budgetImpact.updatedBudget,
+      project.targetCost === null ? null : Number(project.targetCost),
+    );
+
     return {
       projectId,
       projectCode: project.code,
@@ -214,6 +223,7 @@ export class ForecastService {
       probableCost,
       atCompletion,
       budgetImpact,
+      planReconciliation,
       evolution,
       lastForecast,
       warnings: buildWarnings(project, probableCost, atCompletion, evolution, {
@@ -221,6 +231,7 @@ export class ForecastService {
         lastForecast,
         withoutOrder,
         budgetImpact,
+        planReconciliation,
       }),
     };
   }
@@ -455,6 +466,7 @@ function buildWarnings(
     /** Importe recibido en obra sin pedido detrás. */
     withoutOrder: number;
     budgetImpact: ReturnType<typeof computeBudgetImpact>;
+    planReconciliation: ReturnType<typeof reconcilePlan>;
   },
 ): string[] {
   const warnings: string[] = [];
@@ -467,6 +479,19 @@ function buildWarnings(
   if (project.targetCost === null) {
     warnings.push(
       'Falta el coste objetivo. Es la meta interna contra la que se mide la desviación; el presupuesto de venta no sirve para eso.',
+    );
+  }
+  if (context.hasPlan && !context.planReconciliation.matches) {
+    const r = context.planReconciliation;
+    const partes = [
+      r.productionGap !== 0 &&
+        `producción repartida ${formatEuros(r.plannedProductionTotal)} frente a ${formatEuros(r.salesBudget)} de presupuesto`,
+      r.costGap !== null &&
+        r.costGap !== 0 &&
+        `coste repartido ${formatEuros(r.plannedCostTotal)} frente a ${formatEuros(r.targetCost ?? 0)} de objetivo`,
+    ].filter(Boolean);
+    warnings.push(
+      `El reparto mensual no cuadra con el presupuesto: ${partes.join('; ')}. La evolución se está comparando con un plan que no es el plan.`,
     );
   }
   if (!context.hasPlan) {
@@ -509,6 +534,15 @@ function buildWarnings(
   if (evolution.firstDivergenceMonth) {
     warnings.push(
       `El coste real se separó del plan en ${evolution.firstDivergenceMonth.slice(0, 7)}: la causa hay que buscarla en ese mes, no en el último.`,
+    );
+  }
+  const mesEnCurso = startOfMonth(todayIso());
+  const sinCerrar = evolution.rows.filter(
+    (r) => r.month < mesEnCurso && !r.hasRealData,
+  );
+  if (sinCerrar.length > 0) {
+    warnings.push(
+      `${sinCerrar.length} mes(es) ya vencidos sin producción ni coste anotados (desde ${sinCerrar[0].month.slice(0, 7)}). Salen como «sin datos», que no es lo mismo que estar en objetivo: hasta que no se cierren, el semáforo de la obra no dice nada.`,
     );
   }
   if (!atCompletion.costKnown) {
