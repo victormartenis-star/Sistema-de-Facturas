@@ -15,4 +15,5 @@ export * from './forecast';
 export * from './variations';
 export * from './permits';
 export * from './checklist';
+export * from './workers';
 export * from './treasury';

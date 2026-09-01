@@ -728,6 +728,97 @@ export const projectChecklist = pgTable(
   (t) => [uniqueIndex('project_checklist_unique').on(t.projectId, t.itemKey)],
 );
 
+/* ────────── Trabajadores de subcontrata (PRL persona a persona) ──────────
+ * La homologación de la empresa no basta: el manual insiste en verificar
+ * trabajador a trabajador, porque el coste de un accidente con alguien no
+ * dado de alta es de otra magnitud y la responsabilidad es solidaria.
+ */
+
+export const workerDocTypeEnum = pgEnum('worker_doc_type', [
+  'alta_ss',
+  'formacion_prl',
+  'aptitud_medica',
+  'entrega_epi',
+  'informacion_riesgos',
+  'otro',
+]);
+
+export const workers = pgTable(
+  'workers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    /** Subcontrata que le emplea. */
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id),
+    fullName: text('full_name').notNull(),
+    /** DNI/NIE: es como se le identifica en la valla. */
+    docId: text('doc_id'),
+    jobTitle: text('job_title'),
+    isActive: boolean('is_active').notNull().default(true),
+    notes: text('notes'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  // Un mismo DNI no puede estar dos veces vivo en la misma empresa
+  (t) => [
+    uniqueIndex('workers_company_docid_unique')
+      .on(t.companyId, t.docId)
+      .where(sql`deleted_at IS NULL AND doc_id IS NOT NULL`),
+  ],
+);
+
+export const workerDocs = pgTable(
+  'worker_docs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workerId: uuid('worker_id')
+      .notNull()
+      .references(() => workers.id, { onDelete: 'cascade' }),
+    docType: workerDocTypeEnum('doc_type').notNull(),
+    issuedAt: date('issued_at'),
+    expiresAt: date('expires_at'),
+    /** Copia escaneada, si se ha subido al archivo documental. */
+    documentId: uuid('document_id').references(() => documents.id),
+    rejected: boolean('rejected').notNull().default(false),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  // Un documento de cada tipo por trabajador: el nuevo sustituye al viejo
+  (t) => [uniqueIndex('worker_docs_unique').on(t.workerId, t.docType)],
+);
+
+/** Alta de un trabajador en una obra: es lo que compone el listado de valla. */
+export const workerAssignments = pgTable(
+  'worker_assignments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workerId: uuid('worker_id')
+      .notNull()
+      .references(() => workers.id, { onDelete: 'cascade' }),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [uniqueIndex('worker_assignments_unique').on(t.workerId, t.projectId)],
+);
+
 /* ────────────── Licencias, acometidas y suministros ──────────────
  * La etapa que marca el plazo de la obra. Lo que se controla no es solo el
  * retraso ya acumulado, sino si un trámite sin pedir todavía llega a tiempo
@@ -998,6 +1089,10 @@ export type Certification = typeof certifications.$inferSelect;
 export type NewCertification = typeof certifications.$inferInsert;
 export type ProjectChecklistMark = typeof projectChecklist.$inferSelect;
 export type NewProjectChecklistMark = typeof projectChecklist.$inferInsert;
+export type Worker = typeof workers.$inferSelect;
+export type NewWorker = typeof workers.$inferInsert;
+export type WorkerDoc = typeof workerDocs.$inferSelect;
+export type WorkerAssignment = typeof workerAssignments.$inferSelect;
 export type Permit = typeof permits.$inferSelect;
 export type NewPermit = typeof permits.$inferInsert;
 export type Variation = typeof variations.$inferSelect;

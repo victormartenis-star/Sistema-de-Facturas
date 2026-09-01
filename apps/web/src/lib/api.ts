@@ -53,6 +53,12 @@ import type {
   PurchaseOrderUpdateInput,
   TraceabilityReportDto,
   ValidationItemDto,
+  GateListDto,
+  WorkerAssignmentInput,
+  WorkerCreateInput,
+  WorkerDocInput,
+  WorkerDto,
+  WorkerUpdateInput,
   VariationApproveInput,
   VariationCreateInput,
   VariationDto,
@@ -120,6 +126,39 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
+
+export const workersApi = {
+  list: (options: { contactId?: string; projectId?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (options.contactId) params.set('contactId', options.contactId);
+    if (options.projectId) params.set('projectId', options.projectId);
+    const qs = params.toString();
+    return request<WorkerDto[]>(`/workers${qs ? `?${qs}` : ''}`);
+  },
+  gateList: (projectId: string) =>
+    request<GateListDto>(`/workers/valla/${projectId}`),
+  create: (input: WorkerCreateInput) =>
+    request<WorkerDto>('/workers', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  update: (id: string, input: WorkerUpdateInput) =>
+    request<WorkerDto>(`/workers/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  saveDoc: (id: string, input: WorkerDocInput) =>
+    request<WorkerDto>(`/workers/${id}/documentos`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  setAssignment: (id: string, input: WorkerAssignmentInput) =>
+    request<WorkerDto>(`/workers/${id}/obras`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  remove: (id: string) => request<void>(`/workers/${id}`, { method: 'DELETE' }),
+};
 
 export const auditApi = {
   list: (query: AuditQuery) => {

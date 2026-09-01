@@ -90,6 +90,12 @@ const GESTION: NavItem[] = [
     needs: 'economico.ver',
   },
   {
+    href: '/valla',
+    label: 'Acceso a obra',
+    icon: IconUsers,
+    needs: 'albaranes.validar',
+  },
+  {
     href: '/cumplimiento',
     label: 'Homologación',
     icon: IconLock,

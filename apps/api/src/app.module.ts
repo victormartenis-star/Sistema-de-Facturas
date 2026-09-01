@@ -17,6 +17,7 @@ import { PhasesModule } from './phases/phases.module';
 import { ProjectsModule } from './projects/projects.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { VariationsModule } from './variations/variations.module';
+import { WorkersModule } from './workers/workers.module';
 import { TreasuryModule } from './treasury/treasury.module';
 
 @Module({
@@ -36,6 +37,7 @@ import { TreasuryModule } from './treasury/treasury.module';
     TreasuryModule,
     PermitsModule,
     ChecklistModule,
+    WorkersModule,
     VariationsModule,
     ForecastModule,
     OcrModule,
