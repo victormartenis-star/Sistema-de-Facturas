@@ -42,6 +42,15 @@ export const projectCreateSchema = z
     status: z.enum(PROJECT_STATUSES).default('en_curso'),
     startDate: isoDate.nullish(),
     expectedEnd: isoDate.nullish(),
+    clientId: z.string().uuid('Cliente no válido').nullish(),
+    address: z.string().trim().max(300).nullish(),
+    /** Presupuesto de Ejecución Material. */
+    pemAmount: z
+      .number({ invalid_type_error: 'Debe ser un número' })
+      .nonnegative('No puede ser negativo')
+      .max(999_999_999_999.99)
+      .nullish(),
+    /** Presupuesto de contrata: lo que se factura al cliente. */
     contractAmount: z
       .number({ invalid_type_error: 'Debe ser un número' })
       .nonnegative('No puede ser negativo')
@@ -81,6 +90,16 @@ export interface ProjectDto {
   status: ProjectStatus;
   startDate: string | null;
   expectedEnd: string | null;
+  clientId: string | null;
+  clientName: string | null;
+  address: string | null;
+  pemAmount: number | null;
+  /**
+   * Contrata menos PEM: lo que queda para gastos generales y beneficio
+   * industrial. Null si falta alguno de los dos.
+   */
+  ggBiAmount: number | null;
+  ggBiPct: number | null;
   groupManagerId: string | null;
   siteManagerId: string | null;
   foremanId: string | null;

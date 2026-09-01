@@ -69,6 +69,22 @@ describe('computeMarginAtCompletion', () => {
     expect(m.margin).toBe(1_200_000);
   });
 
+  it('sin coste registrado no se inventa un margen del 100 %', () => {
+    // Una obra recién abierta: presupuesto cargado y nada gastado todavía.
+    // Devolver 1.850.000 € y un 100 % pintaría de verde una obra vacía.
+    const m = computeMarginAtCompletion(1_850_000, 1_520_000, 0);
+    expect(m.costKnown).toBe(false);
+    expect(m.margin).toBeNull();
+    expect(m.marginPct).toBeNull();
+    expect(m.costDeviation).toBeNull();
+  });
+
+  it('en cuanto hay un euro de coste, el margen se calcula', () => {
+    const m = computeMarginAtCompletion(1_850_000, 1_520_000, 1);
+    expect(m.costKnown).toBe(true);
+    expect(m.margin).toBe(1_849_999);
+  });
+
   it('una obra en pérdidas da margen negativo, no cero', () => {
     const m = computeMarginAtCompletion(1_000_000, 900_000, 1_150_000);
     expect(m.margin).toBe(-150_000);

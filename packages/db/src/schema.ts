@@ -136,7 +136,22 @@ export const projects = pgTable(
     status: projectStatusEnum('status').notNull().default('en_curso'),
     startDate: date('start_date'),
     expectedEnd: date('expected_end'),
-    /** Presupuesto de venta: lo que se factura al cliente. */
+    /**
+     * Cliente o promotor. Estaba previsto en el diseño desde el principio y
+     * se había quedado sin poner: una obra sin cliente no se puede certificar
+     * ni facturar a nadie.
+     */
+    clientId: uuid('client_id').references((): AnyPgColumn => contacts.id),
+    /** Emplazamiento, tal y como se escribe en el contrato. */
+    address: text('address'),
+    /**
+     * Presupuesto de Ejecución Material. No es el importe que se factura
+     * —ese es el de contrata— pero es la referencia con la que se compara el
+     * coste objetivo: la diferencia entre ambos es lo que queda para gastos
+     * generales y beneficio industrial.
+     */
+    pemAmount: numeric('pem_amount', { precision: 14, scale: 2 }),
+    /** Presupuesto de contrata: lo que se factura al cliente. */
     contractAmount: numeric('contract_amount', { precision: 14, scale: 2 }),
     /**
      * Coste objetivo: la meta interna de coste, distinta del precio ofertado

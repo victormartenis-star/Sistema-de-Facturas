@@ -268,16 +268,24 @@ export default function EconomiaPage() {
               <p className="text-[11px] font-semibold tracking-wide text-gray-500 uppercase">
                 Margen previsto a cierre
               </p>
-              <p
-                className={`mt-1 text-lg font-bold tabular-nums ${
-                  e.atCompletion.margin < 0 ? 'text-red-600' : ''
-                }`}
-              >
-                {formatEur(e.atCompletion.margin)}
-                <span className="ml-1 text-xs font-medium text-gray-500">
-                  {pct(e.atCompletion.marginPct)}
-                </span>
-              </p>
+              {/* Sin coste registrado no se enseña un número: un margen del
+                  100 % en una obra vacía invita a no mirar. */}
+              {e.atCompletion.margin === null ? (
+                <p className="mt-1 text-sm text-gray-500">
+                  Sin coste registrado
+                </p>
+              ) : (
+                <p
+                  className={`mt-1 text-lg font-bold tabular-nums ${
+                    e.atCompletion.margin < 0 ? 'text-red-600' : ''
+                  }`}
+                >
+                  {formatEur(e.atCompletion.margin)}
+                  <span className="ml-1 text-xs font-medium text-gray-500">
+                    {pct(e.atCompletion.marginPct)}
+                  </span>
+                </p>
+              )}
             </div>
           </div>
 

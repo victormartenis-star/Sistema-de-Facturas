@@ -99,6 +99,13 @@
       "when": 1788260949000,
       "tag": "0013_nasty_firebrand",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1788261593619,
+      "tag": "0014_special_penance",
+      "breakpoints": true
     }
   ]
 }

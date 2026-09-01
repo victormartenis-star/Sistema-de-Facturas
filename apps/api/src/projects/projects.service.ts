@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { and, desc, eq, ilike, inArray, isNull, or, SQL } from 'drizzle-orm';
-import { Project, projects, users } from '@erp/db';
+import { Project, contacts, projects, users } from '@erp/db';
 import {
   ProjectCreateInput,
   ProjectDto,
@@ -15,6 +15,7 @@ import {
   USER_ROLE_LABELS,
   UserRole,
   projectStaffSchema,
+  round2,
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
 
@@ -24,7 +25,11 @@ import { DbService } from '../db/db.service';
  * Se hace en el servidor y no ocultando la cifra en la pantalla: quien no
  * tiene `economico.ver` no debe recibir el dato, no basta con no pintárselo.
  */
-function toDto(row: Project, withEconomics = true): ProjectDto {
+function toDto(
+  row: Project,
+  withEconomics = true,
+  clientName: string | null = null,
+): ProjectDto {
   return {
     id: row.id,
     code: row.code,
@@ -35,6 +40,13 @@ function toDto(row: Project, withEconomics = true): ProjectDto {
     groupManagerId: row.groupManagerId,
     siteManagerId: row.siteManagerId,
     foremanId: row.foremanId,
+    clientId: row.clientId,
+    clientName,
+    address: row.address,
+    pemAmount:
+      !withEconomics || row.pemAmount === null ? null : Number(row.pemAmount),
+    ggBiAmount: ggBi(row, withEconomics).amount,
+    ggBiPct: ggBi(row, withEconomics).pct,
     contractAmount:
       !withEconomics || row.contractAmount === null
         ? null
@@ -45,6 +57,26 @@ function toDto(row: Project, withEconomics = true): ProjectDto {
     notes: row.notes,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * Gastos generales y beneficio industrial: la diferencia entre lo que se
+ * factura (contrata) y el coste material presupuestado (PEM). Es el margen
+ * teórico de partida, antes de que la obra empiece a gastar.
+ */
+function ggBi(
+  row: Project,
+  withEconomics: boolean,
+): { amount: number | null; pct: number | null } {
+  if (!withEconomics || row.contractAmount === null || row.pemAmount === null) {
+    return { amount: null, pct: null };
+  }
+  const pem = Number(row.pemAmount);
+  const contrata = Number(row.contractAmount);
+  return {
+    amount: round2(contrata - pem),
+    pct: pem > 0 ? round2(((contrata - pem) / pem) * 100) : null,
   };
 }
 
@@ -136,16 +168,27 @@ export class ProjectsService {
       );
     }
     const rows = await this.dbs.db
-      .select()
+      .select({ project: projects, clientName: contacts.legalName })
       .from(projects)
+      .leftJoin(contacts, eq(projects.clientId, contacts.id))
       .where(and(...filters))
       .orderBy(desc(projects.createdAt));
-    return rows.map((r) => toDto(r, withEconomics));
+    return rows.map((r) => toDto(r.project, withEconomics, r.clientName));
   }
 
   async get(id: string, withEconomics = true): Promise<ProjectDto> {
     const row = await this.find(id);
-    return toDto(row, withEconomics);
+    return toDto(row, withEconomics, await this.clientNameOf(row.clientId));
+  }
+
+  private async clientNameOf(clientId: string | null): Promise<string | null> {
+    if (!clientId) return null;
+    const [row] = await this.dbs.db
+      .select({ legalName: contacts.legalName })
+      .from(contacts)
+      .where(eq(contacts.id, clientId))
+      .limit(1);
+    return row?.legalName ?? null;
   }
 
   async create(input: ProjectCreateInput): Promise<ProjectDto> {
@@ -161,13 +204,16 @@ export class ProjectsService {
           status: data.status,
           startDate: data.startDate ?? null,
           expectedEnd: data.expectedEnd ?? null,
+          clientId: data.clientId ?? null,
+          address: data.address ?? null,
+          pemAmount: data.pemAmount?.toFixed(2) ?? null,
           contractAmount: data.contractAmount?.toFixed(2) ?? null,
           targetCost: data.targetCost?.toFixed(2) ?? null,
           retentionPct: data.retentionPct.toFixed(2),
           notes: data.notes ?? null,
         })
         .returning();
-      return toDto(row);
+      return this.get(row.id);
     } catch (err) {
       this.rethrowDuplicateCode(err, data.code);
     }
@@ -188,6 +234,15 @@ export class ProjectsService {
           ...(input.expectedEnd !== undefined && {
             expectedEnd: input.expectedEnd ?? null,
           }),
+          ...(input.clientId !== undefined && {
+            clientId: input.clientId ?? null,
+          }),
+          ...(input.address !== undefined && {
+            address: input.address ?? null,
+          }),
+          ...(input.pemAmount !== undefined && {
+            pemAmount: input.pemAmount?.toFixed(2) ?? null,
+          }),
           ...(input.contractAmount !== undefined && {
             contractAmount: input.contractAmount?.toFixed(2) ?? null,
           }),
@@ -202,7 +257,7 @@ export class ProjectsService {
         })
         .where(eq(projects.id, id))
         .returning();
-      return toDto(row);
+      return this.get(row.id);
     } catch (err) {
       this.rethrowDuplicateCode(err, input.code ?? '');
     }

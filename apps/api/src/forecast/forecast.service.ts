@@ -511,7 +511,12 @@ function buildWarnings(
       `El coste real se separó del plan en ${evolution.firstDivergenceMonth.slice(0, 7)}: la causa hay que buscarla en ese mes, no en el último.`,
     );
   }
-  if (atCompletion.margin < 0) {
+  if (!atCompletion.costKnown) {
+    warnings.push(
+      'No hay ningún coste registrado todavía: sin facturas, pedidos ni previsión no se puede calcular el margen. Lo que se ve no es una obra sana, es una obra vacía.',
+    );
+  }
+  if (atCompletion.margin !== null && atCompletion.margin < 0) {
     warnings.push(
       'El margen previsto a cierre es negativo: la obra va a perder dinero si nada cambia.',
     );

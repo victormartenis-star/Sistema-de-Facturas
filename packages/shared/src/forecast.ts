@@ -56,8 +56,15 @@ export interface MarginAtCompletion {
   salesBudget: number;
   targetCost: number | null;
   probableCost: number;
-  /** Margen previsto a cierre en euros. */
-  margin: number;
+  /**
+   * ¿Hay algún coste registrado? Con la obra recién abierta el coste probable
+   * es cero, y entonces el margen daría el 100 %: una obra perfecta que en
+   * realidad es una obra vacía. Cuando esto es false, el margen se devuelve
+   * en null en lugar de un número que invita a no mirar.
+   */
+  costKnown: boolean;
+  /** Margen previsto a cierre; null mientras no haya coste registrado. */
+  margin: number | null;
   /** Margen previsto sobre la venta, en porcentaje; null si no hay venta. */
   marginPct: number | null;
   /** Desvío del coste probable frente al objetivo; null si no hay objetivo. */
@@ -77,15 +84,22 @@ export function computeMarginAtCompletion(
   targetCost: number | null,
   probableCost: number,
 ): MarginAtCompletion {
-  const margin = round2(salesBudget - probableCost);
+  const costKnown = probableCost > 0;
+  const margin = costKnown ? round2(salesBudget - probableCost) : null;
   const costDeviation =
-    targetCost === null ? null : round2(probableCost - targetCost);
+    targetCost === null || !costKnown
+      ? null
+      : round2(probableCost - targetCost);
   return {
     salesBudget,
     targetCost,
     probableCost,
+    costKnown,
     margin,
-    marginPct: salesBudget > 0 ? round2((margin / salesBudget) * 100) : null,
+    marginPct:
+      margin !== null && salesBudget > 0
+        ? round2((margin / salesBudget) * 100)
+        : null,
     costDeviation,
     costDeviationPct:
       targetCost !== null && targetCost > 0
