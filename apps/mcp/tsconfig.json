@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    // El SDK de MCP publica sus subrutas ("@modelcontextprotocol/sdk/server/mcp.js")
+    // solo a traves del campo "exports". La resolucion "node" (node10) de
+    // tsconfig.base.json no lee "exports" y no encontraria los tipos, asi que
+    // aqui subimos a node16. El paquete no declara "type": "module", de modo
+    // que la salida sigue siendo CommonJS como en el resto del monorepo y se
+    // usa la build CJS del SDK.
+    "module": "node16",
+    "moduleResolution": "node16"
+  },
+  "include": ["src"]
+}
