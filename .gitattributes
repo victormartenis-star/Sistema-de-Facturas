@@ -1,0 +1,16 @@
+# El repositorio se escribe en LF. Sin esto, git en Windows clona con CRLF
+# (core.autocrlf=true por defecto en Git for Windows) y `npm run format:check`
+# marca como mal formateado TODO el repositorio, mientras que el CI en ubuntu
+# pasa. Local y CI deben ver exactamente el mismo archivo.
+* text=auto eol=lf
+
+# Binarios: git no debe tocarlos.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.zip binary
