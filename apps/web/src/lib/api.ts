@@ -3,8 +3,10 @@ import type {
   AuditEntryDto,
   AuditQuery,
   Capability,
-  CashflowGrouping,
-  CashflowReportDto,
+  StoppageCreateInput,
+  StoppageDto,
+  StoppageReportDto,
+  StoppageUpdateInput,
   ThirteenWeekDto,
   CategoryDto,
   ChecklistDto,
@@ -584,12 +586,6 @@ export const treasuryApi = {
     request<void>(`/treasury/milestones/${id}/pagar`, { method: 'POST' }),
   reopen: (id: string) =>
     request<void>(`/treasury/milestones/${id}/reabrir`, { method: 'POST' }),
-  cashflow: (groupBy: CashflowGrouping, from?: string, to?: string) => {
-    const params = new URLSearchParams({ groupBy });
-    if (from) params.set('from', from);
-    if (to) params.set('to', to);
-    return request<CashflowReportDto>(`/treasury/cashflow?${params}`);
-  },
   thirteenWeek: (saldoInicial: number | null) => {
     const params = new URLSearchParams();
     if (saldoInicial !== null) params.set('saldoInicial', String(saldoInicial));
@@ -622,3 +618,24 @@ export function formatDate(iso: string | null): string {
   const [y, m, d] = iso.split('-');
   return `${d}/${m}/${y}`;
 }
+
+export const stoppagesApi = {
+  list: (projectId?: string) =>
+    request<StoppageDto[]>(
+      `/stoppages${projectId ? `?projectId=${projectId}` : ''}`,
+    ),
+  report: (projectId: string) =>
+    request<StoppageReportDto>(`/stoppages/informe/${projectId}`),
+  create: (body: StoppageCreateInput) =>
+    request<StoppageDto>('/stoppages', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  update: (id: string, body: StoppageUpdateInput) =>
+    request<StoppageDto>(`/stoppages/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  remove: (id: string) =>
+    request<void>(`/stoppages/${id}`, { method: 'DELETE' }),
+};

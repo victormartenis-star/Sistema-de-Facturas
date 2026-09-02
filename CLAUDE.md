@@ -22,6 +22,7 @@
 ## Calidad
 - La aritmética del dinero vive en `packages/shared/src/calculo.ts`: funciones **puras**, sin base de datos y sin leer el reloj (la fecha entra como parámetro). Toda regla nueva de cálculo se añade ahí y se prueba ahí.
 - Un cambio en el cálculo económico no se da por bueno sin un test que falle antes y pase después.
+- **No compares algo completo con algo parcial y llames ahorro a la diferencia.** Es el error que más veces ha aparecido: presupuesto a fin de obra contra gasto de hoy, plan de doce meses contra dos meses cerrados, coste objetivo contra una obra sin un euro anotado. Todos daban verde. Cuando falta el dato, el valor es `null` y la interfaz dice «sin datos», nunca cero ni un porcentaje.
 - `npm run verify` debe estar en verde antes de cada commit; el CI (`.github/workflows/ci.yml`) lo repite y además aplica las migraciones sobre una base vacía.
 
 ## Arquitectura y Reglas

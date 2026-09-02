@@ -8,8 +8,6 @@ import {
   Query,
 } from '@nestjs/common';
 import {
-  CASHFLOW_GROUPINGS,
-  CashflowGrouping,
   MILESTONE_DIRECTIONS,
   MILESTONE_STATUSES,
   MilestoneDirection,
@@ -55,22 +53,6 @@ export class TreasuryController {
   @HttpCode(204)
   async reopen(@Param('id', ParseUUIDPipe) id: string) {
     await this.service.setStatus(id, 'previsto');
-  }
-
-  /** Previsión de flujo de caja agrupada por semanas o meses. */
-  @Get('cashflow')
-  cashflow(
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-    @Query('groupBy') groupBy?: string,
-  ) {
-    return this.service.cashflow(
-      ISO_DATE.test(from ?? '') ? from : undefined,
-      ISO_DATE.test(to ?? '') ? to : undefined,
-      CASHFLOW_GROUPINGS.includes(groupBy as CashflowGrouping)
-        ? (groupBy as CashflowGrouping)
-        : 'semana',
-    );
   }
 
   /**

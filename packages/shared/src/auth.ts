@@ -81,6 +81,8 @@ export const CAPABILITIES = [
   'homologacion.gestionar',
   /** Licencias, acometidas y suministros. */
   'tramites.gestionar',
+  /** Expedientes de cese de obra: el manual se lo asigna al Jefe de Obra. */
+  'paradas.gestionar',
   'documentos.subir',
 ] as const;
 
@@ -109,6 +111,7 @@ const ROLE_CAPABILITIES: Record<UserRole, readonly Capability[]> = {
     'modificados.registrar',
     'contactos.gestionar',
     'tramites.gestionar',
+    'paradas.gestionar',
     'documentos.subir',
   ],
 
@@ -119,6 +122,7 @@ const ROLE_CAPABILITIES: Record<UserRole, readonly Capability[]> = {
     'modificados.registrar',
     'albaranes.validar',
     'tramites.gestionar',
+    'paradas.gestionar',
     'documentos.subir',
   ],
 

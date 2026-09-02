@@ -1,9 +1,8 @@
 import { addDays, round2, startOfWeek } from './calculo';
 
 /**
- * Tesorería: vencimientos (cobros y pagos previstos) y previsión de
- * flujo de caja agrupada por semanas o meses, con alerta de tensión
- * cuando el saldo acumulado del periodo es negativo.
+ * Tesorería: vencimientos (cobros y pagos previstos) y previsión de caja a
+ * trece semanas, con el saldo semana a semana y aviso de tensión.
  */
 
 export const MILESTONE_DIRECTIONS = ['cobro', 'pago'] as const;
@@ -41,34 +40,6 @@ export interface MilestoneDto {
   amount: number;
   status: MilestoneStatus;
   paidAt: string | null;
-}
-
-export const CASHFLOW_GROUPINGS = ['semana', 'mes'] as const;
-export type CashflowGrouping = (typeof CASHFLOW_GROUPINGS)[number];
-
-export interface CashflowBucketDto {
-  /** Primer día del periodo (AAAA-MM-DD). */
-  periodStart: string;
-  label: string;
-  cobros: number;
-  pagos: number;
-  neto: number;
-  /** Saldo acumulado desde el inicio del horizonte. */
-  saldoAcumulado: number;
-  /** true si el saldo acumulado queda en negativo: tensión de caja. */
-  tension: boolean;
-}
-
-export interface CashflowReportDto {
-  from: string;
-  to: string;
-  groupBy: CashflowGrouping;
-  buckets: CashflowBucketDto[];
-  totalCobros: number;
-  totalPagos: number;
-  saldoFinal: number;
-  /** Número de periodos con tensión de caja. */
-  alertas: number;
 }
 
 /* ─────────────────── tesorería a 13 semanas ─────────────────── */

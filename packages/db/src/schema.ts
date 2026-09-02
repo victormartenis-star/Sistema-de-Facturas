@@ -3,6 +3,7 @@ import {
   AnyPgColumn,
   boolean,
   date,
+  index,
   integer,
   jsonb,
   numeric,
@@ -1086,6 +1087,125 @@ export type AuditEntry = typeof auditLog.$inferSelect;
 export type NewAuditEntry = typeof auditLog.$inferInsert;
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
+/* ─────────────────────── cese de obra ─────────────────────── */
+
+/**
+ * Paradas de obra por causa ajena.
+ *
+ * Del manual: cuando una obra se detiene por causa ajena debe abrirse
+ * expediente **el mismo día**, con fecha de parada, causa, responsable y
+ * valoración de los costes que siguen corriendo. Es la base para reclamar y,
+ * si no se hace en el momento, después es irrecuperable: nadie reconstruye
+ * seis meses después qué grúa estuvo parada ni cuántos días.
+ */
+
+export const stoppageCauseEnum = pgEnum('stoppage_cause', [
+  'falta_definicion_proyecto',
+  'falta_suministro_propiedad',
+  'impago',
+  'licencia_o_permiso',
+  'orden_direccion_facultativa',
+  'condiciones_meteorologicas',
+  'otra',
+]);
+
+/** A quién es imputable la parada. Es lo que decide si hay reclamación. */
+export const stoppageAttributionEnum = pgEnum('stoppage_attribution', [
+  'propiedad',
+  'direccion_facultativa',
+  'administracion',
+  'suministradora',
+  'fuerza_mayor',
+  'contratista',
+]);
+
+/** Los cuatro conceptos que nombra el manual, más un cajón para el resto. */
+export const stoppageCostConceptEnum = pgEnum('stoppage_cost_concept', [
+  'indirectos',
+  'medios_auxiliares',
+  'personal',
+  'alquileres',
+  'otros',
+]);
+
+export const stoppages = pgTable(
+  'stoppages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    /** Correlativo dentro de la obra. */
+    seq: integer('seq').notNull(),
+    stoppageNumber: text('stoppage_number').notNull(),
+    /** Día en que la obra se paró de verdad. */
+    startDate: date('start_date').notNull(),
+    /** Día de reanudación; null mientras siga parada. */
+    endDate: date('end_date'),
+    cause: stoppageCauseEnum('cause').notNull(),
+    attribution: stoppageAttributionEnum('attribution').notNull(),
+    description: text('description').notNull(),
+    /**
+     * Día en que se abrió el expediente. El manual dice «el mismo día»: si es
+     * posterior a la parada, la diferencia es lo que va a costar demostrar.
+     */
+    openedAt: date('opened_at').notNull(),
+    openedBy: text('opened_by'),
+    /** Comunicación formal a la Propiedad o a la DF: sin ella no hay reclamación. */
+    notifiedAt: date('notified_at'),
+    notifiedTo: text('notified_to'),
+    /** Importe reclamado, cuando se formaliza la reclamación. */
+    claimedAmount: numeric('claimed_amount', { precision: 14, scale: 2 }),
+    claimedAt: date('claimed_at'),
+    notes: text('notes'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('stoppages_number_idx')
+      .on(t.companyId, t.stoppageNumber)
+      .where(sql`deleted_at IS NULL`),
+    index('stoppages_project_idx').on(t.projectId),
+  ],
+);
+
+/**
+ * Los costes que siguen corriendo con la obra parada, valorados por día.
+ *
+ * Se guarda el importe diario y no el total: el total depende de los días de
+ * parada, que cambian mientras la obra sigue detenida. Guardar el total
+ * obligaría a recalcularlo a mano cada día, que es la manera segura de que
+ * deje de estar al día.
+ */
+export const stoppageCosts = pgTable(
+  'stoppage_costs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    stoppageId: uuid('stoppage_id')
+      .notNull()
+      .references(() => stoppages.id, { onDelete: 'cascade' }),
+    concept: stoppageCostConceptEnum('concept').notNull(),
+    description: text('description'),
+    /** Coste que corre cada día natural de parada. */
+    dailyAmount: numeric('daily_amount', { precision: 14, scale: 2 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index('stoppage_costs_stoppage_idx').on(t.stoppageId)],
+);
+
 export type Company = typeof companies.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;
@@ -1127,3 +1247,7 @@ export type NewExtraction = typeof extractions.$inferInsert;
 export type ContactComplianceDoc = typeof contactComplianceDocs.$inferSelect;
 export type NewContactComplianceDoc = typeof contactComplianceDocs.$inferInsert;
 export type ComplianceWaiver = typeof complianceWaivers.$inferSelect;
+export type Stoppage = typeof stoppages.$inferSelect;
+export type NewStoppage = typeof stoppages.$inferInsert;
+export type StoppageCost = typeof stoppageCosts.$inferSelect;
+export type NewStoppageCost = typeof stoppageCosts.$inferInsert;

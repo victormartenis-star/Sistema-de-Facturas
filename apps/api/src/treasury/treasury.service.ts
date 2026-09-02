@@ -13,48 +13,18 @@ import {
   projects,
 } from '@erp/db';
 import {
-  CashflowBucketDto,
-  CashflowGrouping,
-  CashflowReportDto,
   CashItem,
   MilestoneDirection,
   MilestoneDto,
   MilestoneStatus,
   ThirteenWeekDto,
   addDays,
-  addMonths,
   buildThirteenWeek,
   round2,
-  startOfMonth,
-  startOfWeek,
   todayIso,
 } from '@erp/shared';
 import { ComplianceService } from '../compliance/compliance.service';
 import { DbService } from '../db/db.service';
-
-const MONTHS_ES = [
-  'enero',
-  'febrero',
-  'marzo',
-  'abril',
-  'mayo',
-  'junio',
-  'julio',
-  'agosto',
-  'septiembre',
-  'octubre',
-  'noviembre',
-  'diciembre',
-];
-
-function bucketLabel(periodStart: string, groupBy: CashflowGrouping): string {
-  if (groupBy === 'mes') {
-    const [y, m] = periodStart.split('-');
-    return `${MONTHS_ES[Number(m) - 1]} ${y}`;
-  }
-  const [, m, d] = periodStart.split('-');
-  return `Sem. ${d}/${m}`;
-}
 
 @Injectable()
 export class TreasuryService {
@@ -170,77 +140,6 @@ export class TreasuryService {
           and(eq(invoices.id, row.invoiceId), ne(invoices.status, 'anulada')),
         );
     });
-  }
-
-  /**
-   * Previsión de flujo de caja: agrupa los vencimientos previstos por
-   * semana o mes y marca con alerta de tensión los periodos en los que
-   * el saldo acumulado (cobros - pagos) queda en negativo.
-   */
-  async cashflow(
-    from?: string,
-    to?: string,
-    groupBy: CashflowGrouping = 'semana',
-  ): Promise<CashflowReportDto> {
-    const start = from ?? todayIso();
-    const end = to ?? addDays(start, 90);
-    const items = await this.milestones({
-      status: 'previsto',
-      from: start,
-      to: end,
-    });
-
-    const keyOf = groupBy === 'mes' ? startOfMonth : startOfWeek;
-    const step =
-      groupBy === 'mes'
-        ? (iso: string) => addMonths(iso, 1)
-        : (iso: string) => addDays(iso, 7);
-
-    // Construye todos los periodos del horizonte, aunque estén vacíos
-    const totals = new Map<string, { cobros: number; pagos: number }>();
-    for (let cursor = keyOf(start); cursor <= end; cursor = step(cursor)) {
-      totals.set(cursor, { cobros: 0, pagos: 0 });
-    }
-    for (const item of items) {
-      const key = keyOf(item.dueDate);
-      const bucket = totals.get(key) ?? { cobros: 0, pagos: 0 };
-      if (item.direction === 'cobro') bucket.cobros += item.amount;
-      else bucket.pagos += item.amount;
-      totals.set(key, bucket);
-    }
-
-    let saldo = 0;
-    let alertas = 0;
-    const buckets: CashflowBucketDto[] = [...totals.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([periodStart, t]) => {
-        const cobros = round2(t.cobros);
-        const pagos = round2(t.pagos);
-        const neto = round2(cobros - pagos);
-        saldo = round2(saldo + neto);
-        const tension = saldo < 0;
-        if (tension) alertas += 1;
-        return {
-          periodStart,
-          label: bucketLabel(periodStart, groupBy),
-          cobros,
-          pagos,
-          neto,
-          saldoAcumulado: saldo,
-          tension,
-        };
-      });
-
-    return {
-      from: start,
-      to: end,
-      groupBy,
-      buckets,
-      totalCobros: round2(buckets.reduce((s, b) => s + b.cobros, 0)),
-      totalPagos: round2(buckets.reduce((s, b) => s + b.pagos, 0)),
-      saldoFinal: saldo,
-      alertas,
-    };
   }
 
   /**

@@ -13,6 +13,7 @@ import {
   IconTrendingUp,
   IconDashboard,
   IconFileText,
+  IconPause,
   IconClipboard,
   IconInbox,
   IconLock,
@@ -76,6 +77,12 @@ const GESTION: NavItem[] = [
     label: 'Licencias',
     icon: IconCalendar,
     needs: 'tramites.gestionar',
+  },
+  {
+    href: '/paradas',
+    label: 'Cese de obra',
+    icon: IconPause,
+    needs: 'paradas.gestionar',
   },
   {
     href: '/modificados',
