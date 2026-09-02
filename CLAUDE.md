@@ -40,5 +40,12 @@ Hay dos montajes distintos; comprueba en cuál estás antes de seguir las rutas.
   `psql.exe` no está en el `Path`; vive en `C:\Program Files\PostgreSQL\16\bin`.
 - Atajos de base de datos: `.\infra\bd.ps1 up | crear | migrate | seed | psql | reset -Confirmar`.
   El script detecta solo si usar el Postgres nativo o el contenedor de `infra/docker/`.
-- Docker Desktop está instalado pero **sin motor**: falta WSL (`wsl --install` como
-  administrador y reiniciar). Hasta entonces el compose no levanta y `bd.ps1` usa el nativo.
+- **En este equipo se trabaja con el PostgreSQL nativo, no con Docker.** WSL 2.7 está
+  instalado y operativo, pero el motor de Docker no arranca: el EDR corporativo
+  (Panda Advanced EPDR) deja los sockets AF_UNIX de Docker en un estado en el que ni
+  su propietario puede borrarlos, y el backend muere al recrearlos
+  (`remove ...\Docker\run\sailor-ingest.sock: El sistema no tiene acceso al archivo`).
+  Se reproduce en `AppData\Local\Docker\run` y en `AppData\Local\docker-secrets-engine`,
+  y sobrevive al reinicio. No se arregla en local: IT debe excluir las rutas y procesos
+  de Docker en la consola de Panda. Hasta entonces `bd.ps1` usa el nativo, que es lo
+  correcto aquí. No pierdas tiempo reinstalando Docker ni WSL: no es ahí el problema.
