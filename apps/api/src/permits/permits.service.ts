@@ -15,6 +15,7 @@ import {
   permitCreateSchema,
   permitUpdateSchema,
   round2,
+  startedWithoutPermit,
   todayIso,
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
@@ -152,9 +153,37 @@ export class PermitsService {
         `Sin resolver, y son requisito para empezar: ${blockingPending.join(', ')}.`,
       );
     }
-    if (counts.rojo > 0) {
+    // Los trámites en rojo se nombran uno a uno con su motivo. «2 trámites en
+    // rojo» no dice qué hay que hacer hoy; «la acometida eléctrica definitiva
+    // debería haberse pedido hace 460 días» sí.
+    for (const p of list.filter((x) => x.light === 'rojo')) {
       warnings.push(
-        `${counts.rojo} trámite(s) en rojo. El retraso de una acometida no se recupera con medios: se recupera pidiéndola antes.`,
+        `${PERMIT_KIND_LABELS[p.kind]}: ${p.reasons.join(' ')} El retraso de una acometida no se recupera con medios: se recupera pidiéndola antes.`,
+      );
+    }
+
+    const sinAlInicio = list.filter((p) =>
+      startedWithoutPermit(
+        {
+          kind: p.kind,
+          requestedAt: p.requestedAt,
+          committedAt: p.committedAt,
+          grantedAt: p.grantedAt,
+          notApplicable: p.notApplicable,
+        },
+        project.startDate,
+      ),
+    );
+    if (sinAlInicio.length > 0) {
+      warnings.push(
+        `La obra empezó el ${project.startDate} sin tener resuelto: ${sinAlInicio
+          .map(
+            (p) =>
+              `${PERMIT_KIND_LABELS[p.kind]}${p.grantedAt ? ` (concedida el ${p.grantedAt})` : ' (todavía sin conceder)'}`,
+          )
+          .join(
+            ', ',
+          )}. Concederlo después no lo arregla hacia atrás: durante ese tiempo hubo obra abierta sin él.`,
       );
     }
 

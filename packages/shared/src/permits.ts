@@ -146,6 +146,24 @@ export function mustRequestBy(kind: PermitKind, neededBy: string): string {
   return addDays(neededBy, -REFERENCE_LEAD_DAYS[kind]);
 }
 
+/**
+ * ¿Se empezó la obra sin este trámite resuelto?
+ *
+ * Solo aplica a los que bloquean el arranque. Un trámite concedido **después**
+ * de la fecha de inicio no deja de ser un incumplimiento por haberse
+ * concedido al final: durante ese tiempo hubo obra abierta sin él, y el
+ * expediente lo va a reflejar. El semáforo, mirando solo el estado de hoy, lo
+ * da por bueno y ya no vuelve a mencionarlo.
+ */
+export function startedWithoutPermit(
+  permit: PermitState,
+  startDate: string | null,
+): boolean {
+  if (!startDate || permit.notApplicable) return false;
+  if (!BLOCKING_PERMIT_KINDS.includes(permit.kind)) return false;
+  return permit.grantedAt === null || permit.grantedAt > startDate;
+}
+
 export interface PermitAssessment {
   status: PermitStatus;
   light: PermitLight;

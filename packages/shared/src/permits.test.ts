@@ -6,6 +6,7 @@ import {
   mustRequestBy,
   permitDaysLate,
   permitStatus,
+  startedWithoutPermit,
   type PermitState,
 } from './permits';
 
@@ -205,5 +206,66 @@ describe('trámites bloqueantes', () => {
     // Se ejecuta con las provisionales mientras llega la definitiva.
     expect(BLOCKING_PERMIT_KINDS).not.toContain('acometida_electrica');
     expect(BLOCKING_PERMIT_KINDS).not.toContain('acometida_agua');
+  });
+});
+
+describe('startedWithoutPermit', () => {
+  const licencia = (grantedAt: string | null): PermitState => ({
+    kind: 'licencia_obra',
+    requestedAt: '2026-01-15',
+    committedAt: null,
+    grantedAt,
+    notApplicable: false,
+  });
+
+  it('concedida después del inicio es haber empezado sin ella', () => {
+    // El caso real: obra abierta el 1 de marzo, licencia concedida el 28 de
+    // abril. El semáforo la da por verde —hoy está concedida— y nadie vuelve
+    // a mencionar los dos meses que hubo obra sin licencia.
+    expect(startedWithoutPermit(licencia('2026-04-28'), '2026-03-01')).toBe(
+      true,
+    );
+  });
+
+  it('concedida antes del inicio está en regla', () => {
+    expect(startedWithoutPermit(licencia('2026-02-20'), '2026-03-01')).toBe(
+      false,
+    );
+  });
+
+  it('concedida el mismo día del inicio está en regla', () => {
+    expect(startedWithoutPermit(licencia('2026-03-01'), '2026-03-01')).toBe(
+      false,
+    );
+  });
+
+  it('sin conceder y con la obra empezada, también', () => {
+    expect(startedWithoutPermit(licencia(null), '2026-03-01')).toBe(true);
+  });
+
+  it('una obra sin fecha de inicio no incumple nada todavía', () => {
+    expect(startedWithoutPermit(licencia(null), null)).toBe(false);
+  });
+
+  it('los trámites que no bloquean el arranque quedan fuera', () => {
+    // La acometida definitiva se tramita en paralelo: no haberla resuelto el
+    // primer día no es empezar sin ella.
+    const definitiva: PermitState = {
+      kind: 'acometida_electrica',
+      requestedAt: null,
+      committedAt: null,
+      grantedAt: null,
+      notApplicable: false,
+    };
+    expect(startedWithoutPermit(definitiva, '2026-03-01')).toBe(false);
+  });
+
+  it('lo marcado como no aplicable no se reprocha', () => {
+    expect(
+      startedWithoutPermit(
+        { ...licencia(null), notApplicable: true },
+        '2026-03-01',
+      ),
+    ).toBe(false);
   });
 });

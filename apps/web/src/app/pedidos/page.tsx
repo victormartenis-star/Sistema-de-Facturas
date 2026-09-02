@@ -330,6 +330,15 @@ export default function PedidosPage() {
             Se entrega a Administración en cada cierre. Los pedidos con albarán
             y sin factura son la provisión del mes.
           </p>
+
+          {traceQuery.data.warnings.map((w) => (
+            <div
+              key={w}
+              className="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800"
+            >
+              {w}
+            </div>
+          ))}
           <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
             <table className="w-full text-sm">
               <thead className="border-b border-gray-200 bg-gray-50 text-left text-xs text-gray-500">
@@ -357,7 +366,17 @@ export default function PedidosPage() {
                     <td className="px-4 py-2.5 font-mono text-xs">
                       {r.orderNumber}
                     </td>
-                    <td className="px-4 py-2.5">{r.contactName}</td>
+                    <td className="px-4 py-2.5">
+                      {r.contactName}
+                      {/* La homologación solo bloquea al facturar y al pagar,
+                          cuando el trabajo ya está hecho. Aquí se ve en el
+                          momento en que el gasto se comprometió. */}
+                      {r.supplierBlocked && (
+                        <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap text-red-700">
+                          NO HOMOLOGADA
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5 text-right tabular-nums">
                       {formatEur(r.amount)}
                     </td>

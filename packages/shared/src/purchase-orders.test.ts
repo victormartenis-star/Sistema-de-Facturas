@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  blockedSupplierWarning,
   buildOrderNumber,
   canReceiveDeliveries,
   deliveryNoteBlockReason,
@@ -159,5 +160,57 @@ describe('lectura del cuadro de trazabilidad', () => {
         accrualAmount: 0,
       }),
     ).toContain('riesgo de plazo');
+  });
+});
+
+describe('blockedSupplierWarning', () => {
+  const pedido = (
+    contactName: string,
+    amount: number,
+    supplierBlocked: boolean,
+  ) => ({
+    contactName,
+    amount,
+    supplierBlocked,
+  });
+
+  it('avisa del importe comprometido con subcontratas bloqueadas', () => {
+    // El caso real: 310.000 € pedidos a una empresa sin REA y 235.000 € a
+    // otra con el seguro caducado. El ERP no dijo nada hasta la factura.
+    const aviso = blockedSupplierWarning([
+      pedido('Cerramientos Cordón S.L.', 310_000, true),
+      pedido('Instalaciones Vallecas S.L.', 235_000, true),
+      pedido('Derribos Rivas S.L.', 145_000, false),
+    ]);
+    expect(aviso).toContain('545.000,00 €');
+    expect(aviso).toContain('Cerramientos Cordón S.L.');
+    expect(aviso).toContain('Instalaciones Vallecas S.L.');
+    expect(aviso).not.toContain('Rivas');
+  });
+
+  it('dice por qué avisar ahora y no al facturar', () => {
+    const aviso = blockedSupplierWarning([
+      pedido('Subcontrata S.L.', 1_000, true),
+    ]);
+    expect(aviso).toContain('el trabajo ya está hecho');
+  });
+
+  it('no repite la empresa que tiene varios pedidos', () => {
+    const aviso = blockedSupplierWarning([
+      pedido('Subcontrata S.L.', 1_000, true),
+      pedido('Subcontrata S.L.', 2_000, true),
+    ]);
+    expect(aviso).toContain('3000,00 €');
+    expect(aviso?.match(/Subcontrata S\.L\./g)).toHaveLength(1);
+  });
+
+  it('sin subcontratas bloqueadas no hay aviso', () => {
+    expect(
+      blockedSupplierWarning([pedido('Derribos Rivas S.L.', 145_000, false)]),
+    ).toBeNull();
+  });
+
+  it('sin pedidos tampoco', () => {
+    expect(blockedSupplierWarning([])).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { amountsMatch, round2 } from './calculo';
+import { amountsMatch, formatEuros, round2 } from './calculo';
 
 /**
  * Pedidos de compra.
@@ -212,6 +212,8 @@ export interface TraceabilityRowDto {
   invoicedAmount: number;
   /** Importe recibido sin facturar: lo que hay que provisionar. */
   accrualAmount: number;
+  /** La subcontrata está bloqueada hoy por documentación de PRL. */
+  supplierBlocked: boolean;
   reading: string;
 }
 
@@ -228,6 +230,35 @@ export interface TraceabilityReportDto {
   totalOrdered: number;
   totalDelivered: number;
   totalInvoiced: number;
+  /**
+   * Comprometido con subcontratas que hoy no pueden pisar la obra.
+   *
+   * El bloqueo por homologación salta al aprobar la factura y al pagar, que
+   * es cuando el trabajo ya está hecho y el problema es de la contrata, no de
+   * la subcontrata. Aquí se ve antes: en el momento de comprometer el gasto.
+   */
+  blockedSupplierAmount: number;
+  warnings: string[];
+}
+
+/**
+ * Lectura de un pedido comprometido con una subcontrata bloqueada.
+ *
+ * Se avisa, no se impide: a veces se adjudica y la empresa trae los papeles
+ * después. Lo que no puede pasar es que nadie lo sepa hasta la factura.
+ */
+export function blockedSupplierWarning(
+  rows: { contactName: string; supplierBlocked: boolean; amount: number }[],
+): string | null {
+  const afectados = rows.filter((r) => r.supplierBlocked);
+  if (afectados.length === 0) return null;
+  const total = afectados.reduce((s, r) => s + r.amount, 0);
+  const empresas = [...new Set(afectados.map((r) => r.contactName))];
+  return (
+    `Hay ${formatEuros(total)} comprometidos con subcontratas que hoy no pueden acceder a la obra: ` +
+    `${empresas.join(', ')}. El bloqueo por homologación solo salta al aprobar la factura, ` +
+    `y para entonces el trabajo ya está hecho: reclama la documentación ahora.`
+  );
 }
 
 /**

@@ -29,6 +29,7 @@ import {
   PurchaseOrderUpdateInput,
   TraceabilityReportDto,
   TraceabilityRowDto,
+  blockedSupplierWarning,
   buildOrderNumber,
   daysBetween,
   deriveOrderStatus,
@@ -39,6 +40,7 @@ import {
   todayIso,
   traceabilityReading,
 } from '@erp/shared';
+import { ComplianceService } from '../compliance/compliance.service';
 import { DbService } from '../db/db.service';
 
 /** Importes servidos y facturados de un pedido, sacados de sus albaranes. */
@@ -50,7 +52,10 @@ interface Delivered {
 
 @Injectable()
 export class PurchaseOrdersService {
-  constructor(private readonly dbs: DbService) {}
+  constructor(
+    private readonly dbs: DbService,
+    private readonly compliance: ComplianceService,
+  ) {}
 
   async list(options: {
     search?: string;
@@ -298,6 +303,14 @@ export class PurchaseOrdersService {
    */
   async traceability(projectId?: string): Promise<TraceabilityReportDto> {
     const orders = await this.list({ projectId });
+
+    // Se reutiliza el criterio de homologación en lugar de reimplementarlo:
+    // si mañana cambia lo que bloquea a una empresa, cambia también aquí.
+    const fichas = await this.compliance.list(false);
+    const bloqueadas = new Set(
+      fichas.filter((f) => f.blocked).map((f) => f.contactId),
+    );
+
     const rows: TraceabilityRowDto[] = orders
       .filter((o) => o.status !== 'anulado')
       .map((o) => {
@@ -315,6 +328,7 @@ export class PurchaseOrdersService {
           deliveredAmount: o.deliveredAmount,
           invoicedAmount: o.invoicedAmount,
           ...base,
+          supplierBlocked: bloqueadas.has(o.contactId),
           reading: traceabilityReading(base),
         };
       });
@@ -323,6 +337,7 @@ export class PurchaseOrdersService {
       round2(rows.reduce((s, r) => s + pick(r), 0));
 
     const project = orders[0];
+    const aviso = blockedSupplierWarning(rows);
     return {
       projectId: projectId ?? null,
       projectCode: projectId ? (project?.projectCode ?? null) : null,
@@ -331,6 +346,10 @@ export class PurchaseOrdersService {
       totalOrdered: sum((r) => r.amount),
       totalDelivered: sum((r) => r.deliveredAmount),
       totalInvoiced: sum((r) => r.invoicedAmount),
+      blockedSupplierAmount: round2(
+        rows.filter((r) => r.supplierBlocked).reduce((s, r) => s + r.amount, 0),
+      ),
+      warnings: aviso ? [aviso] : [],
     };
   }
 
