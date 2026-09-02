@@ -9,6 +9,16 @@
 
 export const BASE_URL = process.env.ERP_API_URL ?? 'http://localhost:3001';
 
+/**
+ * Token de la API, opcional.
+ *
+ * Hoy la API no exige autenticacion, pero la rama que introduce el modulo
+ * `auth` monta un guard que lee `Authorization: Bearer <token>`. Con esto el
+ * MCP ya lo manda cuando la variable existe: mientras no se defina, el
+ * comportamiento es identico al actual y no se envia ninguna cabecera de mas.
+ */
+const TOKEN = process.env.ERP_API_TOKEN ?? '';
+
 /** Error de la API con su codigo y el mensaje que devolvio Nest. */
 export class ErrorApi extends Error {
   constructor(
@@ -42,6 +52,7 @@ export async function pedir<T>(
       ...init,
       headers: {
         'Content-Type': 'application/json',
+        ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
         ...(init.headers ?? {}),
       },
     });
@@ -69,7 +80,18 @@ export async function pedir<T>(
   }
 
   if (!res.ok) {
-    throw new ErrorApi(res.status, cuerpo, mensajeDe(cuerpo, res.status));
+    let mensaje = mensajeDe(cuerpo, res.status);
+    // Un 401 sin token configurado es un fallo de instalacion, no de la
+    // peticion: sin esta pista el agente reintenta la llamada en bucle.
+    if (res.status === 401 && !TOKEN) {
+      mensaje +=
+        ' — La API exige autenticacion y ERP_API_TOKEN no esta definida.' +
+        ' Configurala en el entorno del servidor MCP (.mcp.json).';
+    }
+    if (res.status === 403) {
+      mensaje += ' — El token es valido pero su perfil no tiene ese permiso.';
+    }
+    throw new ErrorApi(res.status, cuerpo, mensaje);
   }
   return cuerpo as T;
 }

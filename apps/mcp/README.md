@@ -49,9 +49,17 @@ lanza solo al abrir el proyecto.
 
 ## Configuración
 
-| Variable      | Por defecto             | Para qué                 |
-| ------------- | ----------------------- | ------------------------ |
-| `ERP_API_URL` | `http://localhost:3001` | Base de la API del ERP   |
+| Variable         | Por defecto             | Para qué                                   |
+| ---------------- | ----------------------- | ------------------------------------------ |
+| `ERP_API_URL`    | `http://localhost:3001` | Base de la API del ERP                     |
+| `ERP_API_TOKEN`  | (vacío)                 | Token Bearer, cuando la API exija auth     |
+
+Hoy la API no pide autenticación y `ERP_API_TOKEN` puede quedarse sin definir:
+sin ella no se envía ninguna cabecera de más. La rama que introduce el módulo
+`auth` monta un guard que lee `Authorization: Bearer <token>`; cuando eso llegue
+a `main`, basta con definir la variable en el bloque `env` de `.mcp.json`. Un 401
+sin token configurado se devuelve con esa explicación, para que el agente no
+reintente en bucle.
 
 ## Herramientas
 
