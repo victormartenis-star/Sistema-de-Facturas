@@ -597,7 +597,7 @@ export default function ObraDetallePage() {
 
       {/* Partidas y desvío */}
       <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-1 flex items-center justify-between">
           <h2 className="text-sm font-semibold">
             Partidas y desvío presupuestario
           </h2>
@@ -614,6 +614,26 @@ export default function ObraDetallePage() {
           </button>
         </div>
 
+        <p className="mb-4 text-xs text-gray-500">
+          El desvío compara el presupuesto de cada partida con su{' '}
+          <strong className="font-semibold">coste probable</strong> —facturado,
+          más recibido sin facturar, más pedido y aún no servido—, no con lo
+          gastado hasta hoy: a mitad de obra falta por gastar justo lo que falta
+          por ejecutar.
+        </p>
+
+        {deviation && deviation.warnings.length > 0 && (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <ul className="space-y-1.5">
+              {deviation.warnings.map((w) => (
+                <li key={w} className="text-xs text-amber-800">
+                  · {w}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {phases.length === 0 && !deviation?.rows.length ? (
           <p className="py-6 text-center text-sm text-gray-500">
             Sin partidas: crea las fases de ejecución para controlar el
@@ -629,9 +649,15 @@ export default function ObraDetallePage() {
                     Presupuesto
                   </th>
                   <th className="px-3 py-2 text-right font-medium">
-                    Gasto imputado
+                    Facturado
                   </th>
-                  <th className="w-48 px-3 py-2 font-medium">Consumo</th>
+                  <th className="px-3 py-2 text-right font-medium">
+                    Comprometido
+                  </th>
+                  <th className="px-3 py-2 text-right font-medium">
+                    Coste probable
+                  </th>
+                  <th className="w-40 px-3 py-2 font-medium">Consumo</th>
                   <th className="px-3 py-2 text-right font-medium">Desvío</th>
                   <th className="px-3 py-2" />
                 </tr>
@@ -639,7 +665,9 @@ export default function ObraDetallePage() {
               <tbody>
                 {(deviation?.rows ?? []).map((row) => {
                   const ratio =
-                    row.budget > 0 ? Math.min(row.actual / row.budget, 1) : 0;
+                    row.budget > 0
+                      ? Math.min(row.probableCost / row.budget, 1)
+                      : 0;
                   const over = row.deviation > 0;
                   const phase = phases.find((p) => p.id === row.phaseId);
                   return (
@@ -656,32 +684,55 @@ export default function ObraDetallePage() {
                       <td className="px-3 py-2.5 text-right tabular-nums">
                         {formatEur(row.budget)}
                       </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">
-                        {formatEur(row.actual)}
+                      <td className="px-3 py-2.5 text-right tabular-nums text-gray-500">
+                        {formatEur(row.invoiced)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-gray-500">
+                        {formatEur(row.accrued + row.committed)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-semibold tabular-nums">
+                        {formatEur(row.probableCost)}
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="h-2 overflow-hidden rounded-full bg-gray-100">
                           <div
                             className={
-                              over
-                                ? 'h-full bg-red-500'
-                                : 'h-full bg-emerald-500'
+                              !row.started
+                                ? 'h-full bg-gray-300'
+                                : over
+                                  ? 'h-full bg-red-500'
+                                  : 'h-full bg-emerald-500'
                             }
                             style={{ width: `${Math.round(ratio * 100)}%` }}
                           />
                         </div>
                       </td>
+                      {/* Una partida sin contratar no está ahorrando: su
+                          "ahorro" es el presupuesto entero. En verde sería la
+                          partida mejor llevada de la obra. */}
                       <td
                         className={`px-3 py-2.5 text-right font-medium tabular-nums ${
-                          over ? 'text-red-600' : 'text-emerald-600'
+                          !row.started
+                            ? 'text-gray-400'
+                            : over
+                              ? 'text-red-600'
+                              : 'text-emerald-600'
                         }`}
                       >
-                        {row.deviation > 0 ? '+' : ''}
-                        {formatEur(row.deviation)}
-                        {row.deviationPct !== null && (
-                          <span className="block text-xs font-normal text-gray-400">
-                            {row.deviationPct > 0 ? '+' : ''}
-                            {row.deviationPct} %
+                        {row.started ? (
+                          <>
+                            {row.deviation > 0 ? '+' : ''}
+                            {formatEur(row.deviation)}
+                            {row.deviationPct !== null && (
+                              <span className="block text-xs font-normal text-gray-400">
+                                {row.deviationPct > 0 ? '+' : ''}
+                                {row.deviationPct} %
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-xs font-normal">
+                            Sin contratar
                           </span>
                         )}
                       </td>
@@ -721,18 +772,42 @@ export default function ObraDetallePage() {
                       {formatEur(deviation.budgetTotal)}
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums">
-                      {formatEur(deviation.actualTotal)}
+                      {formatEur(deviation.invoicedTotal)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      {formatEur(
+                        deviation.probableCostTotal - deviation.invoicedTotal,
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      {formatEur(deviation.probableCostTotal)}
+                      {!deviation.complete && (
+                        <span className="block text-xs font-normal text-gray-400">
+                          falta contratar{' '}
+                          {formatEur(deviation.uncommittedBudget)}
+                        </span>
+                      )}
                     </td>
                     <td />
+                    {/* Con partidas sin contratar el desvío total sale a la
+                        baja por fuerza: no hay nada que sumar todavía. En
+                        verde diría que la obra va sobrada. */}
                     <td
                       className={`px-3 py-2.5 text-right tabular-nums ${
-                        deviation.deviation > 0
-                          ? 'text-red-600'
-                          : 'text-emerald-600'
+                        !deviation.complete
+                          ? 'text-gray-400'
+                          : deviation.deviation > 0
+                            ? 'text-red-600'
+                            : 'text-emerald-600'
                       }`}
                     >
                       {deviation.deviation > 0 ? '+' : ''}
                       {formatEur(deviation.deviation)}
+                      {!deviation.complete && (
+                        <span className="block text-xs font-normal">
+                          provisional
+                        </span>
+                      )}
                     </td>
                     <td />
                   </tr>

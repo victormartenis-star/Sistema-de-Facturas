@@ -536,9 +536,12 @@ function buildWarnings(
       `El coste real se separó del plan en ${evolution.firstDivergenceMonth.slice(0, 7)}: la causa hay que buscarla en ese mes, no en el último.`,
     );
   }
+  // Aquí sí hace falta el reloj: distinguir el mes que nadie ha cerrado del
+  // mes que todavía no ha llegado. El cálculo puro no lo mira a propósito, así
+  // que la comparación con la fecha se hace en este lado.
   const mesEnCurso = startOfMonth(todayIso());
   const sinCerrar = evolution.rows.filter(
-    (r) => r.month < mesEnCurso && !r.hasRealData,
+    (r) => r.month < mesEnCurso && !r.closed,
   );
   if (sinCerrar.length > 0) {
     warnings.push(

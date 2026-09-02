@@ -6,17 +6,21 @@ import {
 import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm';
 import {
   ProjectPhase,
+  deliveryNotes,
   invoiceLines,
   invoices,
   projectPhases,
   projects,
+  purchaseOrders,
 } from '@erp/db';
 import {
   DeviationReportDto,
-  DeviationRowDto,
+  PhaseCostInput,
   PhaseCreateInput,
   PhaseDto,
   PhaseUpdateInput,
+  buildDeviationRows,
+  deviationWarnings,
   phaseCreateSchema,
   round2,
 } from '@erp/shared';
@@ -106,14 +110,106 @@ export class PhasesService {
   }
 
   /**
-   * Desvío presupuestario: presupuesto teórico de cada partida frente al
-   * gasto real imputado (líneas de facturas de compra no anuladas).
+   * Desvío por partida: presupuesto de coste frente al **coste probable**.
+   *
+   * El gasto imputado a día de hoy no sirve para medir el desvío de una
+   * partida: a mitad de obra falta por gastar justo lo que falta por
+   * ejecutar, así que todas las partidas darían un ahorro enorme y el
+   * capítulo que ya se ha pasado de pedidos saldría en verde. Lo que se
+   * compara es lo que la partida va a costar: facturado, más lo recibido sin
+   * facturar, más lo pedido y aún no servido.
    */
   async deviation(projectId: string): Promise<DeviationReportDto> {
     const project = await this.findProject(projectId);
     const phases = await this.list(projectId);
 
-    const spent = await this.dbs.db
+    const [invoiced, accrued, committed] = await Promise.all([
+      this.invoicedByPhase(projectId),
+      this.accruedByPhase(projectId),
+      this.committedByPhase(projectId),
+    ]);
+
+    const pendientes = new Map<string | null, PhaseCostInput>();
+    const registrar = (
+      phaseId: string | null,
+      campo: 'invoiced' | 'accrued' | 'committed',
+      amount: number,
+    ) => {
+      const actual = pendientes.get(phaseId) ?? {
+        phaseId,
+        code: '—',
+        name: 'Sin partida asignada',
+        budget: 0,
+        invoiced: 0,
+        accrued: 0,
+        committed: 0,
+      };
+      actual[campo] = round2(actual[campo] + amount);
+      pendientes.set(phaseId, actual);
+    };
+
+    const inputs: PhaseCostInput[] = phases.map((phase) => ({
+      phaseId: phase.id,
+      code: phase.code,
+      name: phase.name,
+      budget: phase.budgetAmount ?? 0,
+      invoiced: invoiced.get(phase.id) ?? 0,
+      accrued: accrued.get(phase.id) ?? 0,
+      committed: committed.get(phase.id) ?? 0,
+    }));
+
+    // Coste imputado a la obra sin partida (o a partidas ya borradas): se
+    // agrupa en una fila propia. Es coste de la obra igual que el demás, y
+    // esconderlo dejaría el informe cuadrando con menos de lo que cuesta.
+    const conocidas = new Set(phases.map((p) => p.id));
+    for (const [mapa, campo] of [
+      [invoiced, 'invoiced'],
+      [accrued, 'accrued'],
+      [committed, 'committed'],
+    ] as const) {
+      for (const [phaseId, amount] of mapa) {
+        if (phaseId === null || !conocidas.has(phaseId)) {
+          registrar(null, campo, amount);
+        }
+      }
+    }
+    const huerfanas = pendientes.get(null);
+    if (huerfanas) inputs.push(huerfanas);
+
+    const rows = buildDeviationRows(inputs);
+
+    const budgetTotal = round2(rows.reduce((s, r) => s + r.budget, 0));
+    const invoicedTotal = round2(rows.reduce((s, r) => s + r.invoiced, 0));
+    const probableCostTotal = round2(
+      rows.reduce((s, r) => s + r.probableCost, 0),
+    );
+    const uncommittedBudget = round2(
+      rows.filter((r) => !r.started).reduce((s, r) => s + r.budget, 0),
+    );
+    return {
+      projectId,
+      contractAmount:
+        project.contractAmount === null ? null : Number(project.contractAmount),
+      budgetTotal,
+      invoicedTotal,
+      probableCostTotal,
+      deviation: round2(probableCostTotal - budgetTotal),
+      deviationPct:
+        budgetTotal > 0
+          ? round2(((probableCostTotal - budgetTotal) / budgetTotal) * 100)
+          : null,
+      uncommittedBudget,
+      complete: rows.length > 0 && uncommittedBudget === 0,
+      rows,
+      warnings: deviationWarnings(rows),
+    };
+  }
+
+  /** Facturas de compra vivas, por partida. */
+  private async invoicedByPhase(
+    projectId: string,
+  ): Promise<Map<string | null, number>> {
+    const rows = await this.dbs.db
       .select({
         phaseId: invoiceLines.phaseId,
         total: sql<string>`coalesce(sum(${invoiceLines.baseAmount}), 0)`,
@@ -129,60 +225,67 @@ export class PhasesService {
         ),
       )
       .groupBy(invoiceLines.phaseId);
+    return new Map(rows.map((r) => [r.phaseId, round2(Number(r.total))]));
+  }
 
-    const actualByPhase = new Map<string | null, number>();
-    for (const row of spent) {
-      actualByPhase.set(row.phaseId, Number(row.total));
-    }
+  /** Albaranes recibidos y todavía sin factura, por partida. */
+  private async accruedByPhase(
+    projectId: string,
+  ): Promise<Map<string | null, number>> {
+    const rows = await this.dbs.db
+      .select({
+        phaseId: deliveryNotes.phaseId,
+        total: sql<string>`coalesce(sum(${deliveryNotes.amount}), 0)`,
+      })
+      .from(deliveryNotes)
+      .where(
+        and(
+          eq(deliveryNotes.projectId, projectId),
+          isNull(deliveryNotes.invoiceId),
+          isNull(deliveryNotes.deletedAt),
+        ),
+      )
+      .groupBy(deliveryNotes.phaseId);
+    return new Map(rows.map((r) => [r.phaseId, round2(Number(r.total))]));
+  }
 
-    const rows: DeviationRowDto[] = phases.map((phase) => {
-      const budget = phase.budgetAmount ?? 0;
-      const actual = actualByPhase.get(phase.id) ?? 0;
-      actualByPhase.delete(phase.id);
-      return {
-        phaseId: phase.id,
-        code: phase.code,
-        name: phase.name,
-        budget,
-        actual: round2(actual),
-        deviation: round2(actual - budget),
-        deviationPct:
-          budget > 0 ? round2(((actual - budget) / budget) * 100) : null,
-      };
-    });
+  /**
+   * Pedido vivo por la parte no servida, por partida.
+   *
+   * Se agrupa por la partida **del pedido**: es la que decidió el jefe de
+   * obra al comprometer el gasto, y por tanto la que responde de él aunque
+   * algún albarán se impute luego a otra.
+   */
+  private async committedByPhase(
+    projectId: string,
+  ): Promise<Map<string | null, number>> {
+    const delivered = this.dbs.db
+      .select({
+        orderId: deliveryNotes.orderId,
+        amount: sql<string>`sum(${deliveryNotes.amount})`.as('delivered'),
+      })
+      .from(deliveryNotes)
+      .where(isNull(deliveryNotes.deletedAt))
+      .groupBy(deliveryNotes.orderId)
+      .as('d');
 
-    // Gasto imputado a la obra sin partida (o a partidas borradas)
-    let unassigned = 0;
-    for (const amount of actualByPhase.values()) {
-      unassigned += amount;
-    }
-    if (unassigned > 0) {
-      rows.push({
-        phaseId: null,
-        code: '—',
-        name: 'Sin partida asignada',
-        budget: 0,
-        actual: round2(unassigned),
-        deviation: round2(unassigned),
-        deviationPct: null,
-      });
-    }
-
-    const budgetTotal = round2(rows.reduce((s, r) => s + r.budget, 0));
-    const actualTotal = round2(rows.reduce((s, r) => s + r.actual, 0));
-    return {
-      projectId,
-      contractAmount:
-        project.contractAmount === null ? null : Number(project.contractAmount),
-      budgetTotal,
-      actualTotal,
-      deviation: round2(actualTotal - budgetTotal),
-      deviationPct:
-        budgetTotal > 0
-          ? round2(((actualTotal - budgetTotal) / budgetTotal) * 100)
-          : null,
-      rows,
-    };
+    const rows = await this.dbs.db
+      .select({
+        phaseId: purchaseOrders.phaseId,
+        total: sql<string>`coalesce(sum(greatest(${purchaseOrders.amount} - coalesce(${delivered.amount}, 0), 0)), 0)`,
+      })
+      .from(purchaseOrders)
+      .leftJoin(delivered, eq(delivered.orderId, purchaseOrders.id))
+      .where(
+        and(
+          eq(purchaseOrders.projectId, projectId),
+          isNull(purchaseOrders.deletedAt),
+          ne(purchaseOrders.status, 'anulado'),
+          ne(purchaseOrders.status, 'cerrado'),
+        ),
+      )
+      .groupBy(purchaseOrders.phaseId);
+    return new Map(rows.map((r) => [r.phaseId, round2(Number(r.total))]));
   }
 
   private async find(id: string): Promise<ProjectPhase> {

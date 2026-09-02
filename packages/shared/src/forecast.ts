@@ -223,12 +223,19 @@ export interface MonthlyRow extends MonthlyInput {
   cumulativeRealProduction: number;
   cumulativeRealCost: number;
   cumulativeMargin: number;
+  /** ¿Tiene este mes producción o coste anotados? Es decir: ¿está cerrado? */
+  closed: boolean;
   /**
-   * ¿Hay algo real anotado hasta este mes? Mientras no lo haya, los desvíos
-   * se devuelven en null: el acumulado real es cero porque nadie ha cerrado
-   * el mes, no porque la obra se esté ejecutando gratis.
+   * ¿Significa algo comparar el acumulado en este mes?
+   *
+   * Solo entre el primer y el último mes cerrados. Antes del primero, el
+   * acumulado real es cero porque nadie ha anotado nada; después del último,
+   * porque el mes no ha ocurrido. En los dos casos el desvío daría −100 %
+   * —"he gastado menos"— y el semáforo pintaría de verde una obra de la que
+   * no se sabe nada. Un hueco entre medias sí se compara: ese mes pertenece
+   * al periodo ya vivido aunque nadie lo cerrara.
    */
-  hasRealData: boolean;
+  comparable: boolean;
   /** Desvío acumulado de coste frente al plan, en porcentaje. */
   costDeviationPct: number | null;
   /** Desvío acumulado de producción frente al plan, en porcentaje. */
@@ -251,11 +258,23 @@ export interface MonthlyEvolution {
  *
  * Los meses se ordenan por fecha antes de acumular: si llegan desordenados,
  * el acumulado saldría mal y nadie lo notaría.
+ *
+ * La comparación con el plan se corta en el último mes cerrado. El plan llega
+ * hasta fin de obra, pero lo real solo llega hasta donde alguien lo ha
+ * anotado: comparar más allá es restar un plan que sigue creciendo de un real
+ * que ya no crece, y eso pinta de verde —cada vez más verde— unos meses que
+ * simplemente no han pasado todavía. No hace falta mirar el reloj para saber
+ * dónde termina lo conocido; lo dice el propio dato.
  */
 export function buildMonthlyEvolution(
   months: MonthlyInput[],
 ): MonthlyEvolution {
   const sorted = [...months].sort((a, b) => a.month.localeCompare(b.month));
+
+  const isClosed = (m: MonthlyInput) => m.realProduction > 0 || m.realCost > 0;
+  const cerrados = sorted.filter(isClosed);
+  const primerCerrado = cerrados.at(0)?.month ?? null;
+  const ultimoCerrado = cerrados.at(-1)?.month ?? null;
 
   let cumPlannedProduction = 0;
   let cumPlannedCost = 0;
@@ -269,18 +288,18 @@ export function buildMonthlyEvolution(
     cumRealProduction = round2(cumRealProduction + m.realProduction);
     cumRealCost = round2(cumRealCost + m.realCost);
 
-    // Un mes sin nada anotado da −100 % de desvío de coste, y −100 % es
-    // "gastar menos", que el semáforo pinta de verde. Así es como una obra
-    // recién abierta aparece entera en objetivo sin que nadie haya cerrado un
-    // solo mes. Mientras no haya un euro real, no hay desvío que enseñar.
-    const hasRealData = cumRealProduction > 0 || cumRealCost > 0;
+    const comparable =
+      primerCerrado !== null &&
+      ultimoCerrado !== null &&
+      m.month >= primerCerrado &&
+      m.month <= ultimoCerrado;
 
     const costDeviationPct =
-      hasRealData && cumPlannedCost > 0
+      comparable && cumPlannedCost > 0
         ? round2(((cumRealCost - cumPlannedCost) / cumPlannedCost) * 100)
         : null;
     const productionDeviationPct =
-      hasRealData && cumPlannedProduction > 0
+      comparable && cumPlannedProduction > 0
         ? round2(
             ((cumRealProduction - cumPlannedProduction) /
               cumPlannedProduction) *
@@ -304,7 +323,8 @@ export function buildMonthlyEvolution(
       cumulativeRealProduction: cumRealProduction,
       cumulativeRealCost: cumRealCost,
       cumulativeMargin: round2(cumRealProduction - cumRealCost),
-      hasRealData,
+      closed: isClosed(m),
+      comparable,
       costDeviationPct,
       productionDeviationPct,
       light,

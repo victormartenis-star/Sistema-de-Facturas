@@ -253,7 +253,8 @@ describe('buildMonthlyEvolution', () => {
         realCost: 0,
       },
     ]);
-    expect(rows.every((r) => r.hasRealData === false)).toBe(true);
+    expect(rows.every((r) => r.closed === false)).toBe(true);
+    expect(rows.every((r) => r.comparable === false)).toBe(true);
     expect(rows.every((r) => r.costDeviationPct === null)).toBe(true);
     expect(rows.every((r) => r.productionDeviationPct === null)).toBe(true);
     expect(rows.every((r) => r.light === 'sin_datos')).toBe(true);
@@ -282,7 +283,8 @@ describe('buildMonthlyEvolution', () => {
       },
     ]);
     expect(rows[0].light).toBe('sin_datos');
-    expect(rows[1].hasRealData).toBe(true);
+    expect(rows[0].closed).toBe(false);
+    expect(rows[1].comparable).toBe(true);
     // 90.000 de coste real frente a 160.000 de plan acumulado: se ha gastado
     // menos, y eso sí es verde.
     expect(rows[1].costDeviationPct).toBe(-43.75);
@@ -299,8 +301,83 @@ describe('buildMonthlyEvolution', () => {
         realCost: 70_000,
       },
     ]);
-    expect(rows[0].hasRealData).toBe(true);
+    expect(rows[0].comparable).toBe(true);
     expect(rows[0].light).toBe('verde');
+  });
+
+  it('los meses que aún no han pasado no se comparan con nada', () => {
+    // Es el mismo fallo por el otro extremo: el plan sigue creciendo mes a
+    // mes y lo real se queda quieto, así que el desvío se vuelve cada vez más
+    // negativo —«cada vez gasto menos»— y la obra aparece cada vez más verde
+    // hacia el futuro. Al leer la tabla, cuatro meses en ámbar seguidos de
+    // nueve en verde se leen como «se está enderezando». No se está
+    // enderezando: esos meses no han ocurrido.
+    const { rows } = buildMonthlyEvolution([
+      {
+        month: '2026-07-01',
+        plannedProduction: 100_000,
+        plannedCost: 80_000,
+        realProduction: 96_000,
+        realCost: 84_000,
+      },
+      {
+        month: '2026-08-01',
+        plannedProduction: 100_000,
+        plannedCost: 80_000,
+        realProduction: 0,
+        realCost: 0,
+      },
+      {
+        month: '2026-09-01',
+        plannedProduction: 100_000,
+        plannedCost: 80_000,
+        realProduction: 0,
+        realCost: 0,
+      },
+    ]);
+    expect(rows[0].comparable).toBe(true);
+    expect(rows[0].costDeviationPct).toBe(5);
+    expect(rows[0].light).toBe('ambar');
+
+    for (const r of rows.slice(1)) {
+      expect(r.closed).toBe(false);
+      expect(r.comparable).toBe(false);
+      expect(r.costDeviationPct).toBeNull();
+      expect(r.productionDeviationPct).toBeNull();
+      expect(r.light).toBe('sin_datos');
+    }
+  });
+
+  it('un hueco entre meses cerrados se sigue comparando', () => {
+    // Aquí no hay ambigüedad: si junio tiene dato, mayo pertenece al periodo
+    // ya vivido aunque nadie lo cerrara. El acumulado sale corto, y de eso
+    // avisa el listado de meses sin cerrar, no el semáforo.
+    const { rows } = buildMonthlyEvolution([
+      {
+        month: '2026-04-01',
+        plannedProduction: 100_000,
+        plannedCost: 80_000,
+        realProduction: 100_000,
+        realCost: 82_000,
+      },
+      {
+        month: '2026-05-01',
+        plannedProduction: 100_000,
+        plannedCost: 80_000,
+        realProduction: 0,
+        realCost: 0,
+      },
+      {
+        month: '2026-06-01',
+        plannedProduction: 100_000,
+        plannedCost: 80_000,
+        realProduction: 100_000,
+        realCost: 90_000,
+      },
+    ]);
+    expect(rows[1].closed).toBe(false);
+    expect(rows[1].comparable).toBe(true);
+    expect(rows[2].comparable).toBe(true);
   });
 });
 
