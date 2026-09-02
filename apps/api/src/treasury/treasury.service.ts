@@ -4,16 +4,26 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { and, asc, eq, gte, isNull, lte, ne, SQL } from 'drizzle-orm';
-import { contacts, invoices, paymentMilestones } from '@erp/db';
+import {
+  certifications,
+  contacts,
+  deliveryNotes,
+  invoices,
+  paymentMilestones,
+  projects,
+} from '@erp/db';
 import {
   CashflowBucketDto,
   CashflowGrouping,
   CashflowReportDto,
+  CashItem,
   MilestoneDirection,
   MilestoneDto,
   MilestoneStatus,
+  ThirteenWeekDto,
   addDays,
   addMonths,
+  buildThirteenWeek,
   round2,
   startOfMonth,
   startOfWeek,
@@ -231,5 +241,136 @@ export class TreasuryService {
       saldoFinal: saldo,
       alertas,
     };
+  }
+
+  /**
+   * Tesorería a trece semanas.
+   *
+   * Además de los vencimientos ya facturados incorpora lo que va a pasar casi
+   * seguro pero todavía no tiene factura: las certificaciones emitidas y sin
+   * facturar (cobro) y los albaranes validados sin factura (pago). Dejarlos
+   * fuera daría una previsión sistemáticamente optimista en los pagos, que es
+   * el error caro: el cobro que no llega se nota, el pago que aparece de
+   * repente hunde la semana.
+   *
+   * El saldo de partida entra como dato: es el de las cuentas, y el ERP no lo
+   * sabe. Sin él se devuelven los importes pero ningún saldo.
+   */
+  async thirteenWeek(
+    openingBalance: number | null,
+    from?: string,
+  ): Promise<ThirteenWeekDto> {
+    const start = from ?? todayIso();
+    const items: CashItem[] = [];
+
+    // 1. Lo facturado y aprobado: deuda cierta con fecha.
+    const vencimientos = await this.milestones({ status: 'previsto' });
+    for (const m of vencimientos) {
+      items.push({
+        dueDate: m.dueDate,
+        direction: m.direction,
+        amount: m.amount,
+        confirmed: true,
+        concept: `${m.invoiceNumber} · ${m.contactName}`,
+      });
+    }
+
+    // 2. Certificaciones emitidas y sin facturar: cobro a la vista.
+    const certis = await this.dbs.db
+      .select({
+        certDate: certifications.certDate,
+        periodAmount: certifications.periodAmount,
+        retentionAmount: certifications.retentionAmount,
+        projectCode: projects.code,
+        terms: contacts.paymentTermsDays,
+      })
+      .from(certifications)
+      .innerJoin(projects, eq(certifications.projectId, projects.id))
+      .leftJoin(contacts, eq(projects.clientId, contacts.id))
+      .where(
+        and(
+          eq(certifications.status, 'borrador'),
+          isNull(certifications.deletedAt),
+        ),
+      );
+    for (const c of certis) {
+      // Lo que se cobra es el periodo menos la retención de garantía: la
+      // retención se libera al final, no en este horizonte.
+      const importe = round2(
+        Number(c.periodAmount) - Number(c.retentionAmount),
+      );
+      if (importe <= 0) continue;
+      items.push({
+        dueDate: addDays(c.certDate, c.terms ?? 60),
+        direction: 'cobro',
+        amount: importe,
+        confirmed: false,
+        concept: `${c.projectCode} · certificación sin facturar`,
+      });
+    }
+
+    // 3. Facturas de compra registradas y todavía sin aprobar.
+    //
+    // No generan vencimiento hasta que se aprueban, así que hoy son invisibles
+    // para la tesorería. Pero el dinero se debe igual: si la aprobación se
+    // retrasa una semana, la previsión de pagos sale vacía justo en el
+    // horizonte en el que había que decidir. El error va en la dirección mala.
+    const borradores = await this.dbs.db
+      .select({
+        issueDate: invoices.issueDate,
+        dueDate: invoices.dueDate,
+        invoiceNumber: invoices.invoiceNumber,
+        contactName: contacts.legalName,
+        terms: contacts.paymentTermsDays,
+        total: invoices.totalAmount,
+        retention: invoices.retentionAmount,
+      })
+      .from(invoices)
+      .innerJoin(contacts, eq(invoices.contactId, contacts.id))
+      .where(
+        and(
+          eq(invoices.kind, 'compra'),
+          eq(invoices.status, 'borrador'),
+          isNull(invoices.deletedAt),
+        ),
+      );
+    for (const f of borradores) {
+      // La retención de garantía no se paga en este horizonte: se libera al
+      // final de la obra.
+      const importe = round2(Number(f.total) - Number(f.retention ?? 0));
+      if (importe <= 0) continue;
+      items.push({
+        dueDate: f.dueDate ?? addDays(f.issueDate, f.terms ?? 30),
+        direction: 'pago',
+        amount: importe,
+        confirmed: false,
+        concept: `${f.invoiceNumber} · ${f.contactName} (sin aprobar)`,
+      });
+    }
+
+    // 4. Albaranes validados sin factura: el pago que aún no ha aparecido.
+    const albaranes = await this.dbs.db
+      .select({
+        noteDate: deliveryNotes.noteDate,
+        amount: deliveryNotes.amount,
+        contactName: contacts.legalName,
+        terms: contacts.paymentTermsDays,
+      })
+      .from(deliveryNotes)
+      .innerJoin(contacts, eq(deliveryNotes.contactId, contacts.id))
+      .where(
+        and(isNull(deliveryNotes.invoiceId), isNull(deliveryNotes.deletedAt)),
+      );
+    for (const a of albaranes) {
+      items.push({
+        dueDate: addDays(a.noteDate, a.terms ?? 30),
+        direction: 'pago',
+        amount: Number(a.amount),
+        confirmed: false,
+        concept: `${a.contactName} · albarán sin factura`,
+      });
+    }
+
+    return buildThirteenWeek(start, openingBalance, items);
   }
 }

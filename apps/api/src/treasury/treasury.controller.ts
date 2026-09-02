@@ -72,4 +72,25 @@ export class TreasuryController {
         : 'semana',
     );
   }
+
+  /**
+   * Tesorería a trece semanas. `saldoInicial` es el saldo real de las
+   * cuentas; sin él se devuelven los importes pero ningún saldo, porque una
+   * previsión que arranca en cero no dice si hay tensión de caja.
+   */
+  @Get('13-semanas')
+  thirteenWeek(
+    @Query('saldoInicial') saldoInicial?: string,
+    @Query('from') from?: string,
+  ) {
+    const saldo = Number(saldoInicial);
+    return this.service.thirteenWeek(
+      saldoInicial !== undefined &&
+        saldoInicial !== '' &&
+        Number.isFinite(saldo)
+        ? saldo
+        : null,
+      ISO_DATE.test(from ?? '') ? from : undefined,
+    );
+  }
 }

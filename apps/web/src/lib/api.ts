@@ -5,6 +5,7 @@ import type {
   Capability,
   CashflowGrouping,
   CashflowReportDto,
+  ThirteenWeekDto,
   CategoryDto,
   ChecklistDto,
   ChecklistMarkInput,
@@ -588,6 +589,11 @@ export const treasuryApi = {
     if (from) params.set('from', from);
     if (to) params.set('to', to);
     return request<CashflowReportDto>(`/treasury/cashflow?${params}`);
+  },
+  thirteenWeek: (saldoInicial: number | null) => {
+    const params = new URLSearchParams();
+    if (saldoInicial !== null) params.set('saldoInicial', String(saldoInicial));
+    return request<ThirteenWeekDto>(`/treasury/13-semanas?${params}`);
   },
 };
 
