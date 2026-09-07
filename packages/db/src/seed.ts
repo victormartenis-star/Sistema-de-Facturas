@@ -1,6 +1,7 @@
 import { randomBytes, scrypt as scryptCallback } from 'node:crypto';
 import { promisify } from 'node:util';
 import { eq } from 'drizzle-orm';
+import { isValidTaxId, normalizeTaxId } from '@erp/shared';
 import { getDb, closeDb, companies, categories, users } from './index';
 
 const scrypt = promisify(scryptCallback) as (
@@ -48,14 +49,26 @@ async function main() {
   if (company) {
     console.log(`Seed: empresa existente "${company.name}".`);
   } else {
+    const name = process.env.SEED_COMPANY_NAME ?? 'Mi Empresa Constructora';
+    const taxId = process.env.SEED_COMPANY_TAXID?.trim() || null;
+    // El NIF de la empresa es el que sale en cada factura emitida. Uno mal
+    // puesto aquí no se descubre hasta que lo devuelve un cliente, así que se
+    // comprueba antes de crear nada.
+    if (taxId && !isValidTaxId(taxId)) {
+      throw new Error(
+        `SEED_COMPANY_TAXID="${taxId}" no es un NIF/CIF válido: revisa la letra o el dígito de control.`,
+      );
+    }
     [company] = await db
       .insert(companies)
-      .values({
-        name: 'Mi Empresa Constructora',
-        taxId: 'B00000000',
-      })
+      .values({ name, taxId: taxId ? normalizeTaxId(taxId) : 'B00000000' })
       .returning();
     console.log(`Seed: empresa creada "${company.name}" (${company.id}).`);
+    if (!taxId) {
+      console.log(
+        'Seed: AVISO — la empresa tiene un NIF de relleno (B00000000). Es el que saldrá en cada factura emitida: corrígelo antes de emitir la primera, o vuelve a lanzar el seed con SEED_COMPANY_TAXID sobre una base vacía.',
+      );
+    }
   }
 
   const inserted = await db

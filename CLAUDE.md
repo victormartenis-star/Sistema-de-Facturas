@@ -9,6 +9,8 @@
 - Lint: `npm run lint` (arreglar: `npm run lint:fix`) · Formato: `npm run format` / `npm run format:check`
 - Tests: `npm test` (en desarrollo: `npm run test:watch -w @erp/shared`)
 - **Todo junto, lo mismo que ejecuta el CI: `npm run verify`**
+- Diagnóstico cuando algo no arranca: `npm run doctor` (no modifica nada)
+- Copia de seguridad: `npm run copia:crear` · restaurar: `npm run copia:restaurar -- <fichero>`
 
 ## Seguridad
 - La API **deniega por defecto**: la guarda global exige sesión y el endpoint que deba ser abierto se marca con `@Public()`. Un endpoint nuevo sin decorar queda protegido, que es el fallo barato.
@@ -36,3 +38,9 @@
 - Node portable v24: añadir `C:\Users\Victor\Tools\node-v24.18.0-win-x64` al `Path` de la sesión.
 - PostgreSQL 16.9 portable: no auto-arranca al reiniciar; arrancar con
   `C:\Users\Victor\Tools\pgsql\bin\pg_ctl.exe -D C:\Users\Victor\Tools\pgdata-erp -l C:\Users\Victor\Tools\pgdata-erp\server.log -w start`
+- Los scripts de `scripts/windows/` hacen todo eso: `instalar.ps1` (una vez),
+  `arrancar.ps1` (a diario), `parar-bd.ps1`, `copia.ps1`. Cargan las rutas
+  desde `entorno.ps1`, que se pueden cambiar con `ERP_NODE_DIR`, `ERP_PG_DIR`
+  y `ERP_PG_DATA_DIR` sin tocar los scripts.
+- La guía completa, con el orden en que hay que cargar los datos reales, está
+  en `docs/instalacion-y-carga.md`.

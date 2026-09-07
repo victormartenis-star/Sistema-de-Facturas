@@ -51,8 +51,8 @@ export default tseslint.config(
     rules: { '@typescript-eslint/no-explicit-any': 'off' },
   },
   {
-    // Scripts de siembra y migración: la consola es su interfaz.
-    files: ['packages/db/src/**', '**/*.config.*'],
+    // Scripts de siembra, migración y mantenimiento: la consola es su interfaz.
+    files: ['packages/db/src/**', 'scripts/**', '**/*.config.*'],
     rules: { 'no-console': 'off' },
   },
 );
