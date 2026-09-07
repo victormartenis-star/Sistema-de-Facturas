@@ -3,6 +3,7 @@ import type {
   AuditEntryDto,
   AuditQuery,
   Capability,
+  CertificationBaseDto,
   StoppageCreateInput,
   StoppageDto,
   StoppageReportDto,
@@ -321,6 +322,8 @@ export const invoicesApi = {
 };
 
 export const certificationsApi = {
+  base: (projectId: string) =>
+    request<CertificationBaseDto>(`/certifications/base/${projectId}`),
   list: (projectId: string) =>
     request<CertificationDto[]>(`/certifications?projectId=${projectId}`),
   create: (input: CertificationCreateInput) =>

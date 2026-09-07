@@ -152,6 +152,7 @@ function NewCertModal({
   onClose,
 }: {
   open: boolean;
+  /** Base sobre la que se aplica el %: contrato más modificados aprobados. */
   contractAmount: number | null;
   defaultRetention: number;
   prevPct: number;
@@ -462,6 +463,10 @@ export default function ObraDetallePage() {
     queryKey: ['deviation', id],
     queryFn: () => phasesApi.deviation(id),
   });
+  const certBaseQuery = useQuery({
+    queryKey: ['certificaciones-base', id],
+    queryFn: () => certificationsApi.base(id),
+  });
   const certsQuery = useQuery({
     queryKey: ['certifications', id],
     queryFn: () => certificationsApi.list(id),
@@ -559,6 +564,7 @@ export default function ObraDetallePage() {
   const phases = phasesQuery.data ?? [];
   const deviation = deviationQuery.data;
   const certs = certsQuery.data ?? [];
+  const certBase = certBaseQuery.data;
   const lastCert = certs.length > 0 ? certs[certs.length - 1] : null;
 
   if (projectQuery.isError) {
@@ -836,6 +842,41 @@ export default function ObraDetallePage() {
           </button>
         </div>
 
+        {/*
+          Contra qué se aplica el %. Con modificados aprobados no es el
+          contrato: certificar sobre el contrato inicial cobra de menos y no lo
+          delata nada, porque el porcentaje que se teclea es el correcto.
+        */}
+        {certBase?.currentBudget != null && (
+          <p className="mb-3 text-xs text-gray-500">
+            Se certifica sobre{' '}
+            <strong className="font-semibold">
+              {formatEur(certBase.currentBudget)}
+            </strong>
+            {certBase.contractAmount !== null &&
+              certBase.currentBudget !== certBase.contractAmount && (
+                <>
+                  {' '}
+                  (contrato {formatEur(certBase.contractAmount)} + modificados
+                  aprobados)
+                </>
+              )}
+            .
+          </p>
+        )}
+
+        {certBase && certBase.warnings.length > 0 && (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <ul className="space-y-1.5">
+              {certBase.warnings.map((w) => (
+                <li key={w} className="text-xs text-amber-800">
+                  · {w}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {certs.length === 0 ? (
           <p className="py-6 text-center text-sm text-gray-500">
             Sin certificaciones todavía. La primera parte del 0 % ejecutado.
@@ -942,7 +983,7 @@ export default function ObraDetallePage() {
       />
       <NewCertModal
         open={certModalOpen}
-        contractAmount={project.contractAmount}
+        contractAmount={certBase?.currentBudget ?? project.contractAmount}
         defaultRetention={project.retentionPct}
         prevPct={lastCert ? lastCert.cumulativePct : 0}
         prevCumulative={lastCert ? lastCert.cumulativeAmount : 0}

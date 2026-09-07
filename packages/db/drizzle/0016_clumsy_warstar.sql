@@ -1,0 +1,1 @@
+ALTER TABLE "certifications" ADD COLUMN "budget_base" numeric(14, 2);

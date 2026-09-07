@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { formatEuros, round2 } from './calculo';
 
 /**
  * Certificaciones de obra con facturación a origen:
@@ -64,7 +65,15 @@ export interface CertificationDto {
   certDate: string;
   /** % ejecutado acumulado a origen. */
   cumulativePct: number;
-  /** Importe acumulado a origen (contrato × %). */
+  /**
+   * Presupuesto sobre el que se aplicó el %: contrato más modificados
+   * aprobados en la fecha de la certificación. Null en las certificaciones
+   * anteriores a que se guardara la base.
+   */
+  budgetBase: number | null;
+  /** ¿La base incluye modificados, o es el contrato inicial a secas? */
+  budgetBaseIsUpdated: boolean;
+  /** Importe acumulado a origen (presupuesto vigente × %). */
   cumulativeAmount: number;
   /** Lo certificado en periodos anteriores. */
   previousAmount: number;
@@ -77,4 +86,57 @@ export interface CertificationDto {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Base de certificación de una obra y lo que hay que saber de ella. */
+export interface CertificationBaseDto {
+  projectId: string;
+  /** Contrato inicial. */
+  contractAmount: number | null;
+  /** Contrato más modificados aprobados: la base sobre la que se certifica. */
+  currentBudget: number | null;
+  warnings: string[];
+}
+
+/* ─────────────────────────── avisos ─────────────────────────── */
+
+/**
+ * Lo que hay que leer de las certificaciones de una obra.
+ *
+ * El fallo que persiguen: certificar a origen contra el contrato inicial
+ * cuando hay modificados aprobados. El % se aplica a una base menor de la
+ * real, así que se certifica de menos —y no se nota, porque el porcentaje que
+ * se teclea es el correcto—. Lo que falta no aparece en ninguna parte: no hay
+ * una fila que diga «te dejaste esto», simplemente se cobra menos.
+ */
+export function certificationWarnings(
+  rows: { seq: number; budgetBase: number | null; status: CertStatus }[],
+  currentBase: number,
+  contractAmount: number,
+): string[] {
+  const warnings: string[] = [];
+  if (rows.length === 0) return warnings;
+
+  const sinBase = rows.filter((r) => r.budgetBase === null);
+  if (sinBase.length > 0 && currentBase !== contractAmount) {
+    warnings.push(
+      `${sinBase.length} certificación(es) anteriores no guardaron sobre qué presupuesto se hicieron. Con modificados aprobados de por medio, revisa a mano si se certificaron sobre el contrato inicial.`,
+    );
+  }
+
+  const ultima = [...rows].sort((a, b) => b.seq - a.seq)[0];
+  if (ultima.budgetBase !== null && ultima.budgetBase !== currentBase) {
+    const diferencia = round2(currentBase - ultima.budgetBase);
+    warnings.push(
+      `El presupuesto vigente ha cambiado en ${formatEuros(diferencia)} desde la certificación nº ${ultima.seq}: la próxima se calculará sobre ${formatEuros(currentBase)} y el acumulado dará un salto. No es un error, es el modificado entrando a origen.`,
+    );
+  }
+
+  if (currentBase !== contractAmount) {
+    warnings.push(
+      `Se certifica sobre el presupuesto actualizado (${formatEuros(currentBase)}), no sobre el contrato inicial (${formatEuros(contractAmount)}). Solo entran los modificados aprobados por la Dirección Facultativa y por la Propiedad.`,
+    );
+  }
+
+  return warnings;
 }

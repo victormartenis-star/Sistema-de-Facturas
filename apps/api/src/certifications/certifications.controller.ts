@@ -29,6 +29,12 @@ export class CertificationsController {
     return this.service.list(projectId || undefined);
   }
 
+  /** Presupuesto vigente sobre el que se certifica, y sus avisos. */
+  @Get('base/:projectId')
+  base(@Param('projectId', ParseUUIDPipe) projectId: string) {
+    return this.service.base(projectId);
+  }
+
   @Post()
   create(
     @Body(new ZodValidationPipe(certificationCreateSchema))

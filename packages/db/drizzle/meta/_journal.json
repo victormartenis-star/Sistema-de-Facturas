@@ -113,6 +113,13 @@
       "when": 1788360747684,
       "tag": "0015_mean_vision",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1788781894085,
+      "tag": "0016_clumsy_warstar",
+      "breakpoints": true
     }
   ]
 }

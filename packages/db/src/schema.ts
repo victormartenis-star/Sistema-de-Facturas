@@ -452,6 +452,13 @@ export const certifications = pgTable(
       precision: 5,
       scale: 2,
     }).notNull(),
+    /**
+     * Presupuesto sobre el que se certificó este % a origen: contrato más
+     * modificados aprobados en ese momento. Se guarda en lugar de recalcularse
+     * porque una certificación es un documento emitido: si mañana se aprueba
+     * otro modificado, la base cambia para la siguiente, no para las ya hechas.
+     */
+    budgetBase: numeric('budget_base', { precision: 14, scale: 2 }),
     cumulativeAmount: numeric('cumulative_amount', {
       precision: 14,
       scale: 2,
