@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { checkTaxId } from './fiscal';
 import { daysBetween } from './calculo';
 import { COMPLIANCE_WARNING_DAYS, complianceDocStatus } from './compliance';
 
@@ -197,8 +198,19 @@ const isoDate = z
 export const workerCreateSchema = z.object({
   contactId: z.string().uuid('La subcontrata es obligatoria'),
   fullName: z.string().trim().min(1, 'El nombre es obligatorio').max(150),
-  /** DNI/NIE. Se guarda para poder identificarlo en la valla. */
-  docId: z.string().trim().max(30).nullish(),
+  /**
+   * DNI/NIE. Se guarda para poder identificarlo en la valla, y por eso tiene
+   * que estar bien: en la puerta se compara con un documento físico, y un
+   * dígito cambiado convierte la comprobación en una discusión.
+   */
+  docId: z
+    .string()
+    .trim()
+    .max(30)
+    .refine((v) => v === '' || checkTaxId(v).valid, {
+      message: 'El DNI/NIE no es válido: revisa la letra de control',
+    })
+    .nullish(),
   jobTitle: z.string().trim().max(120).nullish(),
   notes: z.string().trim().max(1000).nullish(),
 });

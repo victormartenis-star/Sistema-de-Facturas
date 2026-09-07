@@ -281,7 +281,14 @@ export default function CumplimientoPage() {
                       </span>
                     </div>
                     <p className="mt-1 truncate text-xs text-gray-500">
-                      {item.taxId ?? 'sin NIF'}
+                      <span
+                        className={
+                          item.taxIdWarning ? 'font-medium text-red-600' : ''
+                        }
+                      >
+                        {item.taxId ?? 'sin NIF'}
+                        {item.taxIdWarning && ' ⚠'}
+                      </span>
                       {item.reasons.length > 0 && ` · ${item.reasons[0]}`}
                     </p>
                   </button>
@@ -305,6 +312,18 @@ export default function CumplimientoPage() {
                   <StatusBadge status={selected.status} />
                 </span>
               </div>
+
+              {/*
+                El NIF mal no bloquea: la empresa puede trabajar igual. Pero es
+                la clave con la que se cruzan el REA y los certificados de
+                estar al corriente, así que se enseña aparte de los motivos de
+                bloqueo para que no se confunda con ellos.
+              */}
+              {selected.taxIdWarning && (
+                <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  {selected.taxIdWarning}
+                </p>
+              )}
 
               {selected.reasons.length > 0 && (
                 <ul

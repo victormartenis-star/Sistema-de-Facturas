@@ -195,6 +195,12 @@ export interface ComplianceSummaryDto {
   blocked: boolean;
   /** Motivos legibles del bloqueo o de los avisos. */
   reasons: string[];
+  /**
+   * Problema con el NIF, si lo hay. No bloquea —el NIF mal no impide que la
+   * empresa trabaje— pero se enseña donde se usa, porque es la clave con la
+   * que se cruzan el REA y los certificados de estar al corriente.
+   */
+  taxIdWarning: string | null;
   docs: ComplianceDocDto[];
   waiver: ComplianceWaiverDto | null;
 }

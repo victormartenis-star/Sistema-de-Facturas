@@ -26,6 +26,7 @@ import {
   ComplianceWaiverInput,
   complianceBlockSchema,
   complianceDocCreateSchema,
+  taxIdWarning,
   complianceDocStatus,
   complianceDocUpdateSchema,
   complianceWaiverSchema,
@@ -331,6 +332,7 @@ export class ComplianceService {
       status,
       blocked,
       reasons,
+      taxIdWarning: taxIdWarning(contact.taxId),
       docs,
       waiver,
     };

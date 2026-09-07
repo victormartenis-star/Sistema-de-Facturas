@@ -18,3 +18,4 @@ export * from './checklist';
 export * from './workers';
 export * from './treasury';
 export * from './stoppages';
+export * from './fiscal';
