@@ -1,5 +1,13 @@
 import { DOCUMENT_MAX_SIZE_MB } from '@erp/shared';
 import type {
+  Bc3ImportResultDto,
+  BudgetCreateInput,
+  BudgetDetailDto,
+  BudgetDto,
+  BudgetItemCreateInput,
+  BudgetItemDto,
+  BudgetItemUpdateInput,
+  BudgetUpdateInput,
   AuthTokensDto,
   CashflowGrouping,
   CashflowReportDto,
@@ -509,6 +517,69 @@ export const treasuryApi = {
     if (to) params.set('to', to);
     return request<CashflowReportDto>(`/treasury/cashflow?${params}`);
   },
+};
+
+export const budgetsApi = {
+  /** Lista los presupuestos de una obra (sin partidas). */
+  listByProject: (projectId: string) =>
+    request<BudgetDto[]>(`/projects/${projectId}/budgets`),
+
+  /** Detalle de un presupuesto con el árbol de partidas. */
+  getDetail: (id: string) => request<BudgetDetailDto>(`/budgets/${id}`),
+
+  /** Crea un presupuesto manual vacío para una obra. */
+  create: (projectId: string, input: BudgetCreateInput) =>
+    request<BudgetDto>(`/projects/${projectId}/budgets`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  /** Actualiza nombre, estado o notas de un presupuesto. */
+  update: (id: string, input: BudgetUpdateInput) =>
+    request<BudgetDto>(`/budgets/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+
+  /** Borrado lógico del presupuesto. */
+  remove: (id: string) => request<void>(`/budgets/${id}`, { method: 'DELETE' }),
+
+  /**
+   * Importa un archivo .bc3 (Presto/FIEBDC-3) como nuevo presupuesto.
+   * @param projectId  UUID de la obra
+   * @param file       Archivo .bc3 seleccionado por el usuario
+   * @param name       Nombre del presupuesto (por defecto = nombre del archivo)
+   */
+  importBc3: (
+    projectId: string,
+    file: File,
+    name?: string,
+  ): Promise<Bc3ImportResultDto> => {
+    const form = new FormData();
+    form.append('file', file);
+    if (name) form.append('name', name);
+    return request<Bc3ImportResultDto>(
+      `/projects/${projectId}/budgets/import/bc3`,
+      { method: 'POST', body: form },
+    );
+  },
+
+  // ── Partidas ────────────────────────────────────────────────────────────────
+
+  createItem: (budgetId: string, input: BudgetItemCreateInput) =>
+    request<BudgetItemDto>(`/budgets/${budgetId}/items`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  updateItem: (itemId: string, input: BudgetItemUpdateInput) =>
+    request<BudgetItemDto>(`/budget-items/${itemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+
+  removeItem: (itemId: string) =>
+    request<void>(`/budget-items/${itemId}`, { method: 'DELETE' }),
 };
 
 /** URL del original (visor); la sirve la API en streaming. */

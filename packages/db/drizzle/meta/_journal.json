@@ -57,6 +57,13 @@
       "when": 1789153176871,
       "tag": "0007_normal_talos",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789156191417,
+      "tag": "0008_lazy_morbius",
+      "breakpoints": true
     }
   ]
 }

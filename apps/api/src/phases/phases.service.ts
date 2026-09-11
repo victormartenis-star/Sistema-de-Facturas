@@ -6,6 +6,8 @@ import {
 import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm';
 import {
   ProjectPhase,
+  budgetItems,
+  budgets,
   invoiceLines,
   invoices,
   projectPhases,
@@ -108,10 +110,45 @@ export class PhasesService {
   /**
    * Desvío presupuestario: presupuesto teórico de cada partida frente al
    * gasto real imputado (líneas de facturas de compra no anuladas).
+   *
+   * Si la obra tiene un presupuesto `activo` en `budgets`, el importe
+   * presupuestado de cada fase se calcula sumando las partidas de ese
+   * presupuesto enlazadas a la fase (vía `budget_items.phase_id`).
+   * Si no hay presupuesto activo, se usa `project_phases.budget_amount`
+   * como antes (compatibilidad hacia atrás).
    */
   async deviation(projectId: string): Promise<DeviationReportDto> {
     const project = await this.findProject(projectId);
     const phases = await this.list(projectId);
+
+    // ¿Hay presupuesto activo? Si lo hay, calculamos budgetByPhase desde budget_items.
+    const [activeBudget] = await this.dbs.db
+      .select({ id: budgets.id })
+      .from(budgets)
+      .where(
+        and(
+          eq(budgets.projectId, projectId),
+          eq(budgets.status, 'activo'),
+          isNull(budgets.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    const budgetByPhase = new Map<string, number>();
+    if (activeBudget) {
+      const budgetAgg = await this.dbs.db
+        .select({
+          phaseId: budgetItems.phaseId,
+          total: sql<string>`coalesce(sum(${budgetItems.totalAmount}), 0)`,
+        })
+        .from(budgetItems)
+        .where(eq(budgetItems.budgetId, activeBudget.id))
+        .groupBy(budgetItems.phaseId);
+
+      for (const row of budgetAgg) {
+        if (row.phaseId) budgetByPhase.set(row.phaseId, Number(row.total));
+      }
+    }
 
     const spent = await this.dbs.db
       .select({
@@ -136,7 +173,11 @@ export class PhasesService {
     }
 
     const rows: DeviationRowDto[] = phases.map((phase) => {
-      const budget = phase.budgetAmount ?? 0;
+      // Presupuesto: si hay presupuesto activo con partidas enlazadas, usar esos;
+      // si no, caer al budget_amount de la fase.
+      const budget = activeBudget
+        ? (budgetByPhase.get(phase.id) ?? 0)
+        : (phase.budgetAmount ?? 0);
       const actual = actualByPhase.get(phase.id) ?? 0;
       actualByPhase.delete(phase.id);
       return {

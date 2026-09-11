@@ -720,3 +720,103 @@ export type NewExtraction = typeof extractions.$inferInsert;
 export type ContactComplianceDoc = typeof contactComplianceDocs.$inferSelect;
 export type NewContactComplianceDoc = typeof contactComplianceDocs.$inferInsert;
 export type ComplianceWaiver = typeof complianceWaivers.$inferSelect;
+
+// ─── Presupuestos ────────────────────────────────────────────────────────────
+
+/** Estado del presupuesto: borrador → activo (solo 1 activo por obra) → cerrado. */
+export const budgetStatusEnum = pgEnum('budget_status', [
+  'borrador',
+  'activo',
+  'cerrado',
+]);
+
+/**
+ * Cabecera de presupuesto de obra. Una obra puede tener varias versiones;
+ * solo puede haber un presupuesto `activo` por obra a la vez.
+ * `source`: 'manual' | 'bc3' — indica si se creó a mano o se importó desde Presto/BC3.
+ */
+export const budgets = pgTable(
+  'budgets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    status: budgetStatusEnum('status').notNull().default('borrador'),
+    /** 'manual' | 'bc3' */
+    source: text('source').notNull().default('manual'),
+    /** Cuándo se importó el archivo BC3 (nulo si es manual). */
+    importedAt: timestamp('imported_at', { withTimezone: true }),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+);
+
+/**
+ * Partidas del presupuesto. Admite árbol BC3 completo (capítulos, subcapítulos
+ * y partidas) usando `level` y `parent_code`. Las partidas hoja (level 3+)
+ * tienen `unit_price` y `quantity`; los nodos intermedios (capítulos) acumulan
+ * `total_amount` para facilitar los informes.
+ */
+export const budgetItems = pgTable(
+  'budget_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    budgetId: uuid('budget_id')
+      .notNull()
+      .references(() => budgets.id, { onDelete: 'cascade' }),
+    /** Código BC3 (ej. "01.01.003") o código manual. */
+    code: text('code').notNull(),
+    /** Descripción de la partida / capítulo. */
+    name: text('name').notNull(),
+    /** Unidad de medida (m², m³, ud, h, kg…). Vacío en capítulos. */
+    unit: text('unit').notNull().default(''),
+    /** Precio unitario. 0 en nodos capítulo. */
+    unitPrice: numeric('unit_price', { precision: 14, scale: 4 })
+      .notNull()
+      .default('0'),
+    /** Medición (cantidad). 0 en nodos capítulo. */
+    quantity: numeric('quantity', { precision: 14, scale: 4 })
+      .notNull()
+      .default('0'),
+    /** Importe total = unit_price × quantity (precalculado). */
+    totalAmount: numeric('total_amount', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    /** FK a `project_phases`; permite enlazar partida BC3 con la fase de la obra. */
+    phaseId: uuid('phase_id').references(() => projectPhases.id, {
+      onDelete: 'set null',
+    }),
+    /** Nivel en árbol BC3: 1=capítulo, 2=subcapítulo, 3=partida, 4+=subpartida. */
+    level: integer('level').notNull().default(3),
+    /** Código del nodo padre (null en capítulos raíz). */
+    parentCode: text('parent_code'),
+    /** Orden de aparición dentro del padre. */
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Código único dentro de un presupuesto
+    unique().on(t.budgetId, t.code),
+  ],
+);
+
+export type Budget = typeof budgets.$inferSelect;
+export type NewBudget = typeof budgets.$inferInsert;
+export type BudgetItem = typeof budgetItems.$inferSelect;
+export type NewBudgetItem = typeof budgetItems.$inferInsert;
