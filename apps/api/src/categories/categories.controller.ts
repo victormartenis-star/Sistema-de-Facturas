@@ -11,7 +11,7 @@ export class CategoriesController {
   /** Las categorías de sistema primero, luego las personalizadas por nombre. */
   @Get()
   async list(): Promise<CategoryDto[]> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     const rows = await this.dbs.db
       .select()
       .from(categories)

@@ -74,7 +74,7 @@ export class ComplianceService {
 
   /** Ficha de homologación de todas las subcontratas sujetas a control. */
   async list(onlyRequired = true): Promise<ComplianceSummaryDto[]> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     const rows = await this.dbs.db
       .select()
       .from(contacts)
@@ -110,7 +110,7 @@ export class ComplianceService {
     contactId: string,
     input: ComplianceDocCreateInput,
   ): Promise<ComplianceDocDto> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     await this.findContact(contactId);
     const data = complianceDocCreateSchema.parse(input);
     const [row] = await this.dbs.db
@@ -209,7 +209,7 @@ export class ComplianceService {
     contactId: string,
     input: ComplianceWaiverInput,
   ): Promise<ComplianceWaiverDto> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     await this.findContact(contactId);
     const data = complianceWaiverSchema.parse(input);
     if (daysUntil(data.validUntil) < 0) {

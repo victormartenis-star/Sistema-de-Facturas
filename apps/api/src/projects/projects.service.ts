@@ -38,7 +38,7 @@ export class ProjectsService {
   constructor(private readonly dbs: DbService) {}
 
   async list(search?: string, status?: ProjectStatus): Promise<ProjectDto[]> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     const filters: SQL[] = [
       eq(projects.companyId, companyId),
       isNull(projects.deletedAt),
@@ -66,7 +66,7 @@ export class ProjectsService {
   }
 
   async create(input: ProjectCreateInput): Promise<ProjectDto> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     const data = projectCreateSchema.parse(input);
     try {
       const [row] = await this.dbs.db

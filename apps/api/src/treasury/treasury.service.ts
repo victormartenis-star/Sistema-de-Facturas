@@ -59,7 +59,7 @@ export class TreasuryService {
     from?: string;
     to?: string;
   }): Promise<MilestoneDto[]> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     const filters: SQL[] = [
       eq(paymentMilestones.companyId, companyId),
       isNull(invoices.deletedAt),

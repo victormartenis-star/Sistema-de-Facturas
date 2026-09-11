@@ -56,7 +56,7 @@ export class PhasesService {
   }
 
   async create(projectId: string, input: PhaseCreateInput): Promise<PhaseDto> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     await this.findProject(projectId);
     const data = phaseCreateSchema.parse(input);
     try {

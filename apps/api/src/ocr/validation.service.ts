@@ -52,7 +52,7 @@ export class ValidationService {
    * contacto (por NIF) y obra (por código) para que validar sea un clic.
    */
   async pending(status?: DocStatus): Promise<ValidationItemDto[]> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     const filters: SQL[] = [
       eq(documents.companyId, companyId),
       isNull(documents.deletedAt),

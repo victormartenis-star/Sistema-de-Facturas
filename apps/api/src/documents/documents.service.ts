@@ -68,7 +68,7 @@ export class DocumentsService {
     docType?: DocType;
     projectId?: string;
   }): Promise<DocumentDto[]> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     const where: SQL[] = [
       eq(documents.companyId, companyId),
       isNull(documents.deletedAt),
@@ -101,7 +101,7 @@ export class DocumentsService {
     file: UploadedDocumentFile,
     meta: DocumentUploadMeta,
   ): Promise<DocumentDto> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
 
     if (
       !(DOCUMENT_ACCEPTED_MIME_TYPES as readonly string[]).includes(
@@ -177,7 +177,7 @@ export class DocumentsService {
     await this.find(id);
     const data = documentUpdateSchema.parse(input);
     if (data.projectId) {
-      const companyId = await this.dbs.getDefaultCompanyId();
+      const companyId = await this.dbs.getCompanyId();
       await this.ensureProject(companyId, data.projectId);
     }
     const [row] = await this.dbs.db

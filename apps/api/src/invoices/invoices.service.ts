@@ -63,7 +63,7 @@ export class InvoicesService {
     status?: InvoiceStatus,
     search?: string,
   ): Promise<InvoiceDto[]> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     const filters: SQL[] = [
       eq(invoices.companyId, companyId),
       isNull(invoices.deletedAt),
@@ -95,7 +95,7 @@ export class InvoicesService {
   }
 
   async create(input: InvoiceCreateInput): Promise<InvoiceDto> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     const data = invoiceCreateSchema.parse(input);
     await this.findContact(data.contactId);
     const amounts = computeInvoiceAmounts(

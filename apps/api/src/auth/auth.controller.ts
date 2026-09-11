@@ -1,12 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  HttpCode,
-  Post,
-  Req,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Req } from '@nestjs/common';
 import {
   AuthTokensDto,
   LoginInput,
@@ -19,12 +11,14 @@ import {
 } from '@erp/shared';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { AuthService } from './auth.service';
-import { AuthenticatedRequest, JwtAuthGuard } from './jwt-auth.guard';
+import { AuthenticatedRequest } from './jwt-auth.guard';
+import { Public } from './public.decorator';
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
+  @Public()
   @Post('register')
   register(
     @Body(new ZodValidationPipe(registerSchema)) body: RegisterInput,
@@ -32,6 +26,7 @@ export class AuthController {
     return this.auth.register(body);
   }
 
+  @Public()
   @Post('login')
   @HttpCode(200)
   login(
@@ -40,6 +35,7 @@ export class AuthController {
     return this.auth.login(body);
   }
 
+  @Public()
   @Post('refresh')
   @HttpCode(200)
   refresh(
@@ -48,6 +44,7 @@ export class AuthController {
     return this.auth.refresh(body.refreshToken);
   }
 
+  @Public()
   @Post('logout')
   @HttpCode(204)
   async logout(
@@ -56,8 +53,8 @@ export class AuthController {
     await this.auth.logout(body.refreshToken);
   }
 
+  /** Ya protegido por el `JwtAuthGuard` global (no es `@Public()`). */
   @Get('me')
-  @UseGuards(JwtAuthGuard)
   me(@Req() req: AuthenticatedRequest): Promise<UserDto> {
     return this.auth.me(req.user.sub);
   }

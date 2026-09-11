@@ -79,7 +79,7 @@ export class DeliveryNotesService {
     contactId?: string;
     availableForContact?: string;
   }): Promise<DeliveryNoteDto[]> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     const filters: SQL[] = [
       eq(deliveryNotes.companyId, companyId),
       isNull(deliveryNotes.deletedAt),
@@ -122,7 +122,7 @@ export class DeliveryNotesService {
   }
 
   async create(input: DeliveryNoteCreateInput): Promise<DeliveryNoteDto> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     const data = deliveryNoteCreateSchema.parse(input);
     try {
       const [row] = await this.dbs.db

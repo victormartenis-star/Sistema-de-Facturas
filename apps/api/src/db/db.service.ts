@@ -1,5 +1,10 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  OnModuleDestroy,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { closeDb, companies, Db, getDb } from '@erp/db';
+import { getRequestContext } from '../common/request-context';
 
 @Injectable()
 export class DbService implements OnModuleDestroy {
@@ -10,9 +15,25 @@ export class DbService implements OnModuleDestroy {
   }
 
   /**
-   * MVP monoempresa: todas las operaciones cuelgan de la única empresa
-   * existente (creada por el seed). Cuando llegue la autenticación, el
-   * company_id vendrá del usuario autenticado.
+   * `company_id` del usuario autenticado en la petición actual, publicado por
+   * `RequestContextInterceptor` a partir del JWT que valida `JwtAuthGuard`.
+   * Úsala en cualquier servicio detrás de un endpoint protegido.
+   */
+  getCompanyId(): string {
+    const ctx = getRequestContext();
+    if (!ctx) {
+      throw new UnauthorizedException(
+        'No hay usuario autenticado en el contexto de la petición',
+      );
+    }
+    return ctx.companyId;
+  }
+
+  /**
+   * Bootstrap monoempresa: la única empresa existente (creada por el seed).
+   * Solo para lo que ocurre *antes* de tener un usuario autenticado (alta de
+   * la primera cuenta) o fuera de una petición HTTP (worker de OCR). El resto
+   * del código usa `getCompanyId()`.
    */
   async getDefaultCompanyId(): Promise<string> {
     if (this.defaultCompanyId) return this.defaultCompanyId;

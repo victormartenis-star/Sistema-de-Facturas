@@ -47,7 +47,7 @@ export class CertificationsService {
   ) {}
 
   async list(projectId?: string): Promise<CertificationDto[]> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     const filters: SQL[] = [
       eq(certifications.companyId, companyId),
       isNull(certifications.deletedAt),
@@ -66,7 +66,7 @@ export class CertificationsService {
    * entre el acumulado actual (contrato × %) y lo certificado antes.
    */
   async create(input: CertificationCreateInput): Promise<CertificationDto> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     const data = certificationCreateSchema.parse(input);
     const project = await this.findProject(data.projectId);
     if (project.contractAmount === null) {

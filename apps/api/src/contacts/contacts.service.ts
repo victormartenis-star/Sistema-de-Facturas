@@ -39,7 +39,7 @@ export class ContactsService {
   constructor(private readonly dbs: DbService) {}
 
   async list(search?: string, kind?: ContactKind): Promise<ContactDto[]> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     const filters: SQL[] = [
       eq(contacts.companyId, companyId),
       isNull(contacts.deletedAt),
@@ -70,7 +70,7 @@ export class ContactsService {
   }
 
   async create(input: ContactCreateInput): Promise<ContactDto> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     const data = contactCreateSchema.parse(input);
     try {
       const [row] = await this.dbs.db

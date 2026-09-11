@@ -60,7 +60,7 @@ export class PurchaseOrdersService {
     /** Solo pedidos que todavía pueden recibir albaranes. */
     receiving?: boolean;
   }): Promise<PurchaseOrderDto[]> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     const filters: SQL[] = [
       eq(purchaseOrders.companyId, companyId),
       isNull(purchaseOrders.deletedAt),
@@ -123,7 +123,7 @@ export class PurchaseOrdersService {
    * porque el índice único parcial lo impide.
    */
   async create(input: PurchaseOrderCreateInput): Promise<PurchaseOrderDto> {
-    const companyId = await this.dbs.getDefaultCompanyId();
+    const companyId = await this.dbs.getCompanyId();
     const data = purchaseOrderCreateSchema.parse(input);
     const project = await this.findProject(data.projectId);
     await this.assertContactExists(data.contactId);

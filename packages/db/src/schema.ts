@@ -8,6 +8,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -618,7 +619,81 @@ export const extractions = pgTable('extractions', {
     .defaultNow(),
 });
 
+/**
+ * Identidad y acceso (02-base-de-datos.md §2.1).
+ * Autenticación propia: contraseña con scrypt, JWT de acceso de corta vida y
+ * refresh tokens persistidos (solo su hash) para poder revocarlos. El rol
+ * `obra` solo ve los proyectos asignados en `user_project_access`.
+ */
+export const userRoleEnum = pgEnum('user_role', [
+  'admin',
+  'gerente',
+  'administracion',
+  'obra',
+]);
+
+export const users = pgTable(
+  'users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    email: text('email').notNull(),
+    passwordHash: text('password_hash').notNull(),
+    fullName: text('full_name').notNull(),
+    role: userRoleEnum('role').notNull().default('administracion'),
+    isActive: boolean('is_active').notNull().default(true),
+    lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  // El email identifica al usuario en todo el sistema (login sin indicar empresa)
+  (t) => [
+    uniqueIndex('users_email_unique')
+      .on(sql`lower(${t.email})`)
+      .where(sql`deleted_at IS NULL`),
+  ],
+);
+
+export const userProjectAccess = pgTable(
+  'user_project_access',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.projectId] })],
+);
+
+export const refreshTokens = pgTable('refresh_tokens', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  // sha256 del token opaco entregado al cliente; el token en claro no se guarda
+  tokenHash: text('token_hash').notNull().unique(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export type Company = typeof companies.$inferSelect;
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+export type UserProjectAccess = typeof userProjectAccess.$inferSelect;
+export type RefreshToken = typeof refreshTokens.$inferSelect;
+export type NewRefreshToken = typeof refreshTokens.$inferInsert;
 export type Project = typeof projects.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;
 export type Category = typeof categories.$inferSelect;
