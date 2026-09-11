@@ -1,0 +1,13 @@
+---
+description: Estándares TypeScript / NestJS / Next.js del monorepo
+globs: erp-dintel/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Estándares de Código
+
+- Tipado estricto en TypeScript; preferir tipos de `@erp/shared`.
+- NestJS: controladores delgados; lógica en services.
+- Dinero/cálculo: solo en `packages/shared/src/calculo.ts` (funciones puras + tests).
+- MCP: importar DTOs de `@erp/shared`; no duplicar esquemas; no tocar Postgres.
+- Tras cambiar `packages/*`: `npm run build:packages` antes de arrancar la API.

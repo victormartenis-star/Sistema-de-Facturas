@@ -1,0 +1,12 @@
+---
+description: Puntero a la memoria viva del proyecto
+alwaysApply: true
+---
+
+# Memoria
+
+Fuente de verdad:
+- Estado: `.cursor/memoria/estado-actual.md`
+- Decisiones: `.cursor/memoria/decisiones.md`
+
+No dupliques estado aquí. Lee/actualiza esos archivos.

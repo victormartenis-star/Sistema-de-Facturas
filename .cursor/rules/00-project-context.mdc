@@ -1,0 +1,15 @@
+---
+description: Contexto general ERP Dintel y directivas de trabajo
+alwaysApply: true
+---
+
+# Contexto ERP Dintel
+
+- **Stack:** NestJS (`apps/api`), Next.js (`apps/web`), Drizzle (`packages/db`), Zod/tipos (`packages/shared`), MCP (`apps/mcp`).
+- **Idioma:** respuestas y comentarios en español.
+- **Estilo:** modular, tipado estricto, diffs mínimos (no reescribir archivos enteros).
+
+# Memoria (obligatorio)
+- Antes de modificar código: lee `.cursor/memoria/estado-actual.md` y `.cursor/memoria/decisiones.md`.
+- Tras un hito: actualiza `.cursor/memoria/estado-actual.md`.
+- Workflows de contexto/API: skills `erp-contexto` y `erp-api-dev`.
