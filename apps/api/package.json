@@ -6,7 +6,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node --env-file-if-exists=../../.env dist/main.js",
-    "dev": "tsc -p tsconfig.json && (tsc -p tsconfig.json -w --preserveWatchOutput & node --env-file-if-exists=../../.env --watch dist/main.js)"
+    "dev": "tsc -p tsconfig.json && concurrently -k \"tsc -p tsconfig.json -w --preserveWatchOutput\" \"node --env-file-if-exists=../../.env --watch dist/main.js\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
@@ -22,6 +22,7 @@
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.2",
+    "concurrently": "^10.0.5",
     "typescript": "^5.7.2"
   }
 }
