@@ -1,5 +1,6 @@
 import { DOCUMENT_MAX_SIZE_MB } from '@erp/shared';
 import type {
+  AuthTokensDto,
   CashflowGrouping,
   CashflowReportDto,
   CategoryDto,
@@ -26,6 +27,7 @@ import type {
   InvoiceCreateInput,
   InvoiceDto,
   InvoiceUpdateInput,
+  LoginInput,
   MilestoneDto,
   PhaseCreateInput,
   PhaseDto,
@@ -37,12 +39,53 @@ import type {
   PurchaseOrderDto,
   PurchaseOrderStatus,
   PurchaseOrderUpdateInput,
+  RegisterInput,
   TraceabilityReportDto,
+  UserDto,
   ValidationItemDto,
   ValidationResultDto,
 } from '@erp/shared';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+
+const ACCESS_KEY = 'erp.accessToken';
+const REFRESH_KEY = 'erp.refreshToken';
+const USER_KEY = 'erp.user';
+
+export type StoredSession = {
+  accessToken: string;
+  refreshToken: string;
+  user: UserDto;
+};
+
+export function readStoredSession(): StoredSession | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const accessToken = localStorage.getItem(ACCESS_KEY);
+    const refreshToken = localStorage.getItem(REFRESH_KEY);
+    const rawUser = localStorage.getItem(USER_KEY);
+    if (!accessToken || !refreshToken || !rawUser) return null;
+    return {
+      accessToken,
+      refreshToken,
+      user: JSON.parse(rawUser) as UserDto,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function writeStoredSession(tokens: AuthTokensDto): void {
+  localStorage.setItem(ACCESS_KEY, tokens.accessToken);
+  localStorage.setItem(REFRESH_KEY, tokens.refreshToken);
+  localStorage.setItem(USER_KEY, JSON.stringify(tokens.user));
+}
+
+export function clearStoredSession(): void {
+  localStorage.removeItem(ACCESS_KEY);
+  localStorage.removeItem(REFRESH_KEY);
+  localStorage.removeItem(USER_KEY);
+}
 
 export class ApiError extends Error {
   constructor(
@@ -54,23 +97,68 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  // Con FormData el navegador fija el Content-Type (incluye el boundary)
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function tryRefresh(): Promise<boolean> {
+  const session = readStoredSession();
+  if (!session?.refreshToken) return false;
+  try {
+    const res = await fetch(`${API_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: session.refreshToken }),
+    });
+    if (!res.ok) {
+      clearStoredSession();
+      return false;
+    }
+    const tokens = (await res.json()) as AuthTokensDto;
+    writeStoredSession(tokens);
+    return true;
+  } catch {
+    clearStoredSession();
+    return false;
+  }
+}
+
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  retried = false,
+): Promise<T> {
   const isFormData =
     typeof FormData !== 'undefined' && init?.body instanceof FormData;
+  const session = readStoredSession();
+  const headers: Record<string, string> = {
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+  if (session?.accessToken && !headers.Authorization) {
+    headers.Authorization = `Bearer ${session.accessToken}`;
+  }
+
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
-    headers: {
-      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
-      ...init?.headers,
-    },
+    headers,
   });
+
+  if (res.status === 401 && !retried && !path.startsWith('/auth/')) {
+    refreshInFlight ??= tryRefresh().finally(() => {
+      refreshInFlight = null;
+    });
+    const ok = await refreshInFlight;
+    if (ok) return request<T>(path, init, true);
+  }
+
   if (!res.ok) {
     let message = `Error ${res.status}`;
     let fieldErrors: { field: string; message: string }[] = [];
     try {
       const body = await res.json();
       message = body.message ?? message;
+      if (Array.isArray(body.message)) {
+        message = body.message.join(', ');
+      }
       fieldErrors = body.errors ?? [];
     } catch {
       // sin cuerpo JSON
@@ -83,6 +171,30 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
+
+export const authApi = {
+  login: (input: LoginInput) =>
+    request<AuthTokensDto>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  register: (input: RegisterInput) =>
+    request<AuthTokensDto>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  refresh: (refreshToken: string) =>
+    request<AuthTokensDto>('/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken }),
+    }),
+  logout: (refreshToken: string) =>
+    request<void>('/auth/logout', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken }),
+    }),
+  me: () => request<UserDto>('/auth/me'),
+};
 
 export const projectsApi = {
   list: (search: string, status: string) => {
