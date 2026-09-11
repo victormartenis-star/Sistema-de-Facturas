@@ -582,6 +582,27 @@ export const budgetsApi = {
     request<void>(`/budget-items/${itemId}`, { method: 'DELETE' }),
 };
 
+export interface DashboardResumenDto {
+  obras: { total: number; enCurso: number; contratado: number };
+  certificaciones: {
+    totalCertificado: number;
+    retencionAcumulada: number;
+    certsPendientesFacturar: number;
+  };
+  tesoreria: {
+    pendienteCobro: number;
+    pendientePago: number;
+    vencidoCobro: number;
+    vencidoPago: number;
+  };
+  compras: { pedidosPendientes: number; importePedidosPendientes: number };
+  facturas: { ventaBorradores: number; compraBorradores: number };
+}
+
+export const dashboardApi = {
+  resumen: () => request<DashboardResumenDto>('/dashboard/resumen'),
+};
+
 /** URL del original (visor); la sirve la API en streaming. */
 export function documentFileUrl(id: string): string {
   return `${API_URL}/documents/${id}/file`;

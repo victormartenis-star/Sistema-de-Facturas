@@ -21,11 +21,12 @@ import { registrarTesoreria } from './tools/tesoreria';
 import { registrarCumplimiento } from './tools/cumplimiento';
 import { registrarPresupuestos } from './tools/presupuestos';
 import { registrarCertificaciones } from './tools/certificaciones';
+import { registrarDashboard } from './tools/dashboard';
 
 async function main() {
   const server = new McpServer({
     name: 'erp-dintel',
-    version: '0.2.0',
+    version: '0.3.0',
   });
 
   registrarObras(server);
@@ -37,6 +38,7 @@ async function main() {
   registrarCumplimiento(server);
   registrarPresupuestos(server);
   registrarCertificaciones(server);
+  registrarDashboard(server);
 
   await server.connect(new StdioServerTransport());
   console.error(`[erp-mcp] conectado. API: ${BASE_URL}`);

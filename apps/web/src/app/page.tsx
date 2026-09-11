@@ -9,7 +9,7 @@ import {
   type ProjectStatus,
 } from '@erp/shared';
 import {
-  contactsApi,
+  dashboardApi,
   documentsApi,
   formatDate,
   formatEur,
@@ -20,10 +20,14 @@ import { DocStatusBadge } from '@/components/doc-status-badge';
 import { ErrorBanner } from '@/components/ui';
 import {
   IconBuilding,
+  IconCalculator,
+  IconCalendar,
+  IconClipboard,
   IconEuro,
   IconFileText,
   IconPlus,
   IconSparkles,
+  IconTrendingUp,
   IconUpload,
   IconUsers,
   type IconProps,
@@ -45,15 +49,19 @@ function KpiCard({
   label,
   value,
   hint,
+  alert,
 }: {
   icon: (p: IconProps) => ReactNode;
   tone: string;
   label: string;
   value: string;
   hint?: string;
+  alert?: boolean;
 }) {
   return (
-    <div className="animate-fade-in-up rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+    <div
+      className={`animate-fade-in-up rounded-2xl border bg-white p-5 shadow-sm ${alert ? 'border-red-200' : 'border-gray-200'}`}
+    >
       <div className="flex items-center gap-3">
         <span
           className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${tone}`}
@@ -65,7 +73,11 @@ function KpiCard({
       <p className="mt-4 text-2xl font-bold tracking-tight tabular-nums">
         {value}
       </p>
-      {hint && <p className="mt-1 text-xs text-gray-500">{hint}</p>}
+      {hint && (
+        <p className={`mt-1 text-xs ${alert ? 'font-medium text-red-600' : 'text-gray-500'}`}>
+          {hint}
+        </p>
+      )}
     </div>
   );
 }
@@ -119,6 +131,20 @@ function QuickAction({
   );
 }
 
+function AlertBadge({ count, label }: { count: number; label: string }) {
+  if (count === 0) return null;
+  return (
+    <Link
+      href="/tesoreria"
+      className="flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 hover:bg-red-100"
+    >
+      <span className="font-bold">{count}</span>
+      <span>{label}</span>
+      <span className="text-xs">→</span>
+    </Link>
+  );
+}
+
 export default function DashboardPage() {
   const [today, setToday] = useState('');
   useEffect(() => {
@@ -131,13 +157,14 @@ export default function DashboardPage() {
     setToday(text.charAt(0).toUpperCase() + text.slice(1));
   }, []);
 
+  const resumenQuery = useQuery({
+    queryKey: ['dashboard-resumen'],
+    queryFn: dashboardApi.resumen,
+    staleTime: 2 * 60_000,
+  });
   const projectsQuery = useQuery({
     queryKey: ['projects', '', ''],
     queryFn: () => projectsApi.list('', ''),
-  });
-  const contactsQuery = useQuery({
-    queryKey: ['contacts', '', ''],
-    queryFn: () => contactsApi.list('', ''),
   });
   const documentsQuery = useQuery({
     queryKey: ['documents', '', '', ''],
@@ -148,23 +175,12 @@ export default function DashboardPage() {
     queryFn: () => validationApi.list(''),
   });
 
+  const r = resumenQuery.data;
   const projects = projectsQuery.data ?? [];
-  const contacts = contactsQuery.data ?? [];
   const documents = documentsQuery.data ?? [];
 
-  const enCurso = projects.filter((p) => p.status === 'en_curso');
-  const contratado = enCurso.reduce(
-    (sum, p) => sum + (p.contractAmount ?? 0),
-    0,
-  );
-  const proveedores = contacts.filter(
-    (c) => c.kind === 'proveedor' || c.kind === 'ambos',
-  ).length;
-  const clientes = contacts.filter(
-    (c) => c.kind === 'cliente' || c.kind === 'ambos',
-  ).length;
   const sinClasificar = documents.filter((d) => d.docType === null).length;
-  const pendientes = (validacionQuery.data ?? []).filter(
+  const pendientesOcr = (validacionQuery.data ?? []).filter(
     (v) => v.status === 'extraido',
   ).length;
 
@@ -177,31 +193,53 @@ export default function DashboardPage() {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, 6);
 
-  const loading =
-    projectsQuery.isLoading ||
-    contactsQuery.isLoading ||
-    documentsQuery.isLoading;
+  const loading = resumenQuery.isLoading || projectsQuery.isLoading;
 
   return (
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight">Panel de control</h1>
-        <p className="mt-1 text-sm text-gray-500">{today || ' '}</p>
+        <p className="mt-1 text-sm text-gray-500">{today || ' '}</p>
       </div>
 
-      {projectsQuery.isError && (
+      {resumenQuery.isError && (
         <div className="mb-6">
-          <ErrorBanner message={(projectsQuery.error as Error).message} />
+          <ErrorBanner message={(resumenQuery.error as Error).message} />
+        </div>
+      )}
+
+      {/* Alertas activas */}
+      {r && (r.tesoreria.vencidoCobro > 0 || r.tesoreria.vencidoPago > 0 || r.certificaciones.certsPendientesFacturar > 0) && (
+        <div className="mb-6 flex flex-wrap gap-2">
+          {r.tesoreria.vencidoCobro > 0 && (
+            <AlertBadge
+              count={1}
+              label={`${formatEur(r.tesoreria.vencidoCobro)} en cobros vencidos`}
+            />
+          )}
+          {r.tesoreria.vencidoPago > 0 && (
+            <AlertBadge
+              count={1}
+              label={`${formatEur(r.tesoreria.vencidoPago)} en pagos vencidos`}
+            />
+          )}
+          {r.certificaciones.certsPendientesFacturar > 0 && (
+            <Link
+              href="/certificaciones"
+              className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700 hover:bg-amber-100"
+            >
+              <span className="font-bold">{r.certificaciones.certsPendientesFacturar}</span>
+              <span>certificación{r.certificaciones.certsPendientesFacturar > 1 ? 'es' : ''} sin facturar</span>
+              <span className="text-xs">→</span>
+            </Link>
+          )}
         </div>
       )}
 
       {loading && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div
-              key={i}
-              className="rounded-2xl border border-gray-200 bg-white p-5"
-            >
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="rounded-2xl border border-gray-200 bg-white p-5">
               <div className="skeleton h-10 w-10 rounded-xl" />
               <div className="skeleton mt-4 h-6 w-24" />
               <div className="skeleton mt-2 h-3 w-32" />
@@ -210,41 +248,71 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {!loading && !projectsQuery.isError && (
+      {!loading && !resumenQuery.isError && r && (
         <>
-          {/* Indicadores principales */}
+          {/* KPIs fila 1 — Obras y certificaciones */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <KpiCard
               icon={IconBuilding}
               tone="bg-emerald-50 text-emerald-600"
               label="Obras en curso"
-              value={String(enCurso.length)}
-              hint={`de ${projects.length} en total`}
+              value={String(r.obras.enCurso)}
+              hint={`de ${r.obras.total} en total`}
             />
             <KpiCard
               icon={IconEuro}
               tone="bg-amber-50 text-amber-600"
               label="Contratado (en curso)"
-              value={formatEur(contratado)}
+              value={formatEur(r.obras.contratado)}
               hint="Suma de contratos sin IVA"
             />
             <KpiCard
-              icon={IconUsers}
+              icon={IconClipboard}
+              tone="bg-indigo-50 text-indigo-600"
+              label="Total certificado"
+              value={formatEur(r.certificaciones.totalCertificado)}
+              hint={`Retención acumulada: ${formatEur(r.certificaciones.retencionAcumulada)}`}
+            />
+            <KpiCard
+              icon={IconTrendingUp}
+              tone="bg-violet-50 text-violet-600"
+              label="Pedidos pendientes"
+              value={String(r.compras.pedidosPendientes)}
+              hint={formatEur(r.compras.importePedidosPendientes)}
+            />
+          </div>
+
+          {/* KPIs fila 2 — Tesorería */}
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <KpiCard
+              icon={IconCalendar}
               tone="bg-sky-50 text-sky-600"
-              label="Contactos"
-              value={String(contacts.length)}
-              hint={`${proveedores} proveedores · ${clientes} clientes`}
+              label="Pendiente de cobro"
+              value={formatEur(r.tesoreria.pendienteCobro)}
+              hint={r.tesoreria.vencidoCobro > 0 ? `${formatEur(r.tesoreria.vencidoCobro)} vencido` : 'Sin vencidos'}
+              alert={r.tesoreria.vencidoCobro > 0}
+            />
+            <KpiCard
+              icon={IconCalendar}
+              tone="bg-orange-50 text-orange-600"
+              label="Pendiente de pago"
+              value={formatEur(r.tesoreria.pendientePago)}
+              hint={r.tesoreria.vencidoPago > 0 ? `${formatEur(r.tesoreria.vencidoPago)} vencido` : 'Sin vencidos'}
+              alert={r.tesoreria.vencidoPago > 0}
             />
             <KpiCard
               icon={IconFileText}
-              tone="bg-violet-50 text-violet-600"
-              label="Documentos"
-              value={String(documents.length)}
-              hint={
-                sinClasificar > 0
-                  ? `${sinClasificar} sin clasificar`
-                  : 'Todos clasificados'
-              }
+              tone="bg-rose-50 text-rose-600"
+              label="Facturas de venta en borrador"
+              value={String(r.facturas.ventaBorradores)}
+              hint="Pendientes de aprobar"
+            />
+            <KpiCard
+              icon={IconUsers}
+              tone="bg-teal-50 text-teal-600"
+              label="Facturas de compra en borrador"
+              value={String(r.facturas.compraBorradores)}
+              hint="Pendientes de aprobar"
             />
           </div>
 
@@ -253,10 +321,7 @@ export default function DashboardPage() {
             <Card
               title="Obras por estado"
               action={
-                <Link
-                  href="/obras"
-                  className="text-xs font-medium text-amber-600 hover:text-amber-700"
-                >
+                <Link href="/obras" className="text-xs font-medium text-amber-600 hover:text-amber-700">
                   Ver obras →
                 </Link>
               }
@@ -272,28 +337,17 @@ export default function DashboardPage() {
                       <div
                         key={status}
                         className={STATUS_BAR_COLORS[status]}
-                        style={{
-                          width: `${(count / projects.length) * 100}%`,
-                        }}
+                        style={{ width: `${(count / projects.length) * 100}%` }}
                         title={`${PROJECT_STATUS_LABELS[status]}: ${count}`}
                       />
                     ))}
                   </div>
                   <ul className="mt-4 space-y-2.5">
                     {statusCounts.map(({ status, count }) => (
-                      <li
-                        key={status}
-                        className="flex items-center gap-2.5 text-sm"
-                      >
-                        <span
-                          className={`h-2.5 w-2.5 shrink-0 rounded-full ${STATUS_BAR_COLORS[status]}`}
-                        />
-                        <span className="flex-1 text-gray-700">
-                          {PROJECT_STATUS_LABELS[status]}
-                        </span>
-                        <span className="font-semibold tabular-nums">
-                          {count}
-                        </span>
+                      <li key={status} className="flex items-center gap-2.5 text-sm">
+                        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${STATUS_BAR_COLORS[status]}`} />
+                        <span className="flex-1 text-gray-700">{PROJECT_STATUS_LABELS[status]}</span>
+                        <span className="font-semibold tabular-nums">{count}</span>
                         <span className="w-12 text-right text-xs text-gray-400 tabular-nums">
                           {Math.round((count / projects.length) * 100)} %
                         </span>
@@ -307,10 +361,7 @@ export default function DashboardPage() {
             <Card
               title="Documentos recientes"
               action={
-                <Link
-                  href="/documentos"
-                  className="text-xs font-medium text-amber-600 hover:text-amber-700"
-                >
+                <Link href="/documentos" className="text-xs font-medium text-amber-600 hover:text-amber-700">
                   Ver todos →
                 </Link>
               }
@@ -327,15 +378,10 @@ export default function DashboardPage() {
                         <IconFileText size={15} />
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p
-                          className="truncate text-sm font-medium text-gray-800"
-                          title={d.fileName}
-                        >
+                        <p className="truncate text-sm font-medium text-gray-800" title={d.fileName}>
                           {d.fileName}
                         </p>
-                        <p className="text-xs text-gray-500">
-                          {formatDate(d.createdAt.slice(0, 10))}
-                        </p>
+                        <p className="text-xs text-gray-500">{formatDate(d.createdAt.slice(0, 10))}</p>
                       </div>
                       <DocStatusBadge status={d.status} />
                     </li>
@@ -346,25 +392,13 @@ export default function DashboardPage() {
           </div>
 
           {/* Accesos rápidos */}
-          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <QuickAction
-              href="/obras"
-              icon={<IconPlus size={19} />}
-              title="Nueva obra"
-              subtitle="Alta de una obra o proyecto"
-            />
-            <QuickAction
-              href="/documentos"
-              icon={<IconUpload size={19} />}
-              title="Subir facturas"
-              subtitle="PDF o foto, varias a la vez"
-            />
-            <QuickAction
-              href="/contactos"
-              icon={<IconUsers size={19} />}
-              title="Nuevo contacto"
-              subtitle="Proveedores y clientes"
-            />
+          <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+            <QuickAction href="/obras" icon={<IconPlus size={19} />} title="Nueva obra" subtitle="Alta de proyecto" />
+            <QuickAction href="/documentos" icon={<IconUpload size={19} />} title="Subir facturas" subtitle="PDF o foto" />
+            <QuickAction href="/presupuestos" icon={<IconCalculator size={19} />} title="Presupuestos" subtitle="BC3 e importar" />
+            <QuickAction href="/certificaciones" icon={<IconClipboard size={19} />} title="Certificaciones" subtitle="Avance a origen" />
+            <QuickAction href="/pedidos" icon={<IconFileText size={19} />} title="Pedidos" subtitle="Compras a proveedores" />
+            <QuickAction href="/tesoreria" icon={<IconCalendar size={19} />} title="Tesorería" subtitle="Cobros y pagos" />
           </div>
 
           {/* Bandeja de validación de la IA */}
@@ -377,12 +411,12 @@ export default function DashboardPage() {
             </span>
             <div>
               <p className="font-semibold">
-                {pendientes > 0
-                  ? `${pendientes} documento${pendientes > 1 ? 's' : ''} leído${pendientes > 1 ? 's' : ''} por la IA esperando validación`
+                {pendientesOcr > 0
+                  ? `${pendientesOcr} documento${pendientesOcr > 1 ? 's' : ''} leído${pendientesOcr > 1 ? 's' : ''} por la IA esperando validación`
                   : 'Lectura automática de facturas con IA'}
               </p>
               <p className="mt-1 text-sm text-amber-50">
-                {pendientes > 0
+                {pendientesOcr > 0
                   ? 'Revisa número, fecha, proveedor e importes y confirma en segundos: la factura se crea en borrador →'
                   : 'Sube una factura en Documentos y la IA extraerá número, fecha, proveedor, base, IVA y total para que solo tengas que validarla →'}
               </p>
