@@ -250,6 +250,20 @@ export const IconSparkles = (p: IconProps) => (
   </Base>
 );
 
+export const IconCalculator = (p: IconProps) => (
+  <Base {...p}>
+    <rect x="4" y="2" width="16" height="20" rx="2" />
+    <line x1="8" y1="6" x2="16" y2="6" />
+    <circle cx="8" cy="10" r="0.5" fill="currentColor" />
+    <circle cx="12" cy="10" r="0.5" fill="currentColor" />
+    <circle cx="16" cy="10" r="0.5" fill="currentColor" />
+    <circle cx="8" cy="14" r="0.5" fill="currentColor" />
+    <circle cx="12" cy="14" r="0.5" fill="currentColor" />
+    <circle cx="8" cy="18" r="0.5" fill="currentColor" />
+    <circle cx="12" cy="18" r="0.5" fill="currentColor" />
+    <line x1="16" y1="14" x2="16" y2="18" />
+  </Base>
+);
 export const IconExternalLink = (p: IconProps) => (
   <Base {...p}>
     <path d="M15 3h6v6" />

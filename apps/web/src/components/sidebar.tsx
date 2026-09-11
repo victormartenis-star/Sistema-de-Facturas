@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import type { ComponentType } from 'react';
 import {
   IconBuilding,
+  IconCalculator,
   IconChart,
   IconDashboard,
   IconFileText,
@@ -31,6 +32,7 @@ const MAIN: NavItem[] = [
 
 const GESTION: NavItem[] = [
   { href: '/obras', label: 'Obras', icon: IconBuilding },
+  { href: '/presupuestos', label: 'Presupuestos', icon: IconCalculator },
   { href: '/contactos', label: 'Contactos', icon: IconUsers },
   { href: '/documentos', label: 'Documentos', icon: IconFileText },
   { href: '/validacion', label: 'Validación IA', icon: IconSparkles },
