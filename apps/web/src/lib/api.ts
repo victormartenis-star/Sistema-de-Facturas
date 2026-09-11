@@ -49,6 +49,7 @@ import type {
   PurchaseOrderUpdateInput,
   RegisterInput,
   TraceabilityReportDto,
+  UserCreateInput,
   UserDto,
   ValidationItemDto,
   ValidationResultDto,
@@ -598,6 +599,27 @@ export interface DashboardResumenDto {
   compras: { pedidosPendientes: number; importePedidosPendientes: number };
   facturas: { ventaBorradores: number; compraBorradores: number };
 }
+
+export const usersApi = {
+  list: () => request<UserDto[]>('/users'),
+  create: (input: UserCreateInput) =>
+    request<UserDto>('/users', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  update: (id: string, input: Partial<{ fullName: string; role: string; isActive: boolean }>) =>
+    request<UserDto>(`/users/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  remove: (id: string) => request<void>(`/users/${id}`, { method: 'DELETE' }),
+  listAccess: (id: string) => request<string[]>(`/users/${id}/acceso-obras`),
+  setAccess: (id: string, projectIds: string[]) =>
+    request<void>(`/users/${id}/acceso-obras`, {
+      method: 'PUT',
+      body: JSON.stringify({ projectIds }),
+    }),
+};
 
 export const dashboardApi = {
   resumen: () => request<DashboardResumenDto>('/dashboard/resumen'),

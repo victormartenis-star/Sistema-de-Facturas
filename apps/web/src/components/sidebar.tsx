@@ -44,6 +44,10 @@ const GESTION: NavItem[] = [
   { href: '/cumplimiento', label: 'Homologación', icon: IconLock },
 ];
 
+const CONFIGURACION: NavItem[] = [
+  { href: '/configuracion/usuarios', label: 'Usuarios', icon: IconUsers },
+];
+
 /** Módulos previstos en la hoja de ruta que aún no están construidos. */
 const PROXIMAMENTE: { label: string; icon: ComponentType<IconProps> }[] = [
   { label: 'Informes', icon: IconChart },
@@ -104,6 +108,9 @@ export function Sidebar() {
 
         <SectionTitle>Gestión</SectionTitle>
         <div className="space-y-1">{GESTION.map(renderItem)}</div>
+
+        <SectionTitle>Configuración</SectionTitle>
+        <div className="space-y-1">{CONFIGURACION.map(renderItem)}</div>
 
         <SectionTitle>Próximamente</SectionTitle>
         <div className="space-y-1">

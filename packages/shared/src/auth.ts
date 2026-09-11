@@ -67,6 +67,32 @@ export interface AuthTokensDto {
   user: UserDto;
 }
 
+/** Actualización de un usuario por un admin. */
+export const userUpdateSchema = z.object({
+  fullName: z
+    .string()
+    .trim()
+    .min(1, 'El nombre es obligatorio')
+    .max(200)
+    .optional(),
+  role: z.enum(USER_ROLES).optional(),
+  isActive: z.boolean().optional(),
+});
+export type UserUpdateInput = z.infer<typeof userUpdateSchema>;
+
+/** Creación de un usuario por un admin (con contraseña inicial). */
+export const userCreateSchema = z.object({
+  email,
+  password,
+  fullName: z
+    .string()
+    .trim()
+    .min(1, 'El nombre es obligatorio')
+    .max(200, 'Máximo 200 caracteres'),
+  role: z.enum(USER_ROLES).default('administracion'),
+});
+export type UserCreateInput = z.input<typeof userCreateSchema>;
+
 /** Claims del JWT de acceso. */
 export interface AccessTokenPayload {
   sub: string;
