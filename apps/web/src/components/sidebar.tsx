@@ -7,9 +7,9 @@ import {
   IconBuilding,
   IconCalculator,
   IconChart,
+  IconClipboard,
   IconDashboard,
   IconFileText,
-  IconClipboard,
   IconInbox,
   IconLock,
   IconReceipt,
@@ -33,6 +33,7 @@ const MAIN: NavItem[] = [
 const GESTION: NavItem[] = [
   { href: '/obras', label: 'Obras', icon: IconBuilding },
   { href: '/presupuestos', label: 'Presupuestos', icon: IconCalculator },
+  { href: '/certificaciones', label: 'Certificaciones', icon: IconClipboard },
   { href: '/contactos', label: 'Contactos', icon: IconUsers },
   { href: '/documentos', label: 'Documentos', icon: IconFileText },
   { href: '/validacion', label: 'Validación IA', icon: IconSparkles },
