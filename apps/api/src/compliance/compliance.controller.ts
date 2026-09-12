@@ -33,6 +33,16 @@ export class ComplianceController {
     return this.service.list(todos !== '1');
   }
 
+  /**
+   * Alertas de vencimiento: contactos con docs bloqueantes que ya caducaron
+   * o caducan en los próximos `days` días (default 30).
+   * GET /cumplimiento/alertas?days=30
+   */
+  @Get('cumplimiento/alertas')
+  alertas(@Query('days') days?: string) {
+    return this.service.alertas(days ? parseInt(days, 10) : 30);
+  }
+
   @Get('contacts/:id/cumplimiento')
   summary(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.summary(id);

@@ -198,3 +198,24 @@ export interface ComplianceSummaryDto {
   docs: ComplianceDocDto[];
   waiver: ComplianceWaiverDto | null;
 }
+
+// ─── Alertas de vencimiento ───────────────────────────────────────────────────
+
+export interface ComplianceAlertItem {
+  docType: ComplianceDocType;
+  docTypeLabel: string;
+  expiresAt: string;
+  /** Días hasta vencimiento. Negativo = ya vencido. */
+  daysToExpiry: number;
+  /** true si ya venció */
+  expired: boolean;
+}
+
+export interface ComplianceAlertDto {
+  contactId: string;
+  legalName: string;
+  taxId: string | null;
+  status: ComplianceStatus;
+  /** Documentos próximos a vencer o ya vencidos. */
+  alerts: ComplianceAlertItem[];
+}

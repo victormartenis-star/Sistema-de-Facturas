@@ -9,6 +9,7 @@ import {
   type ProjectStatus,
 } from '@erp/shared';
 import {
+  complianceApi,
   dashboardApi,
   documentsApi,
   formatDate,
@@ -19,6 +20,7 @@ import {
 import { DocStatusBadge } from '@/components/doc-status-badge';
 import { ErrorBanner } from '@/components/ui';
 import {
+  IconBell,
   IconBuilding,
   IconCalculator,
   IconCalendar,
@@ -174,6 +176,14 @@ export default function DashboardPage() {
     queryKey: ['validacion', ''],
     queryFn: () => validationApi.list(''),
   });
+  const complianceAlertasQuery = useQuery({
+    queryKey: ['compliance-alertas', 30],
+    queryFn: () => complianceApi.alertas(30),
+    staleTime: 5 * 60_000,
+  });
+  const complianceAlertas = complianceAlertasQuery.data ?? [];
+  const vencidosCount = complianceAlertas.filter((a) => a.alerts.some((x) => x.expired)).length;
+  const proximosCount = complianceAlertas.filter((a) => !a.alerts.some((x) => x.expired)).length;
 
   const r = resumenQuery.data;
   const projects = projectsQuery.data ?? [];
@@ -209,7 +219,7 @@ export default function DashboardPage() {
       )}
 
       {/* Alertas activas */}
-      {r && (r.tesoreria.vencidoCobro > 0 || r.tesoreria.vencidoPago > 0 || r.certificaciones.certsPendientesFacturar > 0) && (
+      {r && (r.tesoreria.vencidoCobro > 0 || r.tesoreria.vencidoPago > 0 || r.certificaciones.certsPendientesFacturar > 0 || vencidosCount > 0 || proximosCount > 0) && (
         <div className="mb-6 flex flex-wrap gap-2">
           {r.tesoreria.vencidoCobro > 0 && (
             <AlertBadge
@@ -230,6 +240,28 @@ export default function DashboardPage() {
             >
               <span className="font-bold">{r.certificaciones.certsPendientesFacturar}</span>
               <span>certificación{r.certificaciones.certsPendientesFacturar > 1 ? 'es' : ''} sin facturar</span>
+              <span className="text-xs">→</span>
+            </Link>
+          )}
+          {vencidosCount > 0 && (
+            <Link
+              href="/homologacion/alertas"
+              className="flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 hover:bg-red-100"
+            >
+              <IconBell size={14} />
+              <span className="font-bold">{vencidosCount}</span>
+              <span>proveedor{vencidosCount > 1 ? 'es' : ''} con doc. compliance vencida</span>
+              <span className="text-xs">→</span>
+            </Link>
+          )}
+          {vencidosCount === 0 && proximosCount > 0 && (
+            <Link
+              href="/homologacion/alertas"
+              className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700 hover:bg-amber-100"
+            >
+              <IconBell size={14} />
+              <span className="font-bold">{proximosCount}</span>
+              <span>proveedor{proximosCount > 1 ? 'es' : ''} con doc. compliance próxima a vencer</span>
               <span className="text-xs">→</span>
             </Link>
           )}

@@ -1,5 +1,5 @@
 import { DOCUMENT_MAX_SIZE_MB } from '@erp/shared';
-import type { AuditLogDto, AuditQuery } from '@erp/shared';
+import type { AuditLogDto, AuditQuery, ComplianceAlertDto } from '@erp/shared';
 import type {
   Bc3ImportResultDto,
   BudgetCreateInput,
@@ -513,6 +513,8 @@ export const complianceApi = {
     request<void>(`/contacts/${contactId}/cumplimiento/exencion`, {
       method: 'DELETE',
     }),
+  alertas: (days = 30) =>
+    request<ComplianceAlertDto[]>(`/cumplimiento/alertas?days=${days}`),
 };
 
 export const treasuryApi = {

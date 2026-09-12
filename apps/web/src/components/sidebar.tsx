@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ComponentType } from 'react';
 import {
+  IconBell,
   IconBuilding,
   IconCalculator,
   IconChart,
@@ -43,6 +44,7 @@ const GESTION: NavItem[] = [
   { href: '/albaranes', label: 'Albaranes', icon: IconInbox },
   { href: '/tesoreria', label: 'Tesorería', icon: IconWallet },
   { href: '/cumplimiento', label: 'Homologación', icon: IconLock },
+  { href: '/homologacion/alertas', label: 'Alertas PRL', icon: IconBell },
 ];
 
 const CONFIGURACION: NavItem[] = [

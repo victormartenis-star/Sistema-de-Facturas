@@ -393,6 +393,69 @@ export class ComplianceService {
     return row;
   }
 
+  /**
+   * Devuelve todos los contactos que tienen al menos un documento bloqueante
+   * que ya caducó o caduca en los próximos `days` días naturales.
+   * Incluye contactos bloqueados manualmente solo si tienen docs próximos.
+   */
+  async alertas(days = 30): Promise<import('@erp/shared').ComplianceAlertDto[]> {
+    const companyId = await this.dbs.getCompanyId();
+    // Traemos todos los contactos sujetos a compliance
+    const rows = await this.dbs.db
+      .select()
+      .from(contacts)
+      .where(
+        and(
+          eq(contacts.companyId, companyId),
+          eq(contacts.requiresCompliance, true),
+          isNull(contacts.deletedAt),
+        ),
+      )
+      .orderBy(asc(contacts.legalName));
+
+    const result: import('@erp/shared').ComplianceAlertDto[] = [];
+
+    for (const contact of rows) {
+      const docs = await this.docsOf(contact.id);
+      const summary = await this.summaryFor(contact);
+
+      // Un doc de tipo bloqueante cuya fecha de caducidad esté dentro del
+      // horizonte (negativo ya venció, positivo caduca en N días)
+      const alertItems: import('@erp/shared').ComplianceAlertItem[] = [];
+      for (const type of BLOCKING_COMPLIANCE_DOC_TYPES) {
+        const best = docs.find((d) => d.docType === type);
+        if (!best || best.expiresAt === null) continue;
+        const d = daysUntil(best.expiresAt);
+        if (d <= days) {
+          alertItems.push({
+            docType: type,
+            docTypeLabel: COMPLIANCE_DOC_TYPE_LABELS[type],
+            expiresAt: best.expiresAt,
+            daysToExpiry: d,
+            expired: d < 0,
+          });
+        }
+      }
+
+      if (alertItems.length > 0) {
+        result.push({
+          contactId: contact.id,
+          legalName: contact.legalName,
+          taxId: contact.taxId,
+          status: summary.status,
+          alerts: alertItems.sort((a, b) => a.daysToExpiry - b.daysToExpiry),
+        });
+      }
+    }
+
+    // Primero los ya vencidos, luego por días
+    return result.sort(
+      (a, b) =>
+        Math.min(...a.alerts.map((x) => x.daysToExpiry)) -
+        Math.min(...b.alerts.map((x) => x.daysToExpiry)),
+    );
+  }
+
   private async findDoc(id: string): Promise<ContactComplianceDoc> {
     const [row] = await this.dbs.db
       .select()
