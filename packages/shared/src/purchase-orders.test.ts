@@ -62,6 +62,44 @@ describe('regla de oro: sin pedido no hay albarán validado', () => {
     expect(canReceiveDeliveries('anulado')).toBe(false);
     expect(canReceiveDeliveries('cerrado')).toBe(false);
   });
+
+  it('bloquea si el albarán excede el importe pendiente del pedido', () => {
+    // Pedido de 10 000 €, ya recibido 8 000 €, nuevo albarán de 2 500 €
+    // → total 10 500 € > 10 000 € → exceso 500 €
+    expect(
+      deliveryNoteBlockReason({
+        orderNumber: 'OBR-001-PED-0001',
+        orderStatus: 'emitido',
+        orderAmount: 10_000,
+        alreadyDelivered: 8_000,
+        noteAmount: 2_500,
+      }),
+    ).toContain('excede el importe del pedido');
+  });
+
+  it('permite el albarán si encaja exactamente en el pedido', () => {
+    expect(
+      deliveryNoteBlockReason({
+        orderNumber: 'OBR-001-PED-0001',
+        orderStatus: 'emitido',
+        orderAmount: 10_000,
+        alreadyDelivered: 8_000,
+        noteAmount: 2_000,
+      }),
+    ).toBeNull();
+  });
+
+  it('tolera diferencias de centavo (0.01 €) sin bloquear', () => {
+    expect(
+      deliveryNoteBlockReason({
+        orderNumber: 'OBR-001-PED-0001',
+        orderStatus: 'emitido',
+        orderAmount: 10_000,
+        alreadyDelivered: 0,
+        noteAmount: 10_000.005,
+      }),
+    ).toBeNull();
+  });
 });
 
 describe('deriveOrderStatus', () => {

@@ -71,6 +71,12 @@ export function canReceiveDeliveries(status: PurchaseOrderStatus): boolean {
 export function deliveryNoteBlockReason(note: {
   orderNumber: string | null;
   orderStatus: PurchaseOrderStatus | null;
+  /** Importe del pedido. Undefined = sin info (no se verifica). */
+  orderAmount?: number | null;
+  /** Importe ya recibido en otros albaranes validados del mismo pedido. */
+  alreadyDelivered?: number | null;
+  /** Importe de este albarán. */
+  noteAmount?: number | null;
 }): string | null {
   if (!note.orderNumber || !note.orderStatus) {
     // Texto tipo del manual de procesos, para que el albarán y el sistema
@@ -81,6 +87,22 @@ export function deliveryNoteBlockReason(note: {
     return `El pedido ${note.orderNumber} está ${PURCHASE_ORDER_STATUS_LABELS[
       note.orderStatus
     ].toLowerCase()}: no debería recibir más material`;
+  }
+  // Verificación de exceso de suministro (3-way match banda 1↔2)
+  if (
+    note.orderAmount != null &&
+    note.alreadyDelivered != null &&
+    note.noteAmount != null
+  ) {
+    const total = round2(note.alreadyDelivered + note.noteAmount);
+    const excess = round2(total - note.orderAmount);
+    if (excess > 0.01) {
+      return (
+        `El albarán excede el importe del pedido ${note.orderNumber}: ` +
+        `acumulado ${total.toFixed(2)} € > pedido ${note.orderAmount.toFixed(2)} € ` +
+        `(exceso ${excess.toFixed(2)} €)`
+      );
+    }
   }
   return null;
 }

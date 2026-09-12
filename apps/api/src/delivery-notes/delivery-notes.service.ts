@@ -4,7 +4,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { and, desc, eq, ilike, inArray, isNull, or, SQL } from 'drizzle-orm';
+import { and, desc, eq, ilike, inArray, isNull, ne, or, SQL, sum } from 'drizzle-orm';
 import {
   DeliveryNote,
   contacts,
@@ -33,9 +33,10 @@ type Row = {
   projectCode: string | null;
   orderNumber: string | null;
   orderStatus: string | null;
+  orderAmount: string | null;
 };
 
-function toDto(row: Row): DeliveryNoteDto {
+function toDto(row: Row, alreadyDelivered?: number | null): DeliveryNoteDto {
   const { note } = row;
   return {
     id: note.id,
@@ -49,6 +50,9 @@ function toDto(row: Row): DeliveryNoteDto {
     blockReason: deliveryNoteBlockReason({
       orderNumber: row.orderNumber,
       orderStatus: row.orderStatus as PurchaseOrderStatus | null,
+      orderAmount: row.orderAmount != null ? Number(row.orderAmount) : null,
+      alreadyDelivered: alreadyDelivered ?? null,
+      noteAmount: Number(note.amount),
     }),
     noteNumber: note.noteNumber,
     noteDate: note.noteDate,
@@ -116,6 +120,8 @@ export class DeliveryNotesService {
         projectCode: projects.code,
         orderNumber: purchaseOrders.orderNumber,
         orderStatus: purchaseOrders.status,
+        // En el listado no calculamos alreadyDelivered (costoso con N filas)
+        orderAmount: purchaseOrders.amount,
       })
       .from(deliveryNotes)
       .innerJoin(contacts, eq(deliveryNotes.contactId, contacts.id))
@@ -123,7 +129,7 @@ export class DeliveryNotesService {
       .leftJoin(purchaseOrders, eq(deliveryNotes.orderId, purchaseOrders.id))
       .where(and(...filters))
       .orderBy(desc(deliveryNotes.noteDate), desc(deliveryNotes.createdAt));
-    return rows.map(toDto);
+    return rows.map((r) => toDto(r));
   }
 
   async create(input: DeliveryNoteCreateInput): Promise<DeliveryNoteDto> {
@@ -242,6 +248,7 @@ export class DeliveryNotesService {
         projectCode: projects.code,
         orderNumber: purchaseOrders.orderNumber,
         orderStatus: purchaseOrders.status,
+        orderAmount: purchaseOrders.amount,
       })
       .from(deliveryNotes)
       .innerJoin(contacts, eq(deliveryNotes.contactId, contacts.id))
@@ -252,7 +259,25 @@ export class DeliveryNotesService {
     if (!row) {
       throw new NotFoundException('Albarán no encontrado');
     }
-    return toDto(row);
+
+    // 3-way match banda 1↔2: importe ya recibido en albaranes validados del pedido
+    let alreadyDelivered: number | null = null;
+    if (row.note.orderId) {
+      const [agg] = await this.dbs.db
+        .select({ total: sum(deliveryNotes.amount) })
+        .from(deliveryNotes)
+        .where(
+          and(
+            eq(deliveryNotes.orderId, row.note.orderId),
+            eq(deliveryNotes.status, 'validado'),
+            ne(deliveryNotes.id, id),
+            isNull(deliveryNotes.deletedAt),
+          ),
+        );
+      alreadyDelivered = Number(agg?.total ?? 0);
+    }
+
+    return toDto(row, alreadyDelivered);
   }
 
   private async find(id: string): Promise<DeliveryNote> {
