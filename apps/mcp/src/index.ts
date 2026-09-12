@@ -22,6 +22,9 @@ import { registrarCumplimiento } from './tools/cumplimiento';
 import { registrarPresupuestos } from './tools/presupuestos';
 import { registrarCertificaciones } from './tools/certificaciones';
 import { registrarDashboard } from './tools/dashboard';
+import { registrarInformes } from './tools/informes';
+import { registrarDocumentos } from './tools/documentos';
+import { registrarLineasCertificacion } from './tools/lineas_certificacion';
 
 async function main() {
   const server = new McpServer({
@@ -39,6 +42,9 @@ async function main() {
   registrarPresupuestos(server);
   registrarCertificaciones(server);
   registrarDashboard(server);
+  registrarInformes(server);
+  registrarDocumentos(server);
+  registrarLineasCertificacion(server);
 
   await server.connect(new StdioServerTransport());
   console.error(`[erp-mcp] conectado. API: ${BASE_URL}`);
