@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   Budget,
   BudgetItem,
@@ -340,6 +340,10 @@ export class BudgetsService {
   // ── Helpers privados ─────────────────────────────────────────────────────────
 
   private async findProject(projectId: string) {
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (allowed !== null && !allowed.includes(projectId)) {
+      throw new NotFoundException('Obra no encontrada');
+    }
     const [row] = await this.dbs.db
       .select()
       .from(projects)

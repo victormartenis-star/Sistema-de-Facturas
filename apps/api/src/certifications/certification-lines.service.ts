@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, inArray } from 'drizzle-orm';
 import {
   CertificationLine,
   certificationLines,
@@ -42,16 +42,17 @@ export class CertificationLinesService {
   /** Verifica que la certificación existe y pertenece a la empresa del contexto. */
   private async findCert(certId: string) {
     const companyId = this.dbs.getCompanyId();
+    const allowed = await this.dbs.getObrasAccesibles();
+    const filters = [
+      eq(certifications.id, certId),
+      eq(certifications.companyId, companyId),
+      isNull(certifications.deletedAt),
+    ];
+    if (allowed !== null) filters.push(inArray(certifications.projectId, allowed));
     const [cert] = await this.db
       .select({ id: certifications.id })
       .from(certifications)
-      .where(
-        and(
-          eq(certifications.id, certId),
-          eq(certifications.companyId, companyId),
-          isNull(certifications.deletedAt),
-        ),
-      )
+      .where(and(...filters))
       .limit(1);
     if (!cert)
       throw new NotFoundException(`Certificación ${certId} no encontrada`);
