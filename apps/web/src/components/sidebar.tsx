@@ -13,6 +13,7 @@ import {
   IconInbox,
   IconLock,
   IconReceipt,
+  IconShield,
   IconSparkles,
   IconUsers,
   IconWallet,
@@ -46,6 +47,7 @@ const GESTION: NavItem[] = [
 
 const CONFIGURACION: NavItem[] = [
   { href: '/configuracion/usuarios', label: 'Usuarios', icon: IconUsers },
+  { href: '/configuracion/auditoria', label: 'Auditoría', icon: IconShield },
 ];
 
 /** Módulos previstos en la hoja de ruta que aún no están construidos. */

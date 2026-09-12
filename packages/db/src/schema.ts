@@ -14,6 +14,7 @@ import {
   unique,
   uniqueIndex,
   uuid,
+  varchar,
 } from 'drizzle-orm/pg-core';
 
 /**
@@ -870,3 +871,34 @@ export const certificationLines = pgTable(
 
 export type CertificationLine = typeof certificationLines.$inferSelect;
 export type NewCertificationLine = typeof certificationLines.$inferInsert;
+
+// ─── Auditoría ────────────────────────────────────────────────────────────────
+
+export const AUDIT_ACTIONS = ['create', 'update', 'delete'] as const;
+export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+
+export const auditLog = pgTable('audit_log', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  /** Timestamp del evento (con zona horaria). */
+  occurredAt: timestamp('occurred_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  /** Usuario que realizó la acción (null si fue el sistema). */
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id, { onDelete: 'cascade' }),
+  /** Tipo de entidad: 'certification', 'invoice', 'project', etc. */
+  entityType: varchar('entity_type', { length: 60 }).notNull(),
+  entityId: uuid('entity_id').notNull(),
+  action: varchar('action', { length: 10 }).notNull(),
+  /** Snapshot anterior (null en create). */
+  oldData: jsonb('old_data'),
+  /** Snapshot nuevo (null en delete). */
+  newData: jsonb('new_data'),
+  /** IP o agente adicional (opcional). */
+  meta: jsonb('meta'),
+});
+
+export type AuditLogEntry = typeof auditLog.$inferSelect;
+export type NewAuditLogEntry = typeof auditLog.$inferInsert;

@@ -1,4 +1,5 @@
 import { DOCUMENT_MAX_SIZE_MB } from '@erp/shared';
+import type { AuditLogDto, AuditQuery } from '@erp/shared';
 import type {
   Bc3ImportResultDto,
   BudgetCreateInput,
@@ -662,6 +663,20 @@ export const copilotoApi = {
 
 export const dashboardApi = {
   resumen: () => request<DashboardResumenDto>('/dashboard/resumen'),
+};
+
+export const auditApi = {
+  list: (query?: Partial<AuditQuery>) => {
+    const params = new URLSearchParams();
+    if (query?.entityType) params.set('entityType', query.entityType);
+    if (query?.entityId) params.set('entityId', query.entityId);
+    if (query?.userId) params.set('userId', query.userId);
+    if (query?.action) params.set('action', query.action);
+    if (query?.limit !== undefined) params.set('limit', String(query.limit));
+    if (query?.offset !== undefined) params.set('offset', String(query.offset));
+    const qs = params.toString();
+    return request<AuditLogDto[]>(`/audit${qs ? `?${qs}` : ''}`);
+  },
 };
 
 /** URL del original (visor); la sirve la API en streaming. */

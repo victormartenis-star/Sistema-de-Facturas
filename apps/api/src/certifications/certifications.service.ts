@@ -14,6 +14,7 @@ import {
   computeCertification,
   round2,
 } from '@erp/shared';
+import { AuditService } from '../audit/audit.service';
 import { DbService } from '../db/db.service';
 import { InvoicesService } from '../invoices/invoices.service';
 
@@ -44,6 +45,7 @@ export class CertificationsService {
   constructor(
     private readonly dbs: DbService,
     private readonly invoicesService: InvoicesService,
+    private readonly audit: AuditService,
   ) {}
 
   async list(projectId?: string): Promise<CertificationDto[]> {
@@ -124,6 +126,7 @@ export class CertificationsService {
         notes: data.notes ?? null,
       })
       .returning();
+    void this.audit.log({ entityType: 'certification', entityId: row.id, action: 'create', newData: row });
     return toDto(row);
   }
 
@@ -181,6 +184,7 @@ export class CertificationsService {
       })
       .where(eq(certifications.id, id))
       .returning();
+    void this.audit.log({ entityType: 'certification', entityId: id, action: 'update', newData: { status: 'facturada', invoiceId: invoiceDto.id } });
     return toDto(row);
   }
 
@@ -211,6 +215,7 @@ export class CertificationsService {
       .update(certifications)
       .set({ deletedAt: new Date(), updatedAt: new Date() })
       .where(eq(certifications.id, id));
+    void this.audit.log({ entityType: 'certification', entityId: id, action: 'delete', oldData: cert });
   }
 
   private async find(id: string): Promise<Certification> {

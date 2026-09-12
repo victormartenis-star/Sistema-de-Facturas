@@ -44,6 +44,7 @@ import {
   todayIso,
 } from '@erp/shared';
 import { ComplianceService } from '../compliance/compliance.service';
+import { AuditService } from '../audit/audit.service';
 import { DbService } from '../db/db.service';
 
 /** Cliente de transacción de drizzle (el callback de db.transaction). */
@@ -56,6 +57,7 @@ export class InvoicesService {
   constructor(
     private readonly dbs: DbService,
     private readonly compliance: ComplianceService,
+    private readonly audit: AuditService,
   ) {}
 
   async list(
@@ -151,7 +153,9 @@ export class InvoicesService {
       }
       return row.id;
     });
-    return this.get(invoiceId);
+    const dto = await this.get(invoiceId);
+    void this.audit.log({ entityType: 'invoice', entityId: invoiceId, action: 'create', newData: { invoiceId, kind: dto.kind, status: dto.status } });
+    return dto;
   }
 
   /** Solo se puede editar una factura en borrador. */
@@ -309,6 +313,7 @@ export class InvoicesService {
 
       await this.insertMilestones(tx, invoice, contact);
     });
+    void this.audit.log({ entityType: 'invoice', entityId: id, action: 'update', newData: { status: 'aprobada' } });
     return this.get(id);
   }
 

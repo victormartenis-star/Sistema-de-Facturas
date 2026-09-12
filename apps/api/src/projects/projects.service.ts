@@ -12,6 +12,7 @@ import {
   ProjectStatus,
   ProjectUpdateInput,
 } from '@erp/shared';
+import { AuditService } from '../audit/audit.service';
 import { DbService } from '../db/db.service';
 
 function toDto(row: Project): ProjectDto {
@@ -35,7 +36,10 @@ const UNIQUE_VIOLATION = '23505';
 
 @Injectable()
 export class ProjectsService {
-  constructor(private readonly dbs: DbService) {}
+  constructor(
+    private readonly dbs: DbService,
+    private readonly audit: AuditService,
+  ) {}
 
   async list(search?: string, status?: ProjectStatus): Promise<ProjectDto[]> {
     const companyId = this.dbs.getCompanyId();
@@ -89,6 +93,7 @@ export class ProjectsService {
           notes: data.notes ?? null,
         })
         .returning();
+      void this.audit.log({ entityType: 'project', entityId: row.id, action: 'create', newData: row });
       return toDto(row);
     } catch (err) {
       this.rethrowDuplicateCode(err, data.code);
@@ -121,6 +126,7 @@ export class ProjectsService {
         })
         .where(eq(projects.id, id))
         .returning();
+      void this.audit.log({ entityType: 'project', entityId: id, action: 'update', newData: row });
       return toDto(row);
     } catch (err) {
       this.rethrowDuplicateCode(err, input.code ?? '');
@@ -129,11 +135,12 @@ export class ProjectsService {
 
   /** Borrado lógico (deleted_at), como marca 02-base-de-datos.md. */
   async remove(id: string): Promise<void> {
-    await this.find(id);
+    const existing = await this.find(id);
     await this.dbs.db
       .update(projects)
       .set({ deletedAt: new Date(), updatedAt: new Date() })
       .where(eq(projects.id, id));
+    void this.audit.log({ entityType: 'project', entityId: id, action: 'delete', oldData: existing });
   }
 
   private async find(id: string): Promise<Project> {

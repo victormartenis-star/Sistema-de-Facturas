@@ -71,6 +71,13 @@
       "when": 1789172201183,
       "tag": "0009_melodic_terror",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789172865700,
+      "tag": "0010_good_kat_farrell",
+      "breakpoints": true
     }
   ]
 }
