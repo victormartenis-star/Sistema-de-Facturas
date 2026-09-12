@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, desc, eq, isNull, SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, SQL } from 'drizzle-orm';
 import { Certification, certifications, projects } from '@erp/db';
 import {
   CertificationCreateInput,
@@ -47,11 +47,16 @@ export class CertificationsService {
   ) {}
 
   async list(projectId?: string): Promise<CertificationDto[]> {
-    const companyId = await this.dbs.getCompanyId();
+    const companyId = this.dbs.getCompanyId();
+    const allowed = await this.dbs.getObrasAccesibles();
     const filters: SQL[] = [
       eq(certifications.companyId, companyId),
       isNull(certifications.deletedAt),
     ];
+    if (allowed !== null) {
+      if (allowed.length === 0) return [];
+      filters.push(inArray(certifications.projectId, allowed));
+    }
     if (projectId) filters.push(eq(certifications.projectId, projectId));
     const rows = await this.dbs.db
       .select()

@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, desc, eq, ilike, isNull, or, SQL } from 'drizzle-orm';
+import { and, desc, eq, ilike, inArray, isNull, or, SQL } from 'drizzle-orm';
 import { Project, projects } from '@erp/db';
 import {
   ProjectCreateInput,
@@ -38,11 +38,17 @@ export class ProjectsService {
   constructor(private readonly dbs: DbService) {}
 
   async list(search?: string, status?: ProjectStatus): Promise<ProjectDto[]> {
-    const companyId = await this.dbs.getCompanyId();
+    const companyId = this.dbs.getCompanyId();
+    const allowed = await this.dbs.getObrasAccesibles();
     const filters: SQL[] = [
       eq(projects.companyId, companyId),
       isNull(projects.deletedAt),
     ];
+    if (allowed !== null) {
+      // rol obra: solo las obras asignadas explícitamente
+      if (allowed.length === 0) return [];
+      filters.push(inArray(projects.id, allowed));
+    }
     if (status) {
       filters.push(eq(projects.status, status));
     }
@@ -131,10 +137,16 @@ export class ProjectsService {
   }
 
   private async find(id: string): Promise<Project> {
+    const allowed = await this.dbs.getObrasAccesibles();
+    const filters: SQL[] = [eq(projects.id, id), isNull(projects.deletedAt)];
+    if (allowed !== null) {
+      if (!allowed.includes(id))
+        throw new NotFoundException('Obra no encontrada');
+    }
     const [row] = await this.dbs.db
       .select()
       .from(projects)
-      .where(and(eq(projects.id, id), isNull(projects.deletedAt)))
+      .where(and(...filters))
       .limit(1);
     if (!row) {
       throw new NotFoundException('Obra no encontrada');

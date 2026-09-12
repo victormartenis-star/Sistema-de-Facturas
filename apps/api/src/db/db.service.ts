@@ -3,7 +3,8 @@ import {
   OnModuleDestroy,
   UnauthorizedException,
 } from '@nestjs/common';
-import { closeDb, companies, Db, getDb } from '@erp/db';
+import { eq } from 'drizzle-orm';
+import { closeDb, companies, Db, getDb, userProjectAccess } from '@erp/db';
 import { getRequestContext } from '../common/request-context';
 
 @Injectable()
@@ -27,6 +28,42 @@ export class DbService implements OnModuleDestroy {
       );
     }
     return ctx.companyId;
+  }
+
+  /**
+   * Devuelve el contexto completo de la petición actual.
+   * Lanza 401 si no hay usuario autenticado.
+   */
+  getContext() {
+    const ctx = getRequestContext();
+    if (!ctx) {
+      throw new UnauthorizedException(
+        'No hay usuario autenticado en el contexto de la petición',
+      );
+    }
+    return ctx;
+  }
+
+  /**
+   * Para el rol `obra`, devuelve los projectIds a los que el usuario tiene
+   * acceso explícito. Para los demás roles devuelve `null` (sin restricción).
+   *
+   * Uso en servicios:
+   * ```ts
+   * const allowed = await this.dbs.getObrasAccesibles();
+   * if (allowed !== null) {
+   *   filters.push(inArray(table.projectId, allowed));
+   * }
+   * ```
+   */
+  async getObrasAccesibles(): Promise<string[] | null> {
+    const ctx = this.getContext();
+    if (ctx.role !== 'obra') return null;
+    const rows = await this.db
+      .select({ projectId: userProjectAccess.projectId })
+      .from(userProjectAccess)
+      .where(eq(userProjectAccess.userId, ctx.userId));
+    return rows.map((r) => r.projectId);
   }
 
   /**

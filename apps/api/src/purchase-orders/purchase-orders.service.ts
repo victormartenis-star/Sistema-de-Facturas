@@ -60,11 +60,16 @@ export class PurchaseOrdersService {
     /** Solo pedidos que todavía pueden recibir albaranes. */
     receiving?: boolean;
   }): Promise<PurchaseOrderDto[]> {
-    const companyId = await this.dbs.getCompanyId();
+    const companyId = this.dbs.getCompanyId();
+    const allowed = await this.dbs.getObrasAccesibles();
     const filters: SQL[] = [
       eq(purchaseOrders.companyId, companyId),
       isNull(purchaseOrders.deletedAt),
     ];
+    if (allowed !== null) {
+      if (allowed.length === 0) return [];
+      filters.push(inArray(purchaseOrders.projectId, allowed));
+    }
     if (options.status) filters.push(eq(purchaseOrders.status, options.status));
     if (options.projectId) {
       filters.push(eq(purchaseOrders.projectId, options.projectId));

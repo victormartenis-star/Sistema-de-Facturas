@@ -4,7 +4,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { and, desc, eq, ilike, isNull, or, SQL } from 'drizzle-orm';
+import { and, desc, eq, ilike, inArray, isNull, or, SQL } from 'drizzle-orm';
 import {
   DeliveryNote,
   contacts,
@@ -79,11 +79,16 @@ export class DeliveryNotesService {
     contactId?: string;
     availableForContact?: string;
   }): Promise<DeliveryNoteDto[]> {
-    const companyId = await this.dbs.getCompanyId();
+    const companyId = this.dbs.getCompanyId();
+    const allowed = await this.dbs.getObrasAccesibles();
     const filters: SQL[] = [
       eq(deliveryNotes.companyId, companyId),
       isNull(deliveryNotes.deletedAt),
     ];
+    if (allowed !== null) {
+      if (allowed.length === 0) return [];
+      filters.push(inArray(deliveryNotes.projectId, allowed));
+    }
     if (options.status) filters.push(eq(deliveryNotes.status, options.status));
     if (options.contactId) {
       filters.push(eq(deliveryNotes.contactId, options.contactId));
