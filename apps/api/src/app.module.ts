@@ -3,6 +3,7 @@ import { AuthModule } from './auth/auth.module';
 import { BudgetsModule } from './budgets/budgets.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { UsersModule } from './users/users.module';
+import { CopilotoModule } from './copiloto/copiloto.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CertificationsModule } from './certifications/certifications.module';
 import { ComplianceModule } from './compliance/compliance.module';
@@ -36,6 +37,7 @@ import { TreasuryModule } from './treasury/treasury.module';
     BudgetsModule,
     DashboardModule,
     UsersModule,
+    CopilotoModule,
   ],
 })
 export class AppModule {}

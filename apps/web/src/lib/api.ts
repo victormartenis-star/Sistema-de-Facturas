@@ -621,6 +621,24 @@ export const usersApi = {
     }),
 };
 
+export interface CopilotoMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface CopilotoResponseDto {
+  answer: string;
+  toolsUsed: string[];
+}
+
+export const copilotoApi = {
+  query: (question: string, history: CopilotoMessage[]) =>
+    request<CopilotoResponseDto>('/copiloto/query', {
+      method: 'POST',
+      body: JSON.stringify({ question, history }),
+    }),
+};
+
 export const dashboardApi = {
   resumen: () => request<DashboardResumenDto>('/dashboard/resumen'),
 };
