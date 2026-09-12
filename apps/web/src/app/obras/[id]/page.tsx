@@ -4,6 +4,16 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import type { CertificationDto, PhaseDto } from '@erp/shared';
 import {
   ApiError,
@@ -613,6 +623,62 @@ export default function ObraDetallePage() {
             Nueva partida
           </button>
         </div>
+
+        {/* Gráfico de desvío (solo si hay filas con presupuesto) */}
+        {(deviation?.rows ?? []).filter((r) => r.budget > 0 || r.actual > 0).length > 0 && (
+          <div className="mb-5">
+            <ResponsiveContainer width="100%" height={Math.max(160, (deviation?.rows.length ?? 0) * 36 + 40)}>
+              <BarChart
+                layout="vertical"
+                data={(deviation?.rows ?? [])
+                  .filter((r) => r.budget > 0 || r.actual > 0)
+                  .map((r) => ({
+                    name: r.name.length > 22 ? r.name.slice(0, 20) + '…' : r.name,
+                    Presupuesto: r.budget,
+                    Real: r.actual,
+                    over: r.deviation > 0,
+                  }))}
+                margin={{ top: 0, right: 16, left: 0, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
+                <XAxis
+                  type="number"
+                  tickFormatter={(v: number) =>
+                    v >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`
+                  }
+                  tick={{ fontSize: 10, fill: '#9ca3af' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="name"
+                  tick={{ fontSize: 10, fill: '#6b7280' }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={110}
+                />
+                <Tooltip
+                  formatter={(v, name) => [formatEur(Number(v ?? 0)), String(name)]}
+                  contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid #e5e7eb' }}
+                />
+                <Bar dataKey="Presupuesto" fill="#d1fae5" radius={[0, 3, 3, 0]} maxBarSize={14} />
+                <Bar dataKey="Real" radius={[0, 3, 3, 0]} maxBarSize={14}>
+                  {(deviation?.rows ?? [])
+                    .filter((r) => r.budget > 0 || r.actual > 0)
+                    .map((r, i) => (
+                      <Cell key={i} fill={r.deviation > 0 ? '#fca5a5' : '#6ee7b7'} />
+                    ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            <div className="mt-1 flex items-center gap-4 text-xs text-gray-400">
+              <span className="flex items-center gap-1"><span className="inline-block h-2 w-4 rounded-sm bg-emerald-100" />Presupuesto</span>
+              <span className="flex items-center gap-1"><span className="inline-block h-2 w-4 rounded-sm bg-emerald-300" />Gasto (ok)</span>
+              <span className="flex items-center gap-1"><span className="inline-block h-2 w-4 rounded-sm bg-red-300" />Gasto (sobrecoste)</span>
+            </div>
+          </div>
+        )}
 
         {phases.length === 0 && !deviation?.rows.length ? (
           <p className="py-6 text-center text-sm text-gray-500">

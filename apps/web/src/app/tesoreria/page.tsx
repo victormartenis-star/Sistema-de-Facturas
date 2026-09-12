@@ -3,6 +3,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import {
+  Bar,
+  CartesianGrid,
+  ComposedChart,
+  Legend,
+  Line,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import {
   MILESTONE_KIND_LABELS,
   type CashflowGrouping,
   type MilestoneDto,
@@ -17,6 +28,25 @@ import {
   IconWallet,
 } from '@/components/icons';
 import { ErrorBanner, PageHeader, selectCls } from '@/components/ui';
+
+// ─── Tooltip personalizado del gráfico ────────────────────────────────────────
+function CashflowTooltip({ active, payload, label }: {
+  active?: boolean;
+  payload?: Array<{ name: string; value: number; color: string }>;
+  label?: string;
+}) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-lg text-xs">
+      <p className="mb-2 font-semibold text-gray-700">{label}</p>
+      {payload.map((p) => (
+        <p key={p.name} style={{ color: p.color }} className="tabular-nums">
+          {p.name}: {formatEur(p.value)}
+        </p>
+      ))}
+    </div>
+  );
+}
 
 const errText = (e: unknown) =>
   e instanceof Error ? e.message : 'Error inesperado';
@@ -72,9 +102,6 @@ export default function TesoreriaPage() {
 
   const report = cashflowQuery.data;
   const milestones = milestonesQuery.data ?? [];
-  const maxFlow = report
-    ? Math.max(1, ...report.buckets.map((b) => Math.max(b.cobros, b.pagos)))
-    : 1;
   const overdue = milestones.filter(
     (m) => m.status === 'previsto' && m.dueDate < todayIso(),
   );
@@ -197,66 +224,51 @@ export default function TesoreriaPage() {
               </div>
             </div>
 
-            <div className="overflow-x-auto pb-2">
-              <div className="flex min-w-full items-end gap-3">
-                {report.buckets.map((b) => (
-                  <div
-                    key={b.periodStart}
-                    className={`flex min-w-16 flex-1 flex-col items-center rounded-lg p-2 ${
-                      b.tension ? 'bg-red-50' : ''
-                    }`}
-                    title={`${b.label}: +${b.cobros.toFixed(2)} € / −${b.pagos.toFixed(2)} € · saldo ${b.saldoAcumulado.toFixed(2)} €`}
-                  >
-                    <div className="flex h-32 items-end gap-1">
-                      <div
-                        className="w-4 rounded-t bg-emerald-500"
-                        style={{
-                          height: `${Math.round((b.cobros / maxFlow) * 100)}%`,
-                          minHeight: b.cobros > 0 ? '3px' : '0',
-                        }}
-                      />
-                      <div
-                        className="w-4 rounded-t bg-red-400"
-                        style={{
-                          height: `${Math.round((b.pagos / maxFlow) * 100)}%`,
-                          minHeight: b.pagos > 0 ? '3px' : '0',
-                        }}
-                      />
-                    </div>
-                    <p className="mt-2 text-[10px] font-medium text-gray-500">
-                      {b.label}
-                    </p>
-                    <p
-                      className={`text-[10px] font-semibold tabular-nums ${
-                        b.saldoAcumulado < 0 ? 'text-red-600' : 'text-gray-700'
-                      }`}
-                    >
-                      {formatEur(b.saldoAcumulado)}
-                    </p>
-                    {b.tension && (
-                      <IconAlertTriangle
-                        size={11}
-                        className="mt-0.5 text-red-500"
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="mt-2 flex items-center gap-4 text-xs text-gray-500">
-              <span className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" />
-                Cobros
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-sm bg-red-400" />
-                Pagos
-              </span>
-              <span className="flex items-center gap-1.5">
-                <IconAlertTriangle size={11} className="text-red-500" />
-                Tensión de caja (saldo acumulado negativo)
-              </span>
-            </div>
+            <ResponsiveContainer width="100%" height={280}>
+              <ComposedChart
+                data={report.buckets.map((b) => ({
+                  label: b.label,
+                  Cobros: b.cobros,
+                  Pagos: b.pagos,
+                  'Saldo acum.': b.saldoAcumulado,
+                  tension: b.tension,
+                }))}
+                margin={{ top: 4, right: 16, left: 0, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 10, fill: '#9ca3af' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tickFormatter={(v: number) =>
+                    v >= 1000 ? `${(v / 1000).toFixed(0)}k€` : `${v}€`
+                  }
+                  tick={{ fontSize: 10, fill: '#9ca3af' }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={52}
+                />
+                <Tooltip content={<CashflowTooltip />} />
+                <Legend
+                  iconType="square"
+                  iconSize={10}
+                  wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }}
+                />
+                <Bar dataKey="Cobros" fill="#10b981" radius={[3, 3, 0, 0]} maxBarSize={40} />
+                <Bar dataKey="Pagos" fill="#f87171" radius={[3, 3, 0, 0]} maxBarSize={40} />
+                <Line
+                  type="monotone"
+                  dataKey="Saldo acum."
+                  stroke="#f59e0b"
+                  strokeWidth={2}
+                  dot={false}
+                  strokeDasharray="4 2"
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
           </section>
         </>
       )}
