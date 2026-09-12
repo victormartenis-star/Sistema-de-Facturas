@@ -10,4 +10,10 @@ export class DashboardController {
   resumen() {
     return this.service.resumen();
   }
+
+  /** KPIs económicos por obra: margen bruto, % certificado, coste real. */
+  @Get('obras')
+  obrasKpi() {
+    return this.service.obrasKpi();
+  }
 }

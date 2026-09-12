@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { and, eq, gte, isNull, lt, sql, sum } from 'drizzle-orm';
+import { and, eq, isNull, inArray } from 'drizzle-orm';
 import {
   certifications,
+  invoiceLines,
   invoices,
   paymentMilestones,
   projects,
@@ -185,4 +186,115 @@ export class DashboardService {
       },
     };
   }
+
+  // ── KPI por obra ──────────────────────────────────────────────────────────
+
+  async obrasKpi(): Promise<ObrasKpiRow[]> {
+    const companyId = this.dbs.getCompanyId();
+    const allowed = await this.dbs.getObrasAccesibles();
+
+    const projectFilters = [
+      eq(projects.companyId, companyId),
+      isNull(projects.deletedAt),
+    ];
+    if (allowed !== null) projectFilters.push(inArray(projects.id, allowed));
+
+    const projectRows = await this.dbs.db
+      .select({
+        id: projects.id,
+        code: projects.code,
+        name: projects.name,
+        status: projects.status,
+        contractAmount: projects.contractAmount,
+      })
+      .from(projects)
+      .where(and(...projectFilters));
+
+    if (projectRows.length === 0) return [];
+
+    const projectIds = projectRows.map((p) => p.id);
+
+    // Certificaciones por obra
+    const certAgg = await this.dbs.db
+      .select({
+        projectId: certifications.projectId,
+        periodAmount: certifications.periodAmount,
+      })
+      .from(certifications)
+      .where(
+        and(
+          inArray(certifications.projectId, projectIds),
+          isNull(certifications.deletedAt),
+        ),
+      );
+
+    const certByProject = new Map<string, number>();
+    for (const c of certAgg) {
+      certByProject.set(
+        c.projectId,
+        (certByProject.get(c.projectId) ?? 0) + Number(c.periodAmount),
+      );
+    }
+
+    // Coste real: líneas de facturas de compra aprobadas, agrupadas por obra
+    const costRows = await this.dbs.db
+      .select({
+        projectId: invoiceLines.projectId,
+        baseAmount: invoiceLines.baseAmount,
+      })
+      .from(invoiceLines)
+      .innerJoin(invoices, eq(invoiceLines.invoiceId, invoices.id))
+      .where(
+        and(
+          inArray(invoiceLines.projectId, projectIds),
+          eq(invoices.kind, 'compra'),
+          eq(invoices.status, 'aprobada'),
+          isNull(invoices.deletedAt),
+        ),
+      );
+
+    const costByProject = new Map<string, number>();
+    for (const c of costRows) {
+      if (!c.projectId) continue;
+      costByProject.set(
+        c.projectId,
+        (costByProject.get(c.projectId) ?? 0) + Number(c.baseAmount),
+      );
+    }
+
+    return projectRows.map((p) => {
+      const contract = Number(p.contractAmount ?? 0);
+      const certificado = certByProject.get(p.id) ?? 0;
+      const costReal = costByProject.get(p.id) ?? 0;
+      const margenBruto = certificado - costReal;
+      const margenPct = certificado > 0 ? round2((margenBruto / certificado) * 100) : 0;
+      const pctCertificado = contract > 0 ? round2((certificado / contract) * 100) : 0;
+      return {
+        projectId: p.id,
+        code: p.code,
+        name: p.name,
+        status: p.status,
+        contractAmount: round2(contract),
+        totalCertificado: round2(certificado),
+        pctCertificado,
+        costReal: round2(costReal),
+        margenBruto: round2(margenBruto),
+        margenPct,
+      };
+    });
+  }
 }
+
+export interface ObrasKpiRow {
+  projectId: string;
+  code: string;
+  name: string;
+  status: string;
+  contractAmount: number;
+  totalCertificado: number;
+  pctCertificado: number;
+  costReal: number;
+  margenBruto: number;
+  margenPct: number;
+}
+

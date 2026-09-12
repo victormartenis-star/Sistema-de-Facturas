@@ -663,8 +663,22 @@ export const copilotoApi = {
     }),
 };
 
+export interface ObrasKpiRow {
+  projectId: string;
+  code: string;
+  name: string;
+  status: string;
+  contractAmount: number;
+  totalCertificado: number;
+  pctCertificado: number;
+  costReal: number;
+  margenBruto: number;
+  margenPct: number;
+}
+
 export const dashboardApi = {
   resumen: () => request<DashboardResumenDto>('/dashboard/resumen'),
+  obrasKpi: () => request<ObrasKpiRow[]>('/dashboard/obras'),
 };
 
 export const auditApi = {

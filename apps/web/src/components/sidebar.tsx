@@ -45,6 +45,7 @@ const GESTION: NavItem[] = [
   { href: '/tesoreria', label: 'Tesorería', icon: IconWallet },
   { href: '/cumplimiento', label: 'Homologación', icon: IconLock },
   { href: '/homologacion/alertas', label: 'Alertas PRL', icon: IconBell },
+  { href: '/informes', label: 'Informes', icon: IconChart },
 ];
 
 const CONFIGURACION: NavItem[] = [
@@ -53,9 +54,7 @@ const CONFIGURACION: NavItem[] = [
 ];
 
 /** Módulos previstos en la hoja de ruta que aún no están construidos. */
-const PROXIMAMENTE: { label: string; icon: ComponentType<IconProps> }[] = [
-  { label: 'Informes', icon: IconChart },
-];
+const PROXIMAMENTE: { label: string; icon: ComponentType<IconProps> }[] = [];
 
 function SectionTitle({ children }: { children: string }) {
   return (
