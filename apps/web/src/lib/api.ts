@@ -21,6 +21,8 @@ import type {
   ComplianceWaiverInput,
   CertificationDto,
   CertificationInvoiceInput,
+  CertificationLineDto,
+  CertificationLineCreateInput,
   ContactCreateInput,
   ContactDto,
   ContactUpdateInput,
@@ -343,6 +345,25 @@ export const certificationsApi = {
     }),
   remove: (id: string) =>
     request<void>(`/certifications/${id}`, { method: 'DELETE' }),
+};
+
+export const certificationLinesApi = {
+  list: (certId: string) =>
+    request<CertificationLineDto[]>(`/certifications/${certId}/lines`),
+  create: (certId: string, input: CertificationLineCreateInput) =>
+    request<CertificationLineDto>(`/certifications/${certId}/lines`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  update: (certId: string, lineId: string, input: Partial<CertificationLineCreateInput>) =>
+    request<CertificationLineDto>(`/certifications/${certId}/lines/${lineId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  remove: (certId: string, lineId: string) =>
+    request<void>(`/certifications/${certId}/lines/${lineId}`, {
+      method: 'DELETE',
+    }),
 };
 
 export const purchaseOrdersApi = {

@@ -78,3 +78,41 @@ export interface CertificationDto {
   createdAt: string;
   updatedAt: string;
 }
+
+// ─── Líneas de certificación ───────────────────────────────────────────────
+
+export const certificationLineCreateSchema = z.object({
+  budgetItemId: z.string().uuid('Partida no válida'),
+  cumulativePct: z
+    .number({ invalid_type_error: 'Debe ser un número' })
+    .min(0, 'Entre 0 y 100')
+    .max(100, 'Entre 0 y 100'),
+  cumulativeAmount: z
+    .number({ invalid_type_error: 'Debe ser un número' })
+    .min(0, 'Debe ser ≥ 0'),
+  periodAmount: z
+    .number({ invalid_type_error: 'Debe ser un número' })
+    .min(0, 'Debe ser ≥ 0'),
+  notes: z.string().trim().max(500).nullish(),
+});
+
+export type CertificationLineCreateInput = z.input<
+  typeof certificationLineCreateSchema
+>;
+
+export const certificationLineUpdateSchema = certificationLineCreateSchema.partial();
+export type CertificationLineUpdateInput = z.input<
+  typeof certificationLineUpdateSchema
+>;
+
+export interface CertificationLineDto {
+  id: string;
+  certificationId: string;
+  budgetItemId: string;
+  cumulativePct: number;
+  cumulativeAmount: number;
+  periodAmount: number;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}

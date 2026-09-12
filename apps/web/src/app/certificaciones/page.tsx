@@ -15,10 +15,13 @@ import {
   type CertificationDto,
   type CertificationCreateInput,
   type CertificationInvoiceInput,
+  type CertificationLineDto,
+  type CertificationLineCreateInput,
 } from '@erp/shared';
 import {
   ApiError,
   certificationsApi,
+  certificationLinesApi,
   contactsApi,
   formatDate,
   formatEur,
@@ -26,7 +29,14 @@ import {
 } from '@/lib/api';
 import { useToast } from '@/components/toast';
 import { ConfirmDialog } from '@/components/confirm-dialog';
-import { IconClipboard, IconPlus, IconReceipt, IconTrash } from '@/components/icons';
+import {
+  IconChevronDown,
+  IconChevronUp,
+  IconClipboard,
+  IconPlus,
+  IconReceipt,
+  IconTrash,
+} from '@/components/icons';
 import {
   EmptyState,
   ErrorBanner,
@@ -354,6 +364,215 @@ function FacturarModal({ open, cert, contacts, onSuccess, onClose }: FacturarMod
   );
 }
 
+// ─── Modal nueva línea ────────────────────────────────────────────────────────
+
+interface NuevaLineaModalProps {
+  open: boolean;
+  certId: string;
+  onSuccess: () => void;
+  onClose: () => void;
+}
+
+function NuevaLineaModal({ open, certId, onSuccess, onClose }: NuevaLineaModalProps) {
+  const toast = useToast();
+  const [budgetItemId, setBudgetItemId] = useState('');
+  const [cumulativePct, setCumulativePct] = useState('');
+  const [cumulativeAmount, setCumulativeAmount] = useState('');
+  const [periodAmount, setPeriodAmount] = useState('');
+  const [notes, setNotes] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: (input: CertificationLineCreateInput) =>
+      certificationLinesApi.create(certId, input),
+    onSuccess: () => {
+      toast('Línea añadida');
+      setBudgetItemId('');
+      setCumulativePct('');
+      setCumulativeAmount('');
+      setPeriodAmount('');
+      setNotes('');
+      onSuccess();
+      onClose();
+    },
+    onError: (e) => toast(errText(e), 'error'),
+  });
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    mutation.mutate({
+      budgetItemId,
+      cumulativePct: parseFloat(cumulativePct),
+      cumulativeAmount: parseFloat(cumulativeAmount),
+      periodAmount: parseFloat(periodAmount),
+      notes: notes || undefined,
+    });
+  }
+
+  return (
+    <Modal open={open} title="Añadir línea de certificación" onClose={onClose}>
+      <form id="line-form" onSubmit={handleSubmit} className="space-y-4">
+        <div className={fieldCls}>
+          <label className={labelCls}>ID de partida presupuestaria</label>
+          <input
+            type="text"
+            required
+            placeholder="UUID de la partida"
+            value={budgetItemId}
+            onChange={(e) => setBudgetItemId(e.target.value)}
+            className={inputCls}
+          />
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <div className={fieldCls}>
+            <label className={labelCls}>% Acumulado</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              max="100"
+              required
+              value={cumulativePct}
+              onChange={(e) => setCumulativePct(e.target.value)}
+              className={inputCls}
+            />
+          </div>
+          <div className={fieldCls}>
+            <label className={labelCls}>Importe acum. (€)</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              required
+              value={cumulativeAmount}
+              onChange={(e) => setCumulativeAmount(e.target.value)}
+              className={inputCls}
+            />
+          </div>
+          <div className={fieldCls}>
+            <label className={labelCls}>Importe periodo (€)</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              required
+              value={periodAmount}
+              onChange={(e) => setPeriodAmount(e.target.value)}
+              className={inputCls}
+            />
+          </div>
+        </div>
+        <div className={fieldCls}>
+          <label className={labelCls}>Notas (opcional)</label>
+          <input
+            type="text"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className={inputCls}
+            maxLength={500}
+          />
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" onClick={onClose} className={btnGhostCls}>
+            Cancelar
+          </button>
+          <button type="submit" form="line-form" className={btnPrimaryCls} disabled={mutation.isPending}>
+            {mutation.isPending ? 'Guardando…' : 'Añadir línea'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+// ─── Panel de líneas ──────────────────────────────────────────────────────────
+
+function LinesPanel({ certId }: { certId: string }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [addOpen, setAddOpen] = useState(false);
+
+  const linesQuery = useQuery({
+    queryKey: ['cert-lines', certId],
+    queryFn: () => certificationLinesApi.list(certId),
+  });
+
+  const removeLine = useMutation({
+    mutationFn: (lineId: string) => certificationLinesApi.remove(certId, lineId),
+    onSuccess: () => {
+      toast('Línea eliminada');
+      qc.invalidateQueries({ queryKey: ['cert-lines', certId] });
+    },
+    onError: (e) => toast(errText(e), 'error'),
+  });
+
+  const lines: CertificationLineDto[] = linesQuery.data ?? [];
+
+  return (
+    <div className="border-t border-gray-100 bg-gray-50/60 px-6 py-4">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+          Líneas de certificación ({lines.length})
+        </p>
+        <button
+          onClick={() => setAddOpen(true)}
+          className={btnGhostCls + ' gap-1 text-xs'}
+        >
+          <IconPlus size={12} />
+          Añadir línea
+        </button>
+      </div>
+
+      {linesQuery.isLoading && (
+        <p className="text-xs text-gray-400">Cargando líneas…</p>
+      )}
+
+      {lines.length === 0 && !linesQuery.isLoading && (
+        <p className="text-xs text-gray-400">Sin líneas. Añade partidas para desglosar la certificación.</p>
+      )}
+
+      {lines.length > 0 && (
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left font-semibold text-gray-500">
+              <th className="pb-1 pr-4">Partida ID</th>
+              <th className="pb-1 pr-4 text-right">% Acum.</th>
+              <th className="pb-1 pr-4 text-right">Importe periodo</th>
+              <th className="pb-1 pr-4 text-right">Importe acum.</th>
+              <th className="pb-1" />
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((ln) => (
+              <tr key={ln.id} className="border-t border-gray-100">
+                <td className="py-1 pr-4 font-mono text-gray-600">{ln.budgetItemId.slice(0, 8)}…</td>
+                <td className="py-1 pr-4 text-right font-mono">{ln.cumulativePct.toFixed(2)} %</td>
+                <td className="py-1 pr-4 text-right font-mono">{formatEur(ln.periodAmount)}</td>
+                <td className="py-1 pr-4 text-right font-mono">{formatEur(ln.cumulativeAmount)}</td>
+                <td className="py-1">
+                  <button
+                    onClick={() => removeLine.mutate(ln.id)}
+                    className="rounded p-0.5 text-gray-300 hover:text-red-500"
+                    title="Eliminar línea"
+                  >
+                    <IconTrash size={12} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <NuevaLineaModal
+        open={addOpen}
+        certId={certId}
+        onSuccess={() => qc.invalidateQueries({ queryKey: ['cert-lines', certId] })}
+        onClose={() => setAddOpen(false)}
+      />
+    </div>
+  );
+}
+
 // ─── KPI card ─────────────────────────────────────────────────────────────────
 
 function KpiCard({
@@ -386,6 +605,8 @@ interface CertTableProps {
 }
 
 function CertTable({ certs, contacts, onFacturar, onDelete }: CertTableProps) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
       <table className="w-full text-left text-sm">
@@ -403,6 +624,7 @@ function CertTable({ certs, contacts, onFacturar, onDelete }: CertTableProps) {
         </thead>
         <tbody>
           {certs.map((cert) => (
+            <>
             <tr key={cert.id} className="border-b border-gray-50 hover:bg-gray-50/50">
               <td className="px-4 py-3 text-center font-semibold text-amber-600">
                 {cert.seq}
@@ -429,6 +651,17 @@ function CertTable({ certs, contacts, onFacturar, onDelete }: CertTableProps) {
               </td>
               <td className="px-4 py-3">
                 <div className="flex items-center justify-end gap-2">
+                  <button
+                    onClick={() => setExpandedId(expandedId === cert.id ? null : cert.id)}
+                    className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                    title="Ver líneas"
+                  >
+                    {expandedId === cert.id ? (
+                      <IconChevronUp size={14} />
+                    ) : (
+                      <IconChevronDown size={14} />
+                    )}
+                  </button>
                   {cert.status === 'borrador' && (
                     <button
                       onClick={() => onFacturar(cert)}
@@ -450,6 +683,14 @@ function CertTable({ certs, contacts, onFacturar, onDelete }: CertTableProps) {
                 </div>
               </td>
             </tr>
+            {expandedId === cert.id && (
+              <tr key={`${cert.id}-lines`}>
+                <td colSpan={8} className="p-0">
+                  <LinesPanel certId={cert.id} />
+                </td>
+              </tr>
+            )}
+            </>
           ))}
         </tbody>
       </table>

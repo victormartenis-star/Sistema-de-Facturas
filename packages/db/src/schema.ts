@@ -820,3 +820,53 @@ export type Budget = typeof budgets.$inferSelect;
 export type NewBudget = typeof budgets.$inferInsert;
 export type BudgetItem = typeof budgetItems.$inferSelect;
 export type NewBudgetItem = typeof budgetItems.$inferInsert;
+
+/**
+ * Líneas de certificación: descomposición de una certificación por partida
+ * de presupuesto. Permite certificar a origen partida a partida en lugar de
+ * por porcentaje global de la obra.
+ *
+ * El `cumulativePct` de la cabecera (`certifications`) sigue siendo el %
+ * global de referencia; las líneas son el detalle de ese avance.
+ */
+export const certificationLines = pgTable(
+  'certification_lines',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    certificationId: uuid('certification_id')
+      .notNull()
+      .references(() => certifications.id, { onDelete: 'cascade' }),
+    budgetItemId: uuid('budget_item_id')
+      .notNull()
+      .references(() => budgetItems.id, { onDelete: 'restrict' }),
+    /** % ejecutado acumulado a origen de esta partida. */
+    cumulativePct: numeric('cumulative_pct', {
+      precision: 5,
+      scale: 2,
+    }).notNull(),
+    /** Importe acumulado (partida.total_amount × cumulative_pct / 100). */
+    cumulativeAmount: numeric('cumulative_amount', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    /** Importe del periodo = acumulado_actual - acumulado_anterior. */
+    periodAmount: numeric('period_amount', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Una partida aparece solo una vez por certificación
+    unique().on(t.certificationId, t.budgetItemId),
+  ],
+);
+
+export type CertificationLine = typeof certificationLines.$inferSelect;
+export type NewCertificationLine = typeof certificationLines.$inferInsert;
