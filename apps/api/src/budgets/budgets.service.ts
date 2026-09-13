@@ -4,14 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
-import {
-  Budget,
-  BudgetItem,
-  budgetItems,
-  budgets,
-  projects,
-} from '@erp/db';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { Budget, BudgetItem, budgetItems, budgets, projects } from '@erp/db';
 import {
   Bc3ImportResultDto,
   BudgetCreateInput,
@@ -130,7 +124,10 @@ export class BudgetsService {
     };
   }
 
-  async create(projectId: string, input: BudgetCreateInput): Promise<BudgetDto> {
+  async create(
+    projectId: string,
+    input: BudgetCreateInput,
+  ): Promise<BudgetDto> {
     const companyId = this.dbs.getCompanyId();
     await this.findProject(projectId);
     const data = budgetCreateSchema.parse(input);
@@ -185,7 +182,11 @@ export class BudgetsService {
       .from(budgetItems)
       .where(eq(budgetItems.budgetId, id));
 
-    return budgetToDto(updated, Number(agg?.totalAmount ?? 0), agg?.itemCount ?? 0);
+    return budgetToDto(
+      updated,
+      Number(agg?.totalAmount ?? 0),
+      agg?.itemCount ?? 0,
+    );
   }
 
   async remove(id: string): Promise<void> {
@@ -301,7 +302,9 @@ export class BudgetsService {
     const data = budgetItemUpdateSchema.parse(input);
 
     const unitPrice =
-      data.unitPrice !== undefined ? data.unitPrice : Number(existing.unitPrice);
+      data.unitPrice !== undefined
+        ? data.unitPrice
+        : Number(existing.unitPrice);
     const quantity =
       data.quantity !== undefined ? data.quantity : Number(existing.quantity);
     const totalAmount = round2(unitPrice * quantity);

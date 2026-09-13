@@ -3,6 +3,17 @@ name: CI
 # Se ejecuta en cada push y en cada pull request. El objetivo no es tener un
 # semáforo verde bonito: es que nadie pueda fusionar código que no compila,
 # que no pasa el lint o que rompe el cálculo del dinero.
+#
+# Tres jobs independientes, cada uno con su runner y su Postgres efímero:
+#   - calidad:     build, typecheck, lint, formato, tests unitarios (rápido).
+#   - migraciones: aplica las migraciones sobre una BD vacía y repite el
+#                  seed de sistema para comprobar que es idempotente.
+#   - e2e:         arranca API + web de verdad y corre Playwright contra
+#                  ellas (lento; solo arranca si `calidad` pasa).
+#
+# Caché: `actions/setup-node`'s `cache: npm` (basada en package-lock.json)
+# es la única caché de dependencias del repo — no se usa Turborepo porque no
+# forma parte de este monorepo (build plano con npm workspaces + tsc).
 on:
   push:
     branches: ['**']
@@ -85,3 +96,79 @@ jobs:
       # El seed debe poder repetirse sin duplicar nada (es idempotente).
       - name: Repetir el seed (idempotencia)
         run: npm run db:seed
+
+  e2e:
+    name: Suite E2E con Playwright
+    runs-on: ubuntu-latest
+    # No tiene sentido gastar minutos de CI arrancando navegador y dos apps
+    # completas si el código ni siquiera tipa o pasa el lint.
+    needs: calidad
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: erp
+          POSTGRES_PASSWORD: erp
+          POSTGRES_DB: erp_dev
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://erp:erp@localhost:5432/erp_dev
+      # Sin esto la API arranca igual (usa un secreto de desarrollo con
+      # aviso), pero fijarlo explícito es la práctica correcta en CI.
+      JWT_SECRET: erp-dintel-ci-secret-no-usar-en-produccion-1234567890
+      # Mismas credenciales que crea `apps/e2e/seed.ts` si no existen ya
+      # (por defecto son las mismas; se repiten aquí para que quede a la
+      # vista sin tener que rastrear dos ficheros de código fuente).
+      E2E_EMAIL: test@dintel.es
+      E2E_PASSWORD: Test1234!
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Compilar paquetes compartidos
+        run: npm run build:packages
+
+      # Chromium es el único navegador que usa la suite (ver
+      # `apps/e2e/playwright.config.ts`); `--with-deps` instala también las
+      # librerías del sistema que hacen falta en un runner desnudo.
+      - name: Instalar navegador de Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Aplicar migraciones
+        run: npm run db:migrate
+
+      # Crea la empresa por defecto y las categorías de sistema: sin esto
+      # `POST /auth/register` (que usa `apps/e2e/seed.ts`) no tiene dónde
+      # colgar el primer usuario — el sistema es mono-empresa.
+      - name: Sembrar datos de sistema
+        run: npm run db:seed
+
+      # El seed de fixtures E2E (`apps/e2e/seed.ts`) NO se ejecuta aquí como
+      # paso suelto: habla solo por la API HTTP, así que necesita la API ya
+      # arrancada, y esa vida solo existe dentro del propio proceso de
+      # Playwright. Se dispara automáticamente vía `globalSetup`, justo
+      # después de que `webServer` confirme que la API está arriba y antes
+      # de que corra ningún test — ver `playwright.config.ts` y `global-setup.ts`.
+      - name: Ejecutar la suite E2E (arranca API+web, siembra, prueba)
+        run: npm run e2e
+
+      - name: Subir el reporte de Playwright (solo si falla)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/e2e/playwright-report/
+          retention-days: 14

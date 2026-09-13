@@ -73,9 +73,7 @@ export class BudgetsController {
 
   /** GET /budgets/:id — detalle con todas las partidas */
   @Get('budgets/:id')
-  getDetail(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<BudgetDetailDto> {
+  getDetail(@Param('id', ParseUUIDPipe) id: string): Promise<BudgetDetailDto> {
     return this.svc.getDetail(id);
   }
 

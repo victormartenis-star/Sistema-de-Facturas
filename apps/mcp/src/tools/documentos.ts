@@ -34,11 +34,23 @@ export function registrarDocumentos(server: McpServer) {
         'o por obra. Útil para ver qué documentos están pendientes de validar.',
       inputSchema: {
         status: z
-          .enum(['pendiente', 'procesando', 'extraido', 'validado', 'rechazado'])
+          .enum([
+            'pendiente',
+            'procesando',
+            'extraido',
+            'validado',
+            'rechazado',
+          ])
           .optional()
           .describe('Estado del documento en el pipeline OCR'),
         docType: z
-          .enum(['factura_compra', 'factura_venta', 'albaran', 'contrato', 'otro'])
+          .enum([
+            'factura_compra',
+            'factura_venta',
+            'albaran',
+            'contrato',
+            'otro',
+          ])
           .optional()
           .describe('Tipo de documento'),
         projectId: z
@@ -46,20 +58,19 @@ export function registrarDocumentos(server: McpServer) {
           .uuid()
           .optional()
           .describe('Filtrar por obra (uuid)'),
-        search: z.string().optional().describe('Búsqueda por nombre de archivo'),
+        search: z
+          .string()
+          .optional()
+          .describe('Búsqueda por nombre de archivo'),
       },
       annotations: { readOnlyHint: true },
     },
     async (params) =>
       ejecutar(async () => {
-        const docs = await pedir<DocumentDto[]>(
-          `/documents${query(params)}`,
-        );
+        const docs = await pedir<DocumentDto[]>(`/documents${query(params)}`);
         return {
           total: docs.length,
-          pendientesValidar: docs.filter(
-            (d) => d.status === 'extraido',
-          ).length,
+          pendientesValidar: docs.filter((d) => d.status === 'extraido').length,
           documentos: docs.map((d) => ({
             id: d.id,
             fileName: d.fileName,
@@ -87,10 +98,7 @@ export function registrarDocumentos(server: McpServer) {
         'para revisar qué ha leído el sistema de un documento concreto o ' +
         'para diagnosticar por qué no ha podido validarse.',
       inputSchema: {
-        documentId: z
-          .string()
-          .uuid()
-          .describe('ID del documento (uuid)'),
+        documentId: z.string().uuid().describe('ID del documento (uuid)'),
       },
       annotations: { readOnlyHint: true },
     },
@@ -141,7 +149,8 @@ export function registrarDocumentos(server: McpServer) {
         return {
           total: docs.length,
           porEstado,
-          pendientesDeRevision: docs.filter((d) => d.status === 'extraido').length,
+          pendientesDeRevision: docs.filter((d) => d.status === 'extraido')
+            .length,
           rechazados: docs.filter((d) => d.status === 'rechazado').length,
         };
       }),

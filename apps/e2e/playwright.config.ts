@@ -3,11 +3,23 @@ import { defineConfig, devices } from '@playwright/test';
 /**
  * Configuración de tests E2E para el ERP Dintel.
  *
- * Requiere que la API (puerto 3001) y la web (puerto 3000) estén en marcha.
- * En CI se arrancan automáticamente vía webServer.
+ * En local: la API (puerto 3001) y la web (puerto 3000) deben estar ya en
+ * marcha (`npm run dev:api` / `npm run dev:web`) — no se arrancan solas para
+ * no interferir con el hot-reload de una sesión de desarrollo activa.
+ *
+ * En CI (`process.env.CI`): `webServer` compila y arranca ambas por su cuenta,
+ * ya que no hay ningún servidor previo. Requiere `npm run build:packages`
+ * previo (paquetes compartidos) y una base de datos migrada
+ * (`npm run db:migrate && npm run db:seed`).
+ *
+ * `globalSetup` puebla los datos de prueba (`npm run seed:e2e`, ver
+ * `seed.ts`) después de que `webServer` confirme que la API está arriba —
+ * incluido el usuario `E2E_EMAIL` / `E2E_PASSWORD` que usa
+ * `tests/auth.setup.ts`, que hasta ahora había que crear a mano.
  */
 export default defineConfig({
   testDir: './tests',
+  globalSetup: require.resolve('./global-setup'),
   /* Timeout por test */
   timeout: 30_000,
   /* Fallo en el primer test fallido del fichero */
@@ -44,5 +56,23 @@ export default defineConfig({
     },
   ],
   /* En local no arrancamos servidores automáticamente (ya deben estar corriendo). */
-  // webServer: [...],
+  webServer: process.env.CI
+    ? [
+        {
+          command: 'npm run build -w @erp/api && npm run start -w @erp/api',
+          port: 3001,
+          reuseExistingServer: false,
+          // El runner de CI es más lento y variable que un portátil: margen
+          // amplio para que un `tsc` frío no dispare un fallo por timeout.
+          timeout: 180_000,
+        },
+        {
+          command: 'npm run build -w @erp/web && npm run start -w @erp/web',
+          port: 3000,
+          reuseExistingServer: false,
+          // El build de Next.js es el más lento de los dos arranques.
+          timeout: 180_000,
+        },
+      ]
+    : undefined,
 });

@@ -9,7 +9,7 @@ import {
   type BudgetItemDto,
   type BudgetStatus,
 } from '@erp/shared';
-import { ApiError, budgetsApi, formatEur, projectsApi } from '@/lib/api';
+import { budgetsApi, formatEur, projectsApi } from '@/lib/api';
 import { useToast } from '@/components/toast';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import {
@@ -28,7 +28,6 @@ import {
   TableSkeleton,
   btnGhostCls,
   btnPrimaryCls,
-  fieldCls,
   inputCls,
   labelCls,
   selectCls,
@@ -237,7 +236,8 @@ function ImportBc3Modal({
   const [warnings, setWarnings] = useState<string[]>([]);
 
   const mutation = useMutation({
-    mutationFn: () => budgetsApi.importBc3(projectId, file!, name.trim() || undefined),
+    mutationFn: () =>
+      budgetsApi.importBc3(projectId, file!, name.trim() || undefined),
     onSuccess: (res) => {
       toast(`BC3 importado: ${res.itemsCreated} partidas`);
       qc.invalidateQueries({ queryKey: ['budgets', projectId] });
@@ -264,11 +264,16 @@ function ImportBc3Modal({
   };
 
   return (
-    <Modal open={open} title="Importar BC3 (Presto / FIEBDC-3)" onClose={handleClose}>
+    <Modal
+      open={open}
+      title="Importar BC3 (Presto / FIEBDC-3)"
+      onClose={handleClose}
+    >
       {warnings.length > 0 ? (
         <div className="space-y-3">
           <p className="text-sm font-medium text-amber-700">
-            Importado con {warnings.length} aviso{warnings.length !== 1 ? 's' : ''}:
+            Importado con {warnings.length} aviso
+            {warnings.length !== 1 ? 's' : ''}:
           </p>
           <ul className="max-h-48 overflow-y-auto rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 space-y-1">
             {warnings.map((w, i) => (
@@ -413,7 +418,8 @@ function BudgetCard({
             </span>
             {budget.importedAt && (
               <span className="text-gray-400">
-                {' '}· importado{' '}
+                {' '}
+                · importado{' '}
                 {new Date(budget.importedAt).toLocaleDateString('es-ES')}
               </span>
             )}
@@ -452,7 +458,11 @@ function BudgetCard({
             className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
             title={expanded ? 'Ocultar partidas' : 'Ver partidas'}
           >
-            {expanded ? <IconChevronUp size={16} /> : <IconChevronDown size={16} />}
+            {expanded ? (
+              <IconChevronUp size={16} />
+            ) : (
+              <IconChevronDown size={16} />
+            )}
           </button>
         </div>
       </div>
@@ -466,9 +476,7 @@ function BudgetCard({
             </div>
           )}
           {detailQuery.isError && (
-            <ErrorBanner
-              message={(detailQuery.error as Error).message}
-            />
+            <ErrorBanner message={(detailQuery.error as Error).message} />
           )}
           {detailQuery.data && <BudgetTree detail={detailQuery.data} />}
         </div>
@@ -513,10 +521,7 @@ export default function PresupuestosPage() {
       <PageHeader title="Presupuestos">
         {projectId && (
           <>
-            <button
-              onClick={() => setImportOpen(true)}
-              className={btnGhostCls}
-            >
+            <button onClick={() => setImportOpen(true)} className={btnGhostCls}>
               <IconUpload size={15} />
               Importar BC3
             </button>
@@ -533,7 +538,9 @@ export default function PresupuestosPage() {
 
       {/* Selector de obra */}
       <div className="flex items-center gap-3">
-        <label className="text-sm font-medium text-gray-700 shrink-0">Obra</label>
+        <label className="text-sm font-medium text-gray-700 shrink-0">
+          Obra
+        </label>
         <select
           className={`${selectCls} max-w-sm flex-1`}
           value={projectId}
@@ -571,14 +578,14 @@ export default function PresupuestosPage() {
           title="Esta obra no tiene presupuestos todavía"
         >
           <div className="flex gap-2">
-            <button
-              onClick={() => setImportOpen(true)}
-              className={btnGhostCls}
-            >
+            <button onClick={() => setImportOpen(true)} className={btnGhostCls}>
               <IconUpload size={15} />
               Importar BC3
             </button>
-            <button onClick={() => setCreateOpen(true)} className={btnPrimaryCls}>
+            <button
+              onClick={() => setCreateOpen(true)}
+              className={btnPrimaryCls}
+            >
               <IconPlus size={15} />
               Crear presupuesto
             </button>

@@ -115,7 +115,9 @@ export default function AlertasCompliancePage() {
           className={selectCls}
         >
           {HORIZONTE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
           ))}
         </select>
       </div>
@@ -126,7 +128,8 @@ export default function AlertasCompliancePage() {
       {!query.isLoading && !query.error && alertas.length === 0 && (
         <EmptyState icon={<IconShield size={40} />} title="Sin alertas">
           <p className="text-sm text-gray-500">
-            Ningún contacto tiene documentación bloqueante que caduque en los próximos {days} días.
+            Ningún contacto tiene documentación bloqueante que caduque en los
+            próximos {days} días.
           </p>
         </EmptyState>
       )}
@@ -136,7 +139,8 @@ export default function AlertasCompliancePage() {
         <section>
           <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-red-600">
             <IconBell size={16} />
-            Documentación vencida ({vencidos.length} contacto{vencidos.length !== 1 ? 's' : ''})
+            Documentación vencida ({vencidos.length} contacto
+            {vencidos.length !== 1 ? 's' : ''})
           </h2>
           <AlertTable rows={vencidos} />
         </section>
@@ -147,7 +151,8 @@ export default function AlertasCompliancePage() {
         <section>
           <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-amber-600">
             <IconBell size={16} />
-            Próximos a vencer en {days} días ({proximos.length} contacto{proximos.length !== 1 ? 's' : ''})
+            Próximos a vencer en {days} días ({proximos.length} contacto
+            {proximos.length !== 1 ? 's' : ''})
           </h2>
           <AlertTable rows={proximos} />
         </section>
@@ -171,8 +176,13 @@ function AlertTable({ rows }: { rows: ComplianceAlertDto[] }) {
         </thead>
         <tbody>
           {rows.map((a) => (
-            <tr key={a.contactId} className="border-b border-gray-50 hover:bg-gray-50/40">
-              <td className="px-4 py-3 font-medium text-gray-900">{a.legalName}</td>
+            <tr
+              key={a.contactId}
+              className="border-b border-gray-50 hover:bg-gray-50/40"
+            >
+              <td className="px-4 py-3 font-medium text-gray-900">
+                {a.legalName}
+              </td>
               <td className="px-4 py-3 font-mono text-xs text-gray-500">
                 {a.taxId ?? '—'}
               </td>

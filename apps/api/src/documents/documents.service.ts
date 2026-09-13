@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, desc, eq, ilike, isNull, SQL } from 'drizzle-orm';
+import { and, desc, eq, ilike, inArray, isNull, SQL } from 'drizzle-orm';
 import { Document, documents, projects } from '@erp/db';
 import {
   DOCUMENT_ACCEPTED_MIME_TYPES,
@@ -16,6 +16,7 @@ import {
   DocumentUpdateInput,
   DocumentUploadMeta,
   documentUpdateSchema,
+  isProjectAllowed,
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
 import { StorageService } from './storage.service';
@@ -69,10 +70,17 @@ export class DocumentsService {
     projectId?: string;
   }): Promise<DocumentDto[]> {
     const companyId = await this.dbs.getCompanyId();
+    const allowed = await this.dbs.getObrasAccesibles();
     const where: SQL[] = [
       eq(documents.companyId, companyId),
       isNull(documents.deletedAt),
     ];
+    if (allowed !== null) {
+      // Rol obra: solo documentos vinculados a sus obras (los sin obra
+      // asignada quedan fuera, igual que en `isProjectAllowed`).
+      if (allowed.length === 0) return [];
+      where.push(inArray(documents.projectId, allowed));
+    }
     if (filters.status) {
       where.push(eq(documents.status, filters.status));
     }
@@ -223,6 +231,10 @@ export class DocumentsService {
     if (!row) {
       throw new NotFoundException('Documento no encontrado');
     }
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (allowed !== null && !isProjectAllowed(allowed, row.projectId)) {
+      throw new NotFoundException('Documento no encontrado');
+    }
     return row;
   }
 
@@ -243,6 +255,10 @@ export class DocumentsService {
       .limit(1);
     if (!project) {
       throw new BadRequestException('La obra indicada no existe');
+    }
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (allowed !== null && !allowed.includes(projectId)) {
+      throw new BadRequestException('No tienes acceso a esa obra');
     }
   }
 }

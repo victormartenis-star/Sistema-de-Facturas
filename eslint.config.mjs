@@ -17,6 +17,10 @@ export default tseslint.config(
       '**/.next/**',
       '**/node_modules/**',
       '**/drizzle/**',
+      // Salida de Playwright al correr la suite E2E en local: JS del visor
+      // de trazas (bundle de terceros) y capturas/videos de fallos.
+      'apps/e2e/playwright-report/**',
+      'apps/e2e/test-results/**',
       // Lo genera Next en cada arranque; no es código nuestro.
       'apps/web/next-env.d.ts',
     ],
@@ -52,7 +56,7 @@ export default tseslint.config(
   },
   {
     // Scripts de siembra y migración: la consola es su interfaz.
-    files: ['packages/db/src/**', '**/*.config.*'],
+    files: ['packages/db/src/**', 'apps/e2e/seed.ts', '**/*.config.*'],
     rules: { 'no-console': 'off' },
   },
 );

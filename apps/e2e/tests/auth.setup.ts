@@ -12,8 +12,12 @@ setup('autenticar usuario de prueba', async ({ page }) => {
   await page.goto('/login');
 
   // Rellena el formulario de login
-  await page.getByLabel(/email/i).fill(process.env.E2E_EMAIL ?? 'test@dintel.es');
-  await page.getByLabel(/contraseña/i).fill(process.env.E2E_PASSWORD ?? 'Test1234!');
+  await page
+    .getByLabel(/email/i)
+    .fill(process.env.E2E_EMAIL ?? 'test@dintel.es');
+  await page
+    .getByLabel(/contraseña/i)
+    .fill(process.env.E2E_PASSWORD ?? 'Test1234!');
   await page.getByRole('button', { name: /entrar|iniciar sesión/i }).click();
 
   // Espera a estar en el panel principal

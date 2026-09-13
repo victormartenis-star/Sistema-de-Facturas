@@ -111,10 +111,7 @@ export function registrarDashboard(server: McpServer) {
         );
 
         const ultima = certs.at(-1);
-        const totalCertificado = certs.reduce(
-          (s, c) => s + c.periodAmount,
-          0,
-        );
+        const totalCertificado = certs.reduce((s, c) => s + c.periodAmount, 0);
         const retencionAcumulada = certs.reduce(
           (s, c) => s + c.retentionAmount,
           0,

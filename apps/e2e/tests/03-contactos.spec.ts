@@ -7,9 +7,9 @@ import { test, expect } from '@playwright/test';
 test.describe('Contactos', () => {
   test('lista contactos', async ({ page }) => {
     await page.goto('/contactos');
-    await expect(
-      page.getByRole('heading', { name: /contactos/i }),
-    ).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('heading', { name: /contactos/i })).toBeVisible(
+      { timeout: 8_000 },
+    );
   });
 
   test('busca un contacto por texto', async ({ page }) => {

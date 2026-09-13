@@ -1,13 +1,12 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
-  BUDGET_STATUSES,
   budgetCreateSchema,
   budgetUpdateSchema,
   type BudgetDetailDto,
   type BudgetDto,
 } from '@erp/shared';
-import { pedir, query } from '../api';
+import { pedir } from '../api';
 import { ejecutar } from '../comun';
 
 export function registrarPresupuestos(server: McpServer) {

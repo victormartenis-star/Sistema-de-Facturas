@@ -123,7 +123,10 @@ export function AuthSwitchLink({
   return (
     <>
       {prompt}{' '}
-      <Link href={href} className="font-semibold text-amber-300 hover:underline">
+      <Link
+        href={href}
+        className="font-semibold text-amber-300 hover:underline"
+      >
         {label}
       </Link>
     </>

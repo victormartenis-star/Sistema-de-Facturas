@@ -8,12 +8,7 @@ import {
   type UserDto,
   type UserRole,
 } from '@erp/shared';
-import {
-  ApiError,
-  formatDate,
-  projectsApi,
-  usersApi,
-} from '@/lib/api';
+import { ApiError, formatDate, projectsApi, usersApi } from '@/lib/api';
 import { useToast } from '@/components/toast';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import {
@@ -47,7 +42,9 @@ const ROLE_COLORS: Record<UserRole, string> = {
 
 function RoleBadge({ role }: { role: UserRole }) {
   return (
-    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${ROLE_COLORS[role]}`}>
+    <span
+      className={`rounded-full px-2 py-0.5 text-xs font-medium ${ROLE_COLORS[role]}`}
+    >
       {USER_ROLE_LABELS[role]}
     </span>
   );
@@ -73,17 +70,24 @@ function NuevoUsuarioModal({
     mutationFn: () => usersApi.create({ email, fullName, password, role }),
     onSuccess: () => {
       toast('Usuario creado');
-      setEmail(''); setFullName(''); setPassword(''); setRole('administracion');
+      setEmail('');
+      setFullName('');
+      setPassword('');
+      setRole('administracion');
       onSuccess();
       onClose();
     },
-    onError: (e) => toast((e as ApiError).message ?? 'Error al crear usuario', 'error'),
+    onError: (e) =>
+      toast((e as ApiError).message ?? 'Error al crear usuario', 'error'),
   });
 
   return (
     <Modal open={open} title="Nuevo usuario" onClose={onClose}>
       <form
-        onSubmit={(e) => { e.preventDefault(); mutation.mutate(); }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          mutation.mutate();
+        }}
         className="space-y-4"
       >
         <div className={fieldCls}>
@@ -127,7 +131,9 @@ function NuevoUsuarioModal({
             onChange={(e) => setRole(e.target.value as UserRole)}
           >
             {USER_ROLES.map((r) => (
-              <option key={r} value={r}>{USER_ROLE_LABELS[r]}</option>
+              <option key={r} value={r}>
+                {USER_ROLE_LABELS[r]}
+              </option>
             ))}
           </select>
         </div>
@@ -175,7 +181,10 @@ function EditarUsuarioModal({
   return (
     <Modal open={true} title="Editar usuario" onClose={onClose}>
       <form
-        onSubmit={(e) => { e.preventDefault(); mutation.mutate(); }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          mutation.mutate();
+        }}
         className="space-y-4"
       >
         <div className={fieldCls}>
@@ -195,18 +204,25 @@ function EditarUsuarioModal({
             onChange={(e) => setRole(e.target.value as UserRole)}
           >
             {USER_ROLES.map((r) => (
-              <option key={r} value={r}>{USER_ROLE_LABELS[r]}</option>
+              <option key={r} value={r}>
+                {USER_ROLE_LABELS[r]}
+              </option>
             ))}
           </select>
         </div>
         <p className="text-xs text-gray-500">
-          Email: <span className="font-mono">{user.email}</span> · Alta: {formatDate(user.createdAt.slice(0, 10))}
+          Email: <span className="font-mono">{user.email}</span> · Alta:{' '}
+          {formatDate(user.createdAt.slice(0, 10))}
         </p>
         <div className="flex justify-end gap-3 pt-2">
           <button type="button" className={btnGhostCls} onClick={onClose}>
             Cancelar
           </button>
-          <button type="submit" className={btnPrimaryCls} disabled={mutation.isPending}>
+          <button
+            type="submit"
+            className={btnPrimaryCls}
+            disabled={mutation.isPending}
+          >
             {mutation.isPending ? 'Guardando…' : 'Guardar'}
           </button>
         </div>
@@ -252,7 +268,8 @@ function AccesoObrasModal({
   const toggle = (id: string) => {
     setSelected((prev) => {
       const s = new Set(prev ?? accessQuery.data ?? []);
-      if (s.has(id)) s.delete(id); else s.add(id);
+      if (s.has(id)) s.delete(id);
+      else s.add(id);
       return s;
     });
   };
@@ -260,9 +277,15 @@ function AccesoObrasModal({
   const projects = projectsQuery.data ?? [];
 
   return (
-    <Modal open={true} title={`Obras accesibles — ${user.fullName}`} onClose={onClose} wide>
+    <Modal
+      open={true}
+      title={`Obras accesibles — ${user.fullName}`}
+      onClose={onClose}
+      wide
+    >
       <p className="mb-3 text-sm text-gray-500">
-        Marca las obras que este usuario puede ver (solo aplica al rol <strong>Obra</strong>).
+        Marca las obras que este usuario puede ver (solo aplica al rol{' '}
+        <strong>Obra</strong>).
       </p>
       {accessQuery.isLoading || projectsQuery.isLoading ? (
         <TableSkeleton rows={4} />
@@ -285,18 +308,24 @@ function AccesoObrasModal({
                 >
                   {checked && <IconCheck size={12} />}
                 </span>
-                <span className="flex-1 text-sm font-medium text-gray-800">{p.name}</span>
+                <span className="flex-1 text-sm font-medium text-gray-800">
+                  {p.name}
+                </span>
                 <span className="text-xs text-gray-400">{p.code}</span>
               </li>
             );
           })}
           {projects.length === 0 && (
-            <li className="py-8 text-center text-sm text-gray-500">Sin obras</li>
+            <li className="py-8 text-center text-sm text-gray-500">
+              Sin obras
+            </li>
           )}
         </ul>
       )}
       <div className="flex justify-end gap-3 pt-4">
-        <button className={btnGhostCls} onClick={onClose}>Cancelar</button>
+        <button className={btnGhostCls} onClick={onClose}>
+          Cancelar
+        </button>
         <button
           className={btnPrimaryCls}
           disabled={mutation.isPending}
@@ -324,7 +353,8 @@ export default function UsuariosPage() {
   });
 
   const toggleActiveMutation = useMutation({
-    mutationFn: (u: UserDto) => usersApi.update(u.id, { isActive: !u.isActive }),
+    mutationFn: (u: UserDto) =>
+      usersApi.update(u.id, { isActive: !u.isActive }),
     onSuccess: () => {
       toast('Estado actualizado');
       qc.invalidateQueries({ queryKey: ['users'] });
@@ -378,19 +408,35 @@ export default function UsuariosPage() {
           <table className="min-w-full text-sm">
             <thead className="border-b border-gray-200 bg-gray-50">
               <tr>
-                <th className="px-4 py-3 text-left font-medium text-gray-500">Nombre</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-500">Email</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-500">Rol</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-500">Estado</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-500">Alta</th>
-                <th className="px-4 py-3 text-right font-medium text-gray-500">Acciones</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-500">
+                  Nombre
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-gray-500">
+                  Email
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-gray-500">
+                  Rol
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-gray-500">
+                  Estado
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-gray-500">
+                  Alta
+                </th>
+                <th className="px-4 py-3 text-right font-medium text-gray-500">
+                  Acciones
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {userList.map((u) => (
                 <tr key={u.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-900">{u.fullName}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-gray-600">{u.email}</td>
+                  <td className="px-4 py-3 font-medium text-gray-900">
+                    {u.fullName}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-gray-600">
+                    {u.email}
+                  </td>
                   <td className="px-4 py-3">
                     <RoleBadge role={u.role} />
                   </td>
@@ -404,7 +450,11 @@ export default function UsuariosPage() {
                           : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                       }`}
                     >
-                      {u.isActive ? <IconCheck size={11} /> : <IconX size={11} />}
+                      {u.isActive ? (
+                        <IconCheck size={11} />
+                      ) : (
+                        <IconX size={11} />
+                      )}
                       {u.isActive ? 'Activo' : 'Inactivo'}
                     </button>
                   </td>

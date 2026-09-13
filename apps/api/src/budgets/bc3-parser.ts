@@ -148,7 +148,9 @@ export function parseBc3(raw: string): Bc3ParseResult {
   ): void {
     const concept = concepts.get(code);
     if (!concept) {
-      warnings.push(`Código "${code}" referenciado en ~D pero sin ~C definido; se omite.`);
+      warnings.push(
+        `Código "${code}" referenciado en ~D pero sin ~C definido; se omite.`,
+      );
       return;
     }
 

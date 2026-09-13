@@ -7,9 +7,9 @@ import { test, expect } from '@playwright/test';
 test.describe('Usuarios', () => {
   test('carga la página de usuarios', async ({ page }) => {
     await page.goto('/configuracion/usuarios');
-    await expect(
-      page.getByRole('heading', { name: /usuarios/i }),
-    ).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('heading', { name: /usuarios/i })).toBeVisible({
+      timeout: 8_000,
+    });
   });
 
   test('abre el modal de nuevo usuario y lo cierra', async ({ page }) => {

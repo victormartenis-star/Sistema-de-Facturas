@@ -356,7 +356,11 @@ export const certificationLinesApi = {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  update: (certId: string, lineId: string, input: Partial<CertificationLineCreateInput>) =>
+  update: (
+    certId: string,
+    lineId: string,
+    input: Partial<CertificationLineCreateInput>,
+  ) =>
     request<CertificationLineDto>(`/certifications/${certId}/lines/${lineId}`, {
       method: 'PATCH',
       body: JSON.stringify(input),
@@ -631,7 +635,10 @@ export const usersApi = {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  update: (id: string, input: Partial<{ fullName: string; role: string; isActive: boolean }>) =>
+  update: (
+    id: string,
+    input: Partial<{ fullName: string; role: string; isActive: boolean }>,
+  ) =>
     request<UserDto>(`/users/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(input),

@@ -48,7 +48,8 @@ export class CertificationLinesService {
       eq(certifications.companyId, companyId),
       isNull(certifications.deletedAt),
     ];
-    if (allowed !== null) filters.push(inArray(certifications.projectId, allowed));
+    if (allowed !== null)
+      filters.push(inArray(certifications.projectId, allowed));
     const [cert] = await this.db
       .select({ id: certifications.id })
       .from(certifications)
@@ -148,7 +149,6 @@ export class CertificationLinesService {
         ),
       )
       .returning({ id: certificationLines.id });
-    if (!row)
-      throw new NotFoundException(`Línea ${lineId} no encontrada`);
+    if (!row) throw new NotFoundException(`Línea ${lineId} no encontrada`);
   }
 }

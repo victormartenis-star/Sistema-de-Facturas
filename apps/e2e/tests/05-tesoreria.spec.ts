@@ -7,19 +7,21 @@ import { test, expect } from '@playwright/test';
 test.describe('Tesorería', () => {
   test('carga la página de tesorería', async ({ page }) => {
     await page.goto('/tesoreria');
-    await expect(
-      page.getByRole('heading', { name: /tesorería/i }),
-    ).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('heading', { name: /tesorería/i })).toBeVisible(
+      { timeout: 8_000 },
+    );
   });
 
   test('muestra la sección de flujo de caja', async ({ page }) => {
     await page.goto('/tesoreria');
-    await expect(
-      page.getByText(/flujo de caja|cashflow/i).first(),
-    ).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText(/flujo de caja|cashflow/i).first()).toBeVisible(
+      { timeout: 8_000 },
+    );
   });
 
-  test('cambia la agrupación del gráfico entre semana y mes', async ({ page }) => {
+  test('cambia la agrupación del gráfico entre semana y mes', async ({
+    page,
+  }) => {
     await page.goto('/tesoreria');
 
     const btnMes = page.getByRole('button', { name: /meses/i });
@@ -32,8 +34,8 @@ test.describe('Tesorería', () => {
 
   test('muestra el calendario de vencimientos', async ({ page }) => {
     await page.goto('/tesoreria');
-    await expect(
-      page.getByText(/vencimientos/i).first(),
-    ).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText(/vencimientos/i).first()).toBeVisible({
+      timeout: 8_000,
+    });
   });
 });

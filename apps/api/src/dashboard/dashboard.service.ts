@@ -53,7 +53,9 @@ export class DashboardService {
         contractAmount: projects.contractAmount,
       })
       .from(projects)
-      .where(and(eq(projects.companyId, companyId), isNull(projects.deletedAt)));
+      .where(
+        and(eq(projects.companyId, companyId), isNull(projects.deletedAt)),
+      );
 
     const totalObras = allProjects.length;
     const enCurso = allProjects.filter((p) => p.status === 'en_curso');
@@ -267,8 +269,10 @@ export class DashboardService {
       const certificado = certByProject.get(p.id) ?? 0;
       const costReal = costByProject.get(p.id) ?? 0;
       const margenBruto = certificado - costReal;
-      const margenPct = certificado > 0 ? round2((margenBruto / certificado) * 100) : 0;
-      const pctCertificado = contract > 0 ? round2((certificado / contract) * 100) : 0;
+      const margenPct =
+        certificado > 0 ? round2((margenBruto / certificado) * 100) : 0;
+      const pctCertificado =
+        contract > 0 ? round2((certificado / contract) * 100) : 0;
       return {
         projectId: p.id,
         code: p.code,
@@ -297,4 +301,3 @@ export interface ObrasKpiRow {
   margenBruto: number;
   margenPct: number;
 }
-

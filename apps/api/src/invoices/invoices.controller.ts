@@ -9,7 +9,9 @@ import {
   Patch,
   Post,
   Query,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   INVOICE_KINDS,
   INVOICE_STATUSES,
@@ -21,11 +23,15 @@ import {
   invoiceUpdateSchema,
 } from '@erp/shared';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { FacturaeService } from './facturae.service';
 import { InvoicesService } from './invoices.service';
 
 @Controller('invoices')
 export class InvoicesController {
-  constructor(private readonly service: InvoicesService) {}
+  constructor(
+    private readonly service: InvoicesService,
+    private readonly facturaeService: FacturaeService,
+  ) {}
 
   @Get()
   list(
@@ -45,6 +51,23 @@ export class InvoicesController {
   @Get(':id')
   get(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.get(id);
+  }
+
+  /**
+   * XML Facturae 3.2.2 de una factura de venta, con la huella de
+   * encadenamiento VeriFactu incrustada como extensión propia. Alcance
+   * preliminar: sin firma XAdES ni validación contra el XSD oficial — ver
+   * `packages/shared/src/facturae.ts`.
+   */
+  @Get(':id/facturae')
+  async facturae(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    const { xml, fileName } = await this.facturaeService.generate(id);
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    return xml;
   }
 
   @Post()

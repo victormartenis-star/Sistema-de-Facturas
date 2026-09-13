@@ -42,7 +42,10 @@ export function registrarLineasCertificacion(server: McpServer) {
           `/certifications/${certificationId}/lines`,
         );
         const totalPeriodo = lineas.reduce((s, l) => s + l.periodAmount, 0);
-        const totalAcumulado = lineas.reduce((s, l) => s + l.cumulativeAmount, 0);
+        const totalAcumulado = lineas.reduce(
+          (s, l) => s + l.cumulativeAmount,
+          0,
+        );
         return {
           certificationId,
           numLineas: lineas.length,

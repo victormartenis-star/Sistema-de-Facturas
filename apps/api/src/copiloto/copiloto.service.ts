@@ -2,7 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
 import { DbService } from '../db/db.service';
 
-const DEFAULT_MODEL = process.env.ANTHROPIC_MODEL ?? 'claude-haiku-4-5-20251001';
+const DEFAULT_MODEL =
+  process.env.ANTHROPIC_MODEL ?? 'claude-haiku-4-5-20251001';
 const API_BASE = process.env.API_INTERNAL_URL ?? 'http://localhost:3001';
 const MAX_TURNS = 8;
 
@@ -27,14 +28,26 @@ const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'listar_obras',
-    description: 'Lista todas las obras de la empresa con su estado y datos económicos básicos.',
+    description:
+      'Lista todas las obras de la empresa con su estado y datos económicos básicos.',
     input_schema: {
       type: 'object',
       properties: {
-        search: { type: 'string', description: 'Texto a buscar en nombre o código' },
+        search: {
+          type: 'string',
+          description: 'Texto a buscar en nombre o código',
+        },
         status: {
           type: 'string',
-          enum: ['oferta', 'adjudicada', 'en_curso', 'pausada', 'finalizada', 'garantia', 'cerrada'],
+          enum: [
+            'oferta',
+            'adjudicada',
+            'en_curso',
+            'pausada',
+            'finalizada',
+            'garantia',
+            'cerrada',
+          ],
           description: 'Filtrar por estado',
         },
       },
@@ -54,11 +67,15 @@ const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'listar_certificaciones',
-    description: 'Lista certificaciones de una obra con importe de periodo y retención.',
+    description:
+      'Lista certificaciones de una obra con importe de periodo y retención.',
     input_schema: {
       type: 'object',
       properties: {
-        projectId: { type: 'string', description: 'UUID de la obra (opcional)' },
+        projectId: {
+          type: 'string',
+          description: 'UUID de la obra (opcional)',
+        },
       },
     },
   },
@@ -82,10 +99,20 @@ const TOOLS: Anthropic.Tool[] = [
     input_schema: {
       type: 'object',
       properties: {
-        projectId: { type: 'string', description: 'Filtrar por obra (opcional)' },
+        projectId: {
+          type: 'string',
+          description: 'Filtrar por obra (opcional)',
+        },
         status: {
           type: 'string',
-          enum: ['emitido', 'servido_parcial', 'servido', 'facturado', 'cerrado', 'anulado'],
+          enum: [
+            'emitido',
+            'servido_parcial',
+            'servido',
+            'facturado',
+            'cerrado',
+            'anulado',
+          ],
         },
       },
     },
@@ -168,13 +195,18 @@ export class CopilotoService {
       case 'resumen_tesoreria': {
         const dias = Number(input.dias ?? 90);
         const from = new Date().toISOString().slice(0, 10);
-        const to = new Date(Date.now() + dias * 86400_000).toISOString().slice(0, 10);
+        const to = new Date(Date.now() + dias * 86400_000)
+          .toISOString()
+          .slice(0, 10);
         const [milestones, cashflow] = await Promise.all([
           this.callApi(
             `/treasury/milestones?status=previsto&from=${from}&to=${to}`,
             accessToken,
           ),
-          this.callApi(`/treasury/cashflow?groupBy=mes&from=${from}&to=${to}`, accessToken),
+          this.callApi(
+            `/treasury/cashflow?groupBy=mes&from=${from}&to=${to}`,
+            accessToken,
+          ),
         ]);
         return { milestones, cashflow };
       }
@@ -184,7 +216,10 @@ export class CopilotoService {
         if (input.projectId) params.set('projectId', String(input.projectId));
         if (input.status) params.set('status', String(input.status));
         const qs = params.toString();
-        return this.callApi(`/purchase-orders${qs ? `?${qs}` : ''}`, accessToken);
+        return this.callApi(
+          `/purchase-orders${qs ? `?${qs}` : ''}`,
+          accessToken,
+        );
       }
 
       case 'listar_contactos': {

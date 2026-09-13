@@ -30,7 +30,11 @@ import {
 import { ErrorBanner, PageHeader, selectCls } from '@/components/ui';
 
 // ─── Tooltip personalizado del gráfico ────────────────────────────────────────
-function CashflowTooltip({ active, payload, label }: {
+function CashflowTooltip({
+  active,
+  payload,
+  label,
+}: {
   active?: boolean;
   payload?: Array<{ name: string; value: number; color: string }>;
   label?: string;
@@ -257,8 +261,18 @@ export default function TesoreriaPage() {
                   iconSize={10}
                   wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }}
                 />
-                <Bar dataKey="Cobros" fill="#10b981" radius={[3, 3, 0, 0]} maxBarSize={40} />
-                <Bar dataKey="Pagos" fill="#f87171" radius={[3, 3, 0, 0]} maxBarSize={40} />
+                <Bar
+                  dataKey="Cobros"
+                  fill="#10b981"
+                  radius={[3, 3, 0, 0]}
+                  maxBarSize={40}
+                />
+                <Bar
+                  dataKey="Pagos"
+                  fill="#f87171"
+                  radius={[3, 3, 0, 0]}
+                  maxBarSize={40}
+                />
                 <Line
                   type="monotone"
                   dataKey="Saldo acum."

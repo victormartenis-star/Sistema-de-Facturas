@@ -4,7 +4,18 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { and, desc, eq, ilike, inArray, isNull, ne, or, SQL, sum } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  ne,
+  or,
+  SQL,
+  sum,
+} from 'drizzle-orm';
 import {
   DeliveryNote,
   contacts,

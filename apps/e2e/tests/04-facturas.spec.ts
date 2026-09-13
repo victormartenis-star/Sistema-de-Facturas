@@ -7,9 +7,9 @@ import { test, expect } from '@playwright/test';
 test.describe('Facturas', () => {
   test('carga la página de facturas', async ({ page }) => {
     await page.goto('/facturas');
-    await expect(
-      page.getByRole('heading', { name: /facturas/i }),
-    ).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('heading', { name: /facturas/i })).toBeVisible({
+      timeout: 8_000,
+    });
   });
 
   test('filtra por tipo (compra / venta)', async ({ page }) => {
@@ -25,7 +25,9 @@ test.describe('Facturas', () => {
     }
   });
 
-  test('abre modal de nueva factura y valida campos requeridos', async ({ page }) => {
+  test('abre modal de nueva factura y valida campos requeridos', async ({
+    page,
+  }) => {
     await page.goto('/facturas');
     await page.getByRole('button', { name: /nueva factura/i }).click();
     const dialog = page.getByRole('dialog');

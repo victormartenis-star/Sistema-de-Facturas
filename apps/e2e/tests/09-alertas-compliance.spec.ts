@@ -23,11 +23,18 @@ test.describe('Alertas de compliance', () => {
     }
   });
 
-  test('muestra secciones de vencidos y próximos o estado vacío', async ({ page }) => {
+  test('muestra secciones de vencidos y próximos o estado vacío', async ({
+    page,
+  }) => {
     await page.goto('/homologacion/alertas');
-    const hasVencidos = await page.getByText(/vencidos/i).isVisible().catch(() => false);
-    const hasProximos = await page.getByText(/próximos/i).isVisible().catch(() => false);
-    const isEmpty = await page.getByText(/sin alertas|sin proveedores/i).isVisible().catch(() => false);
-    expect(hasVencidos || hasProximos || isEmpty).toBe(true);
+    // `toBeVisible` reintenta durante el timeout, a diferencia de un
+    // `isVisible()` de un solo disparo justo tras el `goto` (que puede
+    // pillar el instante en que las alertas todavía están cargando).
+    const vencidos = page.getByText(/vencidos/i);
+    const proximos = page.getByText(/próximos/i);
+    const vacio = page.getByText(/sin alertas|sin proveedores/i);
+    await expect(vencidos.or(proximos).or(vacio).first()).toBeVisible({
+      timeout: 8_000,
+    });
   });
 });

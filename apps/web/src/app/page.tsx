@@ -76,7 +76,9 @@ function KpiCard({
         {value}
       </p>
       {hint && (
-        <p className={`mt-1 text-xs ${alert ? 'font-medium text-red-600' : 'text-gray-500'}`}>
+        <p
+          className={`mt-1 text-xs ${alert ? 'font-medium text-red-600' : 'text-gray-500'}`}
+        >
           {hint}
         </p>
       )}
@@ -182,14 +184,17 @@ export default function DashboardPage() {
     staleTime: 5 * 60_000,
   });
   const complianceAlertas = complianceAlertasQuery.data ?? [];
-  const vencidosCount = complianceAlertas.filter((a) => a.alerts.some((x) => x.expired)).length;
-  const proximosCount = complianceAlertas.filter((a) => !a.alerts.some((x) => x.expired)).length;
+  const vencidosCount = complianceAlertas.filter((a) =>
+    a.alerts.some((x) => x.expired),
+  ).length;
+  const proximosCount = complianceAlertas.filter(
+    (a) => !a.alerts.some((x) => x.expired),
+  ).length;
 
   const r = resumenQuery.data;
   const projects = projectsQuery.data ?? [];
   const documents = documentsQuery.data ?? [];
 
-  const sinClasificar = documents.filter((d) => d.docType === null).length;
   const pendientesOcr = (validacionQuery.data ?? []).filter(
     (v) => v.status === 'extraido',
   ).length;
@@ -219,59 +224,81 @@ export default function DashboardPage() {
       )}
 
       {/* Alertas activas */}
-      {r && (r.tesoreria.vencidoCobro > 0 || r.tesoreria.vencidoPago > 0 || r.certificaciones.certsPendientesFacturar > 0 || vencidosCount > 0 || proximosCount > 0) && (
-        <div className="mb-6 flex flex-wrap gap-2">
-          {r.tesoreria.vencidoCobro > 0 && (
-            <AlertBadge
-              count={1}
-              label={`${formatEur(r.tesoreria.vencidoCobro)} en cobros vencidos`}
-            />
-          )}
-          {r.tesoreria.vencidoPago > 0 && (
-            <AlertBadge
-              count={1}
-              label={`${formatEur(r.tesoreria.vencidoPago)} en pagos vencidos`}
-            />
-          )}
-          {r.certificaciones.certsPendientesFacturar > 0 && (
-            <Link
-              href="/certificaciones"
-              className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700 hover:bg-amber-100"
-            >
-              <span className="font-bold">{r.certificaciones.certsPendientesFacturar}</span>
-              <span>certificación{r.certificaciones.certsPendientesFacturar > 1 ? 'es' : ''} sin facturar</span>
-              <span className="text-xs">→</span>
-            </Link>
-          )}
-          {vencidosCount > 0 && (
-            <Link
-              href="/homologacion/alertas"
-              className="flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 hover:bg-red-100"
-            >
-              <IconBell size={14} />
-              <span className="font-bold">{vencidosCount}</span>
-              <span>proveedor{vencidosCount > 1 ? 'es' : ''} con doc. compliance vencida</span>
-              <span className="text-xs">→</span>
-            </Link>
-          )}
-          {vencidosCount === 0 && proximosCount > 0 && (
-            <Link
-              href="/homologacion/alertas"
-              className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700 hover:bg-amber-100"
-            >
-              <IconBell size={14} />
-              <span className="font-bold">{proximosCount}</span>
-              <span>proveedor{proximosCount > 1 ? 'es' : ''} con doc. compliance próxima a vencer</span>
-              <span className="text-xs">→</span>
-            </Link>
-          )}
-        </div>
-      )}
+      {r &&
+        (r.tesoreria.vencidoCobro > 0 ||
+          r.tesoreria.vencidoPago > 0 ||
+          r.certificaciones.certsPendientesFacturar > 0 ||
+          vencidosCount > 0 ||
+          proximosCount > 0) && (
+          <div className="mb-6 flex flex-wrap gap-2">
+            {r.tesoreria.vencidoCobro > 0 && (
+              <AlertBadge
+                count={1}
+                label={`${formatEur(r.tesoreria.vencidoCobro)} en cobros vencidos`}
+              />
+            )}
+            {r.tesoreria.vencidoPago > 0 && (
+              <AlertBadge
+                count={1}
+                label={`${formatEur(r.tesoreria.vencidoPago)} en pagos vencidos`}
+              />
+            )}
+            {r.certificaciones.certsPendientesFacturar > 0 && (
+              <Link
+                href="/certificaciones"
+                className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700 hover:bg-amber-100"
+              >
+                <span className="font-bold">
+                  {r.certificaciones.certsPendientesFacturar}
+                </span>
+                <span>
+                  certificación
+                  {r.certificaciones.certsPendientesFacturar > 1
+                    ? 'es'
+                    : ''}{' '}
+                  sin facturar
+                </span>
+                <span className="text-xs">→</span>
+              </Link>
+            )}
+            {vencidosCount > 0 && (
+              <Link
+                href="/homologacion/alertas"
+                className="flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 hover:bg-red-100"
+              >
+                <IconBell size={14} />
+                <span className="font-bold">{vencidosCount}</span>
+                <span>
+                  proveedor{vencidosCount > 1 ? 'es' : ''} con doc. compliance
+                  vencida
+                </span>
+                <span className="text-xs">→</span>
+              </Link>
+            )}
+            {vencidosCount === 0 && proximosCount > 0 && (
+              <Link
+                href="/homologacion/alertas"
+                className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700 hover:bg-amber-100"
+              >
+                <IconBell size={14} />
+                <span className="font-bold">{proximosCount}</span>
+                <span>
+                  proveedor{proximosCount > 1 ? 'es' : ''} con doc. compliance
+                  próxima a vencer
+                </span>
+                <span className="text-xs">→</span>
+              </Link>
+            )}
+          </div>
+        )}
 
       {loading && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="rounded-2xl border border-gray-200 bg-white p-5">
+            <div
+              key={i}
+              className="rounded-2xl border border-gray-200 bg-white p-5"
+            >
               <div className="skeleton h-10 w-10 rounded-xl" />
               <div className="skeleton mt-4 h-6 w-24" />
               <div className="skeleton mt-2 h-3 w-32" />
@@ -321,7 +348,11 @@ export default function DashboardPage() {
               tone="bg-sky-50 text-sky-600"
               label="Pendiente de cobro"
               value={formatEur(r.tesoreria.pendienteCobro)}
-              hint={r.tesoreria.vencidoCobro > 0 ? `${formatEur(r.tesoreria.vencidoCobro)} vencido` : 'Sin vencidos'}
+              hint={
+                r.tesoreria.vencidoCobro > 0
+                  ? `${formatEur(r.tesoreria.vencidoCobro)} vencido`
+                  : 'Sin vencidos'
+              }
               alert={r.tesoreria.vencidoCobro > 0}
             />
             <KpiCard
@@ -329,7 +360,11 @@ export default function DashboardPage() {
               tone="bg-orange-50 text-orange-600"
               label="Pendiente de pago"
               value={formatEur(r.tesoreria.pendientePago)}
-              hint={r.tesoreria.vencidoPago > 0 ? `${formatEur(r.tesoreria.vencidoPago)} vencido` : 'Sin vencidos'}
+              hint={
+                r.tesoreria.vencidoPago > 0
+                  ? `${formatEur(r.tesoreria.vencidoPago)} vencido`
+                  : 'Sin vencidos'
+              }
               alert={r.tesoreria.vencidoPago > 0}
             />
             <KpiCard
@@ -353,7 +388,10 @@ export default function DashboardPage() {
             <Card
               title="Obras por estado"
               action={
-                <Link href="/obras" className="text-xs font-medium text-amber-600 hover:text-amber-700">
+                <Link
+                  href="/obras"
+                  className="text-xs font-medium text-amber-600 hover:text-amber-700"
+                >
                   Ver obras →
                 </Link>
               }
@@ -376,10 +414,19 @@ export default function DashboardPage() {
                   </div>
                   <ul className="mt-4 space-y-2.5">
                     {statusCounts.map(({ status, count }) => (
-                      <li key={status} className="flex items-center gap-2.5 text-sm">
-                        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${STATUS_BAR_COLORS[status]}`} />
-                        <span className="flex-1 text-gray-700">{PROJECT_STATUS_LABELS[status]}</span>
-                        <span className="font-semibold tabular-nums">{count}</span>
+                      <li
+                        key={status}
+                        className="flex items-center gap-2.5 text-sm"
+                      >
+                        <span
+                          className={`h-2.5 w-2.5 shrink-0 rounded-full ${STATUS_BAR_COLORS[status]}`}
+                        />
+                        <span className="flex-1 text-gray-700">
+                          {PROJECT_STATUS_LABELS[status]}
+                        </span>
+                        <span className="font-semibold tabular-nums">
+                          {count}
+                        </span>
                         <span className="w-12 text-right text-xs text-gray-400 tabular-nums">
                           {Math.round((count / projects.length) * 100)} %
                         </span>
@@ -393,7 +440,10 @@ export default function DashboardPage() {
             <Card
               title="Documentos recientes"
               action={
-                <Link href="/documentos" className="text-xs font-medium text-amber-600 hover:text-amber-700">
+                <Link
+                  href="/documentos"
+                  className="text-xs font-medium text-amber-600 hover:text-amber-700"
+                >
                   Ver todos →
                 </Link>
               }
@@ -410,10 +460,15 @@ export default function DashboardPage() {
                         <IconFileText size={15} />
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-gray-800" title={d.fileName}>
+                        <p
+                          className="truncate text-sm font-medium text-gray-800"
+                          title={d.fileName}
+                        >
                           {d.fileName}
                         </p>
-                        <p className="text-xs text-gray-500">{formatDate(d.createdAt.slice(0, 10))}</p>
+                        <p className="text-xs text-gray-500">
+                          {formatDate(d.createdAt.slice(0, 10))}
+                        </p>
                       </div>
                       <DocStatusBadge status={d.status} />
                     </li>
@@ -425,12 +480,42 @@ export default function DashboardPage() {
 
           {/* Accesos rápidos */}
           <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-            <QuickAction href="/obras" icon={<IconPlus size={19} />} title="Nueva obra" subtitle="Alta de proyecto" />
-            <QuickAction href="/documentos" icon={<IconUpload size={19} />} title="Subir facturas" subtitle="PDF o foto" />
-            <QuickAction href="/presupuestos" icon={<IconCalculator size={19} />} title="Presupuestos" subtitle="BC3 e importar" />
-            <QuickAction href="/certificaciones" icon={<IconClipboard size={19} />} title="Certificaciones" subtitle="Avance a origen" />
-            <QuickAction href="/pedidos" icon={<IconFileText size={19} />} title="Pedidos" subtitle="Compras a proveedores" />
-            <QuickAction href="/tesoreria" icon={<IconCalendar size={19} />} title="Tesorería" subtitle="Cobros y pagos" />
+            <QuickAction
+              href="/obras"
+              icon={<IconPlus size={19} />}
+              title="Nueva obra"
+              subtitle="Alta de proyecto"
+            />
+            <QuickAction
+              href="/documentos"
+              icon={<IconUpload size={19} />}
+              title="Subir facturas"
+              subtitle="PDF o foto"
+            />
+            <QuickAction
+              href="/presupuestos"
+              icon={<IconCalculator size={19} />}
+              title="Presupuestos"
+              subtitle="BC3 e importar"
+            />
+            <QuickAction
+              href="/certificaciones"
+              icon={<IconClipboard size={19} />}
+              title="Certificaciones"
+              subtitle="Avance a origen"
+            />
+            <QuickAction
+              href="/pedidos"
+              icon={<IconFileText size={19} />}
+              title="Pedidos"
+              subtitle="Compras a proveedores"
+            />
+            <QuickAction
+              href="/tesoreria"
+              icon={<IconCalendar size={19} />}
+              title="Tesorería"
+              subtitle="Cobros y pagos"
+            />
           </div>
 
           {/* Bandeja de validación de la IA */}

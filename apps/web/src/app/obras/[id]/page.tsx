@@ -625,22 +625,31 @@ export default function ObraDetallePage() {
         </div>
 
         {/* Gráfico de desvío (solo si hay filas con presupuesto) */}
-        {(deviation?.rows ?? []).filter((r) => r.budget > 0 || r.actual > 0).length > 0 && (
+        {(deviation?.rows ?? []).filter((r) => r.budget > 0 || r.actual > 0)
+          .length > 0 && (
           <div className="mb-5">
-            <ResponsiveContainer width="100%" height={Math.max(160, (deviation?.rows.length ?? 0) * 36 + 40)}>
+            <ResponsiveContainer
+              width="100%"
+              height={Math.max(160, (deviation?.rows.length ?? 0) * 36 + 40)}
+            >
               <BarChart
                 layout="vertical"
                 data={(deviation?.rows ?? [])
                   .filter((r) => r.budget > 0 || r.actual > 0)
                   .map((r) => ({
-                    name: r.name.length > 22 ? r.name.slice(0, 20) + '…' : r.name,
+                    name:
+                      r.name.length > 22 ? r.name.slice(0, 20) + '…' : r.name,
                     Presupuesto: r.budget,
                     Real: r.actual,
                     over: r.deviation > 0,
                   }))}
                 margin={{ top: 0, right: 16, left: 0, bottom: 0 }}
               >
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  horizontal={false}
+                  stroke="#f0f0f0"
+                />
                 <XAxis
                   type="number"
                   tickFormatter={(v: number) =>
@@ -659,23 +668,47 @@ export default function ObraDetallePage() {
                   width={110}
                 />
                 <Tooltip
-                  formatter={(v, name) => [formatEur(Number(v ?? 0)), String(name)]}
-                  contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid #e5e7eb' }}
+                  formatter={(v, name) => [
+                    formatEur(Number(v ?? 0)),
+                    String(name),
+                  ]}
+                  contentStyle={{
+                    fontSize: 11,
+                    borderRadius: 8,
+                    border: '1px solid #e5e7eb',
+                  }}
                 />
-                <Bar dataKey="Presupuesto" fill="#d1fae5" radius={[0, 3, 3, 0]} maxBarSize={14} />
+                <Bar
+                  dataKey="Presupuesto"
+                  fill="#d1fae5"
+                  radius={[0, 3, 3, 0]}
+                  maxBarSize={14}
+                />
                 <Bar dataKey="Real" radius={[0, 3, 3, 0]} maxBarSize={14}>
                   {(deviation?.rows ?? [])
                     .filter((r) => r.budget > 0 || r.actual > 0)
                     .map((r, i) => (
-                      <Cell key={i} fill={r.deviation > 0 ? '#fca5a5' : '#6ee7b7'} />
+                      <Cell
+                        key={i}
+                        fill={r.deviation > 0 ? '#fca5a5' : '#6ee7b7'}
+                      />
                     ))}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
             <div className="mt-1 flex items-center gap-4 text-xs text-gray-400">
-              <span className="flex items-center gap-1"><span className="inline-block h-2 w-4 rounded-sm bg-emerald-100" />Presupuesto</span>
-              <span className="flex items-center gap-1"><span className="inline-block h-2 w-4 rounded-sm bg-emerald-300" />Gasto (ok)</span>
-              <span className="flex items-center gap-1"><span className="inline-block h-2 w-4 rounded-sm bg-red-300" />Gasto (sobrecoste)</span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block h-2 w-4 rounded-sm bg-emerald-100" />
+                Presupuesto
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block h-2 w-4 rounded-sm bg-emerald-300" />
+                Gasto (ok)
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block h-2 w-4 rounded-sm bg-red-300" />
+                Gasto (sobrecoste)
+              </span>
             </div>
           </div>
         )}

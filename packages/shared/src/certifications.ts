@@ -100,7 +100,8 @@ export type CertificationLineCreateInput = z.input<
   typeof certificationLineCreateSchema
 >;
 
-export const certificationLineUpdateSchema = certificationLineCreateSchema.partial();
+export const certificationLineUpdateSchema =
+  certificationLineCreateSchema.partial();
 export type CertificationLineUpdateInput = z.input<
   typeof certificationLineUpdateSchema
 >;

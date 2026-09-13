@@ -11,7 +11,12 @@ import {
 } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import type { AuthTokensDto, UserDto } from '@erp/shared';
-import { authApi, clearStoredSession, readStoredSession, writeStoredSession } from '@/lib/api';
+import {
+  authApi,
+  clearStoredSession,
+  readStoredSession,
+  writeStoredSession,
+} from '@/lib/api';
 
 interface AuthContextValue {
   user: UserDto | null;

@@ -93,7 +93,12 @@ export class ProjectsService {
           notes: data.notes ?? null,
         })
         .returning();
-      void this.audit.log({ entityType: 'project', entityId: row.id, action: 'create', newData: row });
+      void this.audit.log({
+        entityType: 'project',
+        entityId: row.id,
+        action: 'create',
+        newData: row,
+      });
       return toDto(row);
     } catch (err) {
       this.rethrowDuplicateCode(err, data.code);
@@ -126,7 +131,12 @@ export class ProjectsService {
         })
         .where(eq(projects.id, id))
         .returning();
-      void this.audit.log({ entityType: 'project', entityId: id, action: 'update', newData: row });
+      void this.audit.log({
+        entityType: 'project',
+        entityId: id,
+        action: 'update',
+        newData: row,
+      });
       return toDto(row);
     } catch (err) {
       this.rethrowDuplicateCode(err, input.code ?? '');
@@ -140,7 +150,12 @@ export class ProjectsService {
       .update(projects)
       .set({ deletedAt: new Date(), updatedAt: new Date() })
       .where(eq(projects.id, id));
-    void this.audit.log({ entityType: 'project', entityId: id, action: 'delete', oldData: existing });
+    void this.audit.log({
+      entityType: 'project',
+      entityId: id,
+      action: 'delete',
+      oldData: existing,
+    });
   }
 
   private async find(id: string): Promise<Project> {

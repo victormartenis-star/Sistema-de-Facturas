@@ -39,7 +39,9 @@ export function registrarInformes(server: McpServer) {
         ordenarPor: z
           .enum(['margenPct', 'contractAmount', 'pctCertificado'])
           .optional()
-          .describe('Campo por el que ordenar el resultado (por defecto: contractAmount desc)'),
+          .describe(
+            'Campo por el que ordenar el resultado (por defecto: contractAmount desc)',
+          ),
       },
       annotations: { readOnlyHint: true },
     },
@@ -58,7 +60,8 @@ export function registrarInformes(server: McpServer) {
         const totCert = resultado.reduce((s, r) => s + r.totalCertificado, 0);
         const totCost = resultado.reduce((s, r) => s + r.costReal, 0);
         const totMargen = totCert - totCost;
-        const margenGlobal = totCert > 0 ? Math.round((totMargen / totCert) * 10000) / 100 : 0;
+        const margenGlobal =
+          totCert > 0 ? Math.round((totMargen / totCert) * 10000) / 100 : 0;
 
         return {
           resumen: {
@@ -101,20 +104,24 @@ export function registrarInformes(server: McpServer) {
         const filas = await pedir<ObrasKpiRow[]>('/dashboard/obras');
 
         const enCurso = filas.filter((r) => r.status === 'en_curso');
-        const riesgo = enCurso.filter((r) => r.totalCertificado > 0 && r.margenPct < umbral);
+        const riesgo = enCurso.filter(
+          (r) => r.totalCertificado > 0 && r.margenPct < umbral,
+        );
         const sobrecostro = enCurso.filter((r) => r.margenBruto < 0);
 
         return {
           umbralUsado: umbral,
           conRiesgo: riesgo.length,
           conSobrecoste: sobrecostro.length,
-          obras: riesgo.sort((a, b) => a.margenPct - b.margenPct).map((r) => ({
-            code: r.code,
-            name: r.name,
-            margenPct: r.margenPct,
-            margenBruto: r.margenBruto,
-            sobrecoste: r.margenBruto < 0,
-          })),
+          obras: riesgo
+            .sort((a, b) => a.margenPct - b.margenPct)
+            .map((r) => ({
+              code: r.code,
+              name: r.name,
+              margenPct: r.margenPct,
+              margenBruto: r.margenBruto,
+              sobrecoste: r.margenBruto < 0,
+            })),
         };
       }),
   );

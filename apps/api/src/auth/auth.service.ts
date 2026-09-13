@@ -71,7 +71,8 @@ export class AuthService {
       .select({ count: sql<number>`count(*)::int` })
       .from(users)
       .where(and(eq(users.companyId, companyId), isNull(users.deletedAt)));
-    const role: UserRole = count === 0 ? 'admin' : (input.role ?? 'administracion');
+    const role: UserRole =
+      count === 0 ? 'admin' : (input.role ?? 'administracion');
 
     try {
       const [user] = await db

@@ -35,6 +35,7 @@ import {
   InvoiceStatus,
   amountsMatch,
   computeInvoiceAmounts,
+  hasAllowedProject,
   invoiceCreateSchema,
   invoiceUpdateSchema,
   InvoiceUpdateInput,
@@ -66,10 +67,20 @@ export class InvoicesService {
     search?: string,
   ): Promise<InvoiceDto[]> {
     const companyId = await this.dbs.getCompanyId();
+    const allowed = await this.dbs.getObrasAccesibles();
     const filters: SQL[] = [
       eq(invoices.companyId, companyId),
       isNull(invoices.deletedAt),
     ];
+    if (allowed !== null) {
+      // Rol obra: solo facturas con alguna línea imputada a sus obras. Las
+      // facturas sin ninguna línea de obra (gasto general de empresa) quedan
+      // fuera, igual que en `hasAllowedProject`.
+      if (allowed.length === 0) return [];
+      const invoiceIds = await this.invoiceIdsForProjects(allowed);
+      if (invoiceIds.length === 0) return [];
+      filters.push(inArray(invoices.id, invoiceIds));
+    }
     if (kind) filters.push(eq(invoices.kind, kind));
     if (status) filters.push(eq(invoices.status, status));
     if (search?.trim()) {
@@ -154,7 +165,12 @@ export class InvoicesService {
       return row.id;
     });
     const dto = await this.get(invoiceId);
-    void this.audit.log({ entityType: 'invoice', entityId: invoiceId, action: 'create', newData: { invoiceId, kind: dto.kind, status: dto.status } });
+    void this.audit.log({
+      entityType: 'invoice',
+      entityId: invoiceId,
+      action: 'create',
+      newData: { invoiceId, kind: dto.kind, status: dto.status },
+    });
     return dto;
   }
 
@@ -313,7 +329,12 @@ export class InvoicesService {
 
       await this.insertMilestones(tx, invoice, contact);
     });
-    void this.audit.log({ entityType: 'invoice', entityId: id, action: 'update', newData: { status: 'aprobada' } });
+    void this.audit.log({
+      entityType: 'invoice',
+      entityId: id,
+      action: 'update',
+      newData: { status: 'aprobada' },
+    });
     return this.get(id);
   }
 
@@ -584,7 +605,31 @@ export class InvoicesService {
     if (!row) {
       throw new NotFoundException('Factura no encontrada');
     }
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (allowed !== null) {
+      const lines = await this.dbs.db
+        .select({ projectId: invoiceLines.projectId })
+        .from(invoiceLines)
+        .where(eq(invoiceLines.invoiceId, id));
+      if (
+        !hasAllowedProject(
+          allowed,
+          lines.map((l) => l.projectId),
+        )
+      ) {
+        throw new NotFoundException('Factura no encontrada');
+      }
+    }
     return row;
+  }
+
+  /** IDs de factura con al menos una línea imputada a una de las obras dadas. */
+  private async invoiceIdsForProjects(projectIds: string[]): Promise<string[]> {
+    const rows = await this.dbs.db
+      .selectDistinct({ invoiceId: invoiceLines.invoiceId })
+      .from(invoiceLines)
+      .where(inArray(invoiceLines.projectId, projectIds));
+    return rows.map((r) => r.invoiceId);
   }
 
   private async findContact(contactId: string): Promise<Contact> {

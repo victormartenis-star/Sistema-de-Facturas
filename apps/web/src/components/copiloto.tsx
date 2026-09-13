@@ -88,9 +88,15 @@ export function Copiloto() {
             <IconSparkles size={18} />
             <div className="flex-1">
               <p className="text-sm font-semibold">Copiloto ERP</p>
-              <p className="text-xs text-amber-100">Pregunta sobre tus obras, facturas o tesorería</p>
+              <p className="text-xs text-amber-100">
+                Pregunta sobre tus obras, facturas o tesorería
+              </p>
             </div>
-            <button onClick={() => setMessages([])} title="Limpiar conversación" className="rounded p-1 hover:bg-white/20">
+            <button
+              onClick={() => setMessages([])}
+              title="Limpiar conversación"
+              className="rounded p-1 hover:bg-white/20"
+            >
               <span className="text-xs">↺</span>
             </button>
           </div>
@@ -130,7 +136,9 @@ export function Copiloto() {
                         : 'bg-gray-100 text-gray-800'
                   }`}
                 >
-                  <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                  <p className="whitespace-pre-wrap leading-relaxed">
+                    {msg.content}
+                  </p>
                   {msg.toolsUsed && msg.toolsUsed.length > 0 && (
                     <p className="mt-1 text-[10px] text-gray-400">
                       via: {msg.toolsUsed.join(', ')}
@@ -153,7 +161,10 @@ export function Copiloto() {
           </div>
 
           {/* Input */}
-          <form onSubmit={handleSubmit} className="flex gap-2 border-t border-gray-100 p-3">
+          <form
+            onSubmit={handleSubmit}
+            className="flex gap-2 border-t border-gray-100 p-3"
+          >
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}

@@ -736,32 +736,29 @@ export const budgetStatusEnum = pgEnum('budget_status', [
  * solo puede haber un presupuesto `activo` por obra a la vez.
  * `source`: 'manual' | 'bc3' — indica si se creó a mano o se importó desde Presto/BC3.
  */
-export const budgets = pgTable(
-  'budgets',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    companyId: uuid('company_id')
-      .notNull()
-      .references(() => companies.id),
-    projectId: uuid('project_id')
-      .notNull()
-      .references(() => projects.id, { onDelete: 'cascade' }),
-    name: text('name').notNull(),
-    status: budgetStatusEnum('status').notNull().default('borrador'),
-    /** 'manual' | 'bc3' */
-    source: text('source').notNull().default('manual'),
-    /** Cuándo se importó el archivo BC3 (nulo si es manual). */
-    importedAt: timestamp('imported_at', { withTimezone: true }),
-    notes: text('notes'),
-    createdAt: timestamp('created_at', { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    deletedAt: timestamp('deleted_at', { withTimezone: true }),
-  },
-);
+export const budgets = pgTable('budgets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  status: budgetStatusEnum('status').notNull().default('borrador'),
+  /** 'manual' | 'bc3' */
+  source: text('source').notNull().default('manual'),
+  /** Cuándo se importó el archivo BC3 (nulo si es manual). */
+  importedAt: timestamp('imported_at', { withTimezone: true }),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+});
 
 /**
  * Partidas del presupuesto. Admite árbol BC3 completo (capítulos, subcapítulos

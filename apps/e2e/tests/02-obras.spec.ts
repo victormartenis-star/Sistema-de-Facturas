@@ -8,9 +8,9 @@ test.describe('Obras', () => {
   test('lista obras existentes', async ({ page }) => {
     await page.goto('/obras');
     // La página debe cargar (con o sin obras)
-    await expect(
-      page.getByRole('heading', { name: /obras/i }),
-    ).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole('heading', { name: /obras/i })).toBeVisible({
+      timeout: 8_000,
+    });
   });
 
   test('abre el modal de nueva obra y lo cierra', async ({ page }) => {
@@ -31,7 +31,10 @@ test.describe('Obras', () => {
     await page.getByRole('button', { name: /nueva obra/i }).click();
     await page.getByLabel(/código/i).fill(code);
     await page.getByLabel(/nombre/i).fill('Obra E2E Test');
-    await page.getByLabel(/contrato|importe/i).first().fill('50000');
+    await page
+      .getByLabel(/contrato|importe/i)
+      .first()
+      .fill('50000');
 
     await page.getByRole('button', { name: /crear|guardar/i }).click();
 
@@ -43,7 +46,10 @@ test.describe('Obras', () => {
     await page.goto('/obras');
 
     // Hace click en la primera obra de la lista
-    const firstLink = page.getByRole('link').filter({ hasText: /TEST-|E2E/ }).first();
+    const firstLink = page
+      .getByRole('link')
+      .filter({ hasText: /TEST-|E2E/ })
+      .first();
     if (await firstLink.isVisible()) {
       await firstLink.click();
       await expect(page).toHaveURL(/\/obras\/.+/);

@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, eq, isNull, ne } from 'drizzle-orm';
+import { and, asc, eq, isNull } from 'drizzle-orm';
 import { User, userProjectAccess, users } from '@erp/db';
 import {
   UserCreateInput,
@@ -120,9 +120,9 @@ export class UsersService {
       .delete(userProjectAccess)
       .where(eq(userProjectAccess.userId, userId));
     if (projectIds.length > 0) {
-      await this.dbs.db.insert(userProjectAccess).values(
-        projectIds.map((projectId) => ({ userId, projectId })),
-      );
+      await this.dbs.db
+        .insert(userProjectAccess)
+        .values(projectIds.map((projectId) => ({ userId, projectId })));
     }
   }
 }

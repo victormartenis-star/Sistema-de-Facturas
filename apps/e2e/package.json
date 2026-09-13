@@ -6,9 +6,16 @@
     "test": "playwright test",
     "test:ui": "playwright test --ui",
     "test:headed": "playwright test --headed",
-    "test:report": "playwright show-report"
+    "test:report": "playwright show-report",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "seed:e2e": "tsc -p tsconfig.json && node --env-file-if-exists=../../.env dist/seed.js"
+  },
+  "dependencies": {
+    "@erp/shared": "*"
   },
   "devDependencies": {
-    "@playwright/test": "^1.48.0"
+    "@playwright/test": "^1.48.0",
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
   }
 }

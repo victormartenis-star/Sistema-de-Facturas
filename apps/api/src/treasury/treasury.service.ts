@@ -3,8 +3,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, eq, gte, isNull, lte, ne, SQL } from 'drizzle-orm';
-import { contacts, invoices, paymentMilestones } from '@erp/db';
+import { and, asc, eq, gte, inArray, isNull, lte, ne, SQL } from 'drizzle-orm';
+import { contacts, invoiceLines, invoices, paymentMilestones } from '@erp/db';
 import {
   CashflowBucketDto,
   CashflowGrouping,
@@ -14,6 +14,7 @@ import {
   MilestoneStatus,
   addDays,
   addMonths,
+  hasAllowedProject,
   round2,
   startOfMonth,
   startOfWeek,
@@ -60,11 +61,19 @@ export class TreasuryService {
     to?: string;
   }): Promise<MilestoneDto[]> {
     const companyId = await this.dbs.getCompanyId();
+    const allowed = await this.dbs.getObrasAccesibles();
     const filters: SQL[] = [
       eq(paymentMilestones.companyId, companyId),
       isNull(invoices.deletedAt),
       ne(invoices.status, 'anulada'),
     ];
+    if (allowed !== null) {
+      // Rol obra: solo vencimientos de facturas con alguna línea en sus obras.
+      if (allowed.length === 0) return [];
+      const invoiceIds = await this.invoiceIdsForProjects(allowed);
+      if (invoiceIds.length === 0) return [];
+      filters.push(inArray(paymentMilestones.invoiceId, invoiceIds));
+    }
     if (options.direction) {
       filters.push(eq(paymentMilestones.direction, options.direction));
     }
@@ -110,6 +119,21 @@ export class TreasuryService {
       .limit(1);
     if (!row) {
       throw new NotFoundException('Vencimiento no encontrado');
+    }
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (allowed !== null) {
+      const lines = await this.dbs.db
+        .select({ projectId: invoiceLines.projectId })
+        .from(invoiceLines)
+        .where(eq(invoiceLines.invoiceId, row.invoiceId));
+      if (
+        !hasAllowedProject(
+          allowed,
+          lines.map((l) => l.projectId),
+        )
+      ) {
+        throw new NotFoundException('Vencimiento no encontrado');
+      }
     }
     if (row.status === status) {
       throw new ConflictException('El vencimiento ya está en ese estado');
@@ -231,5 +255,14 @@ export class TreasuryService {
       saldoFinal: saldo,
       alertas,
     };
+  }
+
+  /** IDs de factura con al menos una línea imputada a una de las obras dadas. */
+  private async invoiceIdsForProjects(projectIds: string[]): Promise<string[]> {
+    const rows = await this.dbs.db
+      .selectDistinct({ invoiceId: invoiceLines.invoiceId })
+      .from(invoiceLines)
+      .where(inArray(invoiceLines.projectId, projectIds));
+    return rows.map((r) => r.invoiceId);
   }
 }

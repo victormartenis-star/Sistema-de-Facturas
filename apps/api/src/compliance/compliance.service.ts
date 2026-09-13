@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import {
   Contact,
   ContactComplianceDoc,
@@ -11,6 +11,8 @@ import {
   complianceWaivers,
   contactComplianceDocs,
   contacts,
+  deliveryNotes,
+  purchaseOrders,
 } from '@erp/db';
 import {
   BLOCKING_COMPLIANCE_DOC_TYPES,
@@ -30,6 +32,7 @@ import {
   complianceDocUpdateSchema,
   complianceWaiverSchema,
   daysBetween,
+  hasAllowedProject,
   todayIso,
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
@@ -75,22 +78,33 @@ export class ComplianceService {
   /** Ficha de homologación de todas las subcontratas sujetas a control. */
   async list(onlyRequired = true): Promise<ComplianceSummaryDto[]> {
     const companyId = await this.dbs.getCompanyId();
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (allowed !== null && allowed.length === 0) return [];
+
     const rows = await this.dbs.db
       .select()
       .from(contacts)
       .where(and(eq(contacts.companyId, companyId), isNull(contacts.deletedAt)))
       .orderBy(asc(contacts.legalName));
 
+    // Rol obra: un contacto solo es visible si tiene algún pedido o albarán
+    // en una de sus obras — los contactos no cuelgan de una obra directa.
+    const visibleIds =
+      allowed !== null ? await this.contactIdsTouchingProjects(allowed) : null;
+
     const summaries: ComplianceSummaryDto[] = [];
     for (const contact of rows) {
       if (onlyRequired && !contact.requiresCompliance) continue;
+      if (visibleIds !== null && !visibleIds.has(contact.id)) continue;
       summaries.push(await this.summaryFor(contact));
     }
     return summaries;
   }
 
   async summary(contactId: string): Promise<ComplianceSummaryDto> {
-    return this.summaryFor(await this.findContact(contactId));
+    const contact = await this.findContact(contactId);
+    await this.assertVisible(contact.id);
+    return this.summaryFor(contact);
   }
 
   /**
@@ -112,6 +126,7 @@ export class ComplianceService {
   ): Promise<ComplianceDocDto> {
     const companyId = await this.dbs.getCompanyId();
     await this.findContact(contactId);
+    await this.assertVisible(contactId);
     const data = complianceDocCreateSchema.parse(input);
     const [row] = await this.dbs.db
       .insert(contactComplianceDocs)
@@ -168,6 +183,7 @@ export class ComplianceService {
     required: boolean,
   ): Promise<ComplianceSummaryDto> {
     await this.findContact(contactId);
+    await this.assertVisible(contactId);
     await this.dbs.db
       .update(contacts)
       .set({ requiresCompliance: required, updatedAt: new Date() })
@@ -180,6 +196,7 @@ export class ComplianceService {
     input: ComplianceBlockInput,
   ): Promise<ComplianceSummaryDto> {
     await this.findContact(contactId);
+    await this.assertVisible(contactId);
     const data = complianceBlockSchema.parse(input);
     await this.dbs.db
       .update(contacts)
@@ -194,6 +211,7 @@ export class ComplianceService {
 
   async unblock(contactId: string): Promise<ComplianceSummaryDto> {
     await this.findContact(contactId);
+    await this.assertVisible(contactId);
     await this.dbs.db
       .update(contacts)
       .set({ blockedAt: null, blockedReason: null, updatedAt: new Date() })
@@ -211,6 +229,7 @@ export class ComplianceService {
   ): Promise<ComplianceWaiverDto> {
     const companyId = await this.dbs.getCompanyId();
     await this.findContact(contactId);
+    await this.assertVisible(contactId);
     const data = complianceWaiverSchema.parse(input);
     if (daysUntil(data.validUntil) < 0) {
       throw new ConflictException(
@@ -241,6 +260,7 @@ export class ComplianceService {
 
   async revokeWaiver(contactId: string): Promise<void> {
     await this.findContact(contactId);
+    await this.assertVisible(contactId);
     await this.dbs.db
       .update(complianceWaivers)
       .set({ revokedAt: new Date() })
@@ -398,8 +418,13 @@ export class ComplianceService {
    * que ya caducó o caduca en los próximos `days` días naturales.
    * Incluye contactos bloqueados manualmente solo si tienen docs próximos.
    */
-  async alertas(days = 30): Promise<import('@erp/shared').ComplianceAlertDto[]> {
+  async alertas(
+    days = 30,
+  ): Promise<import('@erp/shared').ComplianceAlertDto[]> {
     const companyId = await this.dbs.getCompanyId();
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (allowed !== null && allowed.length === 0) return [];
+
     // Traemos todos los contactos sujetos a compliance
     const rows = await this.dbs.db
       .select()
@@ -413,9 +438,13 @@ export class ComplianceService {
       )
       .orderBy(asc(contacts.legalName));
 
+    const visibleIds =
+      allowed !== null ? await this.contactIdsTouchingProjects(allowed) : null;
+
     const result: import('@erp/shared').ComplianceAlertDto[] = [];
 
     for (const contact of rows) {
+      if (visibleIds !== null && !visibleIds.has(contact.id)) continue;
       const docs = await this.docsOf(contact.id);
       const summary = await this.summaryFor(contact);
 
@@ -470,6 +499,86 @@ export class ComplianceService {
     if (!row) {
       throw new NotFoundException('Documento de homologación no encontrado');
     }
+    await this.assertVisible(row.contactId);
     return row;
+  }
+
+  /**
+   * Lanza 404 si el rol `obra` no tiene acceso a ninguna obra en la que el
+   * contacto tenga pedidos o albaranes. Los demás roles no tienen restricción
+   * (`getObrasAccesibles()` devuelve `null`). No la usa `assertCanTransact`:
+   * esa es una regla de negocio que debe aplicarse siempre, sin importar la
+   * obra desde la que se dispare (aprobar factura, liquidar un pago…).
+   */
+  private async assertVisible(contactId: string): Promise<void> {
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (allowed === null) return;
+    if (
+      allowed.length === 0 ||
+      !(await this.touchesProjects(contactId, allowed))
+    ) {
+      throw new NotFoundException('Contacto no encontrado');
+    }
+  }
+
+  /** true si el contacto tiene algún pedido o albarán en una de las obras dadas. */
+  private async touchesProjects(
+    contactId: string,
+    projectIds: string[],
+  ): Promise<boolean> {
+    const [poRows, dnRows] = await Promise.all([
+      this.dbs.db
+        .select({ projectId: purchaseOrders.projectId })
+        .from(purchaseOrders)
+        .where(
+          and(
+            eq(purchaseOrders.contactId, contactId),
+            isNull(purchaseOrders.deletedAt),
+          ),
+        ),
+      this.dbs.db
+        .select({ projectId: deliveryNotes.projectId })
+        .from(deliveryNotes)
+        .where(
+          and(
+            eq(deliveryNotes.contactId, contactId),
+            isNull(deliveryNotes.deletedAt),
+          ),
+        ),
+    ]);
+    return hasAllowedProject(projectIds, [
+      ...poRows.map((r) => r.projectId),
+      ...dnRows.map((r) => r.projectId),
+    ]);
+  }
+
+  /** Todos los contactId con pedidos o albaranes en alguna de las obras dadas. */
+  private async contactIdsTouchingProjects(
+    projectIds: string[],
+  ): Promise<Set<string>> {
+    const [poRows, dnRows] = await Promise.all([
+      this.dbs.db
+        .selectDistinct({ contactId: purchaseOrders.contactId })
+        .from(purchaseOrders)
+        .where(
+          and(
+            inArray(purchaseOrders.projectId, projectIds),
+            isNull(purchaseOrders.deletedAt),
+          ),
+        ),
+      this.dbs.db
+        .selectDistinct({ contactId: deliveryNotes.contactId })
+        .from(deliveryNotes)
+        .where(
+          and(
+            inArray(deliveryNotes.projectId, projectIds),
+            isNull(deliveryNotes.deletedAt),
+          ),
+        ),
+    ]);
+    return new Set([
+      ...poRows.map((r) => r.contactId),
+      ...dnRows.map((r) => r.contactId),
+    ]);
   }
 }

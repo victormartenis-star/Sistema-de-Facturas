@@ -9,8 +9,14 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES, type AuditAction, type AuditEntityType, type AuditLogDto } from '@erp/shared';
-import { auditApi, formatDate } from '@/lib/api';
+import {
+  AUDIT_ACTIONS,
+  AUDIT_ENTITY_TYPES,
+  type AuditAction,
+  type AuditEntityType,
+  type AuditLogDto,
+} from '@erp/shared';
+import { auditApi } from '@/lib/api';
 import { IconShield } from '@/components/icons';
 import {
   EmptyState,
@@ -51,10 +57,13 @@ const ENTITY_LABELS: Record<string, string> = {
 };
 
 function ActionBadge({ action }: { action: string }) {
-  const style = ACTION_STYLES[action as AuditAction] ?? 'bg-gray-100 text-gray-600';
+  const style =
+    ACTION_STYLES[action as AuditAction] ?? 'bg-gray-100 text-gray-600';
   const label = ACTION_LABELS[action as AuditAction] ?? action;
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${style}`}>
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${style}`}
+    >
       {label}
     </span>
   );
@@ -74,15 +83,28 @@ function DataPreview({ data }: { data: unknown }) {
 function formatOccurredAt(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleString('es-ES', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
   });
 }
 
 // ─── Página ───────────────────────────────────────────────────────────────────
 
-const ENTITY_TYPE_OPTIONS = [{ value: '', label: 'Todas las entidades' }, ...AUDIT_ENTITY_TYPES.map(t => ({ value: t, label: ENTITY_LABELS[t] ?? t }))];
-const ACTION_OPTIONS = [{ value: '', label: 'Todas las acciones' }, ...AUDIT_ACTIONS.map(a => ({ value: a, label: ACTION_LABELS[a] }))];
+const ENTITY_TYPE_OPTIONS = [
+  { value: '', label: 'Todas las entidades' },
+  ...AUDIT_ENTITY_TYPES.map((t) => ({
+    value: t,
+    label: ENTITY_LABELS[t] ?? t,
+  })),
+];
+const ACTION_OPTIONS = [
+  { value: '', label: 'Todas las acciones' },
+  ...AUDIT_ACTIONS.map((a) => ({ value: a, label: ACTION_LABELS[a] })),
+];
 const LIMIT_OPTIONS = [25, 50, 100, 200];
 
 export default function AuditoriaPage() {
@@ -117,11 +139,15 @@ export default function AuditoriaPage() {
           <label className={labelCls}>Entidad</label>
           <select
             value={entityType}
-            onChange={(e) => setEntityType(e.target.value as AuditEntityType | '')}
+            onChange={(e) =>
+              setEntityType(e.target.value as AuditEntityType | '')
+            }
             className={selectCls}
           >
             {ENTITY_TYPE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
             ))}
           </select>
         </div>
@@ -134,7 +160,9 @@ export default function AuditoriaPage() {
             className={selectCls}
           >
             {ACTION_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
             ))}
           </select>
         </div>
@@ -147,7 +175,9 @@ export default function AuditoriaPage() {
             className={selectCls}
           >
             {LIMIT_OPTIONS.map((l) => (
-              <option key={l} value={l}>{l} registros</option>
+              <option key={l} value={l}>
+                {l} registros
+              </option>
             ))}
           </select>
         </div>
@@ -157,9 +187,13 @@ export default function AuditoriaPage() {
       {query.error && <ErrorBanner message={(query.error as Error).message} />}
 
       {!query.isLoading && !query.error && entries.length === 0 && (
-        <EmptyState icon={<IconShield size={40} />} title="Sin registros de auditoría">
+        <EmptyState
+          icon={<IconShield size={40} />}
+          title="Sin registros de auditoría"
+        >
           <p className="text-sm text-gray-500">
-            Las acciones de creación, modificación y borrado quedarán registradas aquí.
+            Las acciones de creación, modificación y borrado quedarán
+            registradas aquí.
           </p>
         </EmptyState>
       )}
@@ -179,7 +213,10 @@ export default function AuditoriaPage() {
             </thead>
             <tbody>
               {entries.map((e) => (
-                <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50/40">
+                <tr
+                  key={e.id}
+                  className="border-b border-gray-50 hover:bg-gray-50/40"
+                >
                   <td className="px-4 py-2.5 font-mono text-xs text-gray-500 whitespace-nowrap">
                     {formatOccurredAt(e.occurredAt)}
                   </td>
@@ -187,13 +224,19 @@ export default function AuditoriaPage() {
                     <ActionBadge action={e.action} />
                   </td>
                   <td className="px-4 py-2.5 text-gray-700">
-                    <div className="font-medium">{ENTITY_LABELS[e.entityType] ?? e.entityType}</div>
+                    <div className="font-medium">
+                      {ENTITY_LABELS[e.entityType] ?? e.entityType}
+                    </div>
                   </td>
                   <td className="px-4 py-2.5 font-mono text-xs text-gray-400">
                     {e.entityId.slice(0, 8)}…
                   </td>
                   <td className="px-4 py-2.5 font-mono text-xs text-gray-400">
-                    {e.userId ? e.userId.slice(0, 8) + '…' : <span className="text-gray-300">sistema</span>}
+                    {e.userId ? (
+                      e.userId.slice(0, 8) + '…'
+                    ) : (
+                      <span className="text-gray-300">sistema</span>
+                    )}
                   </td>
                   <td className="px-4 py-2.5 max-w-xs">
                     <DataPreview data={e.newData ?? e.oldData} />

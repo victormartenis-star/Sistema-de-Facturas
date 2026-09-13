@@ -1,17 +1,12 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
-  CERT_STATUSES,
   certificationCreateSchema,
   certificationInvoiceSchema,
   type CertificationDto,
 } from '@erp/shared';
 import { pedir, query } from '../api';
 import { ejecutar } from '../comun';
-
-const isoDate = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato esperado: AAAA-MM-DD');
 
 export function registrarCertificaciones(server: McpServer) {
   server.registerTool(
@@ -143,10 +138,7 @@ export function registrarCertificaciones(server: McpServer) {
           };
         }
         const ultima = lista[lista.length - 1];
-        const totalCertificado = lista.reduce(
-          (s, c) => s + c.periodAmount,
-          0,
-        );
+        const totalCertificado = lista.reduce((s, c) => s + c.periodAmount, 0);
         const retencionAcumulada = lista.reduce(
           (s, c) => s + c.retentionAmount,
           0,

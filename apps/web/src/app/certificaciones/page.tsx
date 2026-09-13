@@ -54,7 +54,9 @@ import {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const errText = (e: unknown) =>
-  e instanceof ApiError ? e.message : (e as Error).message ?? 'Error inesperado';
+  e instanceof ApiError
+    ? e.message
+    : ((e as Error).message ?? 'Error inesperado');
 
 const pct = (n: number) => `${n.toFixed(2)} %`;
 
@@ -92,13 +94,16 @@ function NuevaCertModal({
   onClose,
 }: NuevaCertModalProps) {
   const toast = useToast();
-  const [certDate, setCertDate] = useState(new Date().toISOString().slice(0, 10));
+  const [certDate, setCertDate] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
   const [cumulativePct, setCumulativePct] = useState('');
   const [retentionPct, setRetentionPct] = useState('');
   const [notes, setNotes] = useState('');
 
   const mutation = useMutation({
-    mutationFn: (input: CertificationCreateInput) => certificationsApi.create(input),
+    mutationFn: (input: CertificationCreateInput) =>
+      certificationsApi.create(input),
     onSuccess: () => {
       toast('Certificación creada');
       setCumulativePct('');
@@ -134,7 +139,8 @@ function NuevaCertModal({
         {lastPct > 0 && (
           <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm text-sky-800">
             Último % certificado a origen:{' '}
-            <span className="font-semibold">{pct(lastPct)}</span>. El nuevo debe ser mayor.
+            <span className="font-semibold">{pct(lastPct)}</span>. El nuevo debe
+            ser mayor.
           </div>
         )}
 
@@ -152,7 +158,9 @@ function NuevaCertModal({
         <div className={fieldCls}>
           <label className={labelCls}>
             % ejecutado acumulado a origen{' '}
-            <span className="font-normal text-gray-400">(total, no del periodo)</span>
+            <span className="font-normal text-gray-400">
+              (total, no del periodo)
+            </span>
           </label>
           <input
             type="number"
@@ -171,7 +179,9 @@ function NuevaCertModal({
         <div className={fieldCls}>
           <label className={labelCls}>
             % retención garantía{' '}
-            <span className="font-normal text-gray-400">(vacío = usa el de la obra)</span>
+            <span className="font-normal text-gray-400">
+              (vacío = usa el de la obra)
+            </span>
           </label>
           <input
             type="number"
@@ -200,7 +210,11 @@ function NuevaCertModal({
           <button type="button" onClick={onClose} className={btnGhostCls}>
             Cancelar
           </button>
-          <button type="submit" disabled={mutation.isPending} className={btnPrimaryCls}>
+          <button
+            type="submit"
+            disabled={mutation.isPending}
+            className={btnPrimaryCls}
+          >
             {mutation.isPending ? 'Guardando…' : 'Crear certificación'}
           </button>
         </div>
@@ -219,11 +233,19 @@ interface FacturarModalProps {
   onClose: () => void;
 }
 
-function FacturarModal({ open, cert, contacts, onSuccess, onClose }: FacturarModalProps) {
+function FacturarModal({
+  open,
+  cert,
+  contacts,
+  onSuccess,
+  onClose,
+}: FacturarModalProps) {
   const toast = useToast();
   const [contactId, setContactId] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
-  const [issueDate, setIssueDate] = useState(new Date().toISOString().slice(0, 10));
+  const [issueDate, setIssueDate] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
   const [dueDate, setDueDate] = useState('');
   const [isp, setIsp] = useState(true);
   const [retentionReleaseDate, setRetentionReleaseDate] = useState('');
@@ -258,7 +280,11 @@ function FacturarModal({ open, cert, contacts, onSuccess, onClose }: FacturarMod
   }
 
   return (
-    <Modal open={open} title={`Facturar Cert. nº ${cert.seq}`} onClose={onClose}>
+    <Modal
+      open={open}
+      title={`Facturar Cert. nº ${cert.seq}`}
+      onClose={onClose}
+    >
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Resumen de importes */}
         <div className="grid grid-cols-3 gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm">
@@ -268,7 +294,9 @@ function FacturarModal({ open, cert, contacts, onSuccess, onClose }: FacturarMod
           </div>
           <div>
             <p className="text-gray-500">Retención</p>
-            <p className="font-semibold text-amber-600">− {formatEur(cert.retentionAmount)}</p>
+            <p className="font-semibold text-amber-600">
+              − {formatEur(cert.retentionAmount)}
+            </p>
           </div>
           <div>
             <p className="text-gray-500">Neto</p>
@@ -347,7 +375,9 @@ function FacturarModal({ open, cert, contacts, onSuccess, onClose }: FacturarMod
           />
           <span className="text-sm text-gray-700">
             Inversión del sujeto pasivo (ISP)
-            <span className="ml-1.5 text-gray-400 text-xs">— habitual en construcción B2B</span>
+            <span className="ml-1.5 text-gray-400 text-xs">
+              — habitual en construcción B2B
+            </span>
           </span>
         </label>
 
@@ -355,7 +385,11 @@ function FacturarModal({ open, cert, contacts, onSuccess, onClose }: FacturarMod
           <button type="button" onClick={onClose} className={btnGhostCls}>
             Cancelar
           </button>
-          <button type="submit" disabled={mutation.isPending} className={btnPrimaryCls}>
+          <button
+            type="submit"
+            disabled={mutation.isPending}
+            className={btnPrimaryCls}
+          >
             {mutation.isPending ? 'Generando…' : 'Emitir factura'}
           </button>
         </div>
@@ -373,7 +407,12 @@ interface NuevaLineaModalProps {
   onClose: () => void;
 }
 
-function NuevaLineaModal({ open, certId, onSuccess, onClose }: NuevaLineaModalProps) {
+function NuevaLineaModal({
+  open,
+  certId,
+  onSuccess,
+  onClose,
+}: NuevaLineaModalProps) {
   const toast = useToast();
   const [budgetItemId, setBudgetItemId] = useState('');
   const [cumulativePct, setCumulativePct] = useState('');
@@ -475,7 +514,12 @@ function NuevaLineaModal({ open, certId, onSuccess, onClose }: NuevaLineaModalPr
           <button type="button" onClick={onClose} className={btnGhostCls}>
             Cancelar
           </button>
-          <button type="submit" form="line-form" className={btnPrimaryCls} disabled={mutation.isPending}>
+          <button
+            type="submit"
+            form="line-form"
+            className={btnPrimaryCls}
+            disabled={mutation.isPending}
+          >
             {mutation.isPending ? 'Guardando…' : 'Añadir línea'}
           </button>
         </div>
@@ -497,7 +541,8 @@ function LinesPanel({ certId }: { certId: string }) {
   });
 
   const removeLine = useMutation({
-    mutationFn: (lineId: string) => certificationLinesApi.remove(certId, lineId),
+    mutationFn: (lineId: string) =>
+      certificationLinesApi.remove(certId, lineId),
     onSuccess: () => {
       toast('Línea eliminada');
       qc.invalidateQueries({ queryKey: ['cert-lines', certId] });
@@ -527,7 +572,9 @@ function LinesPanel({ certId }: { certId: string }) {
       )}
 
       {lines.length === 0 && !linesQuery.isLoading && (
-        <p className="text-xs text-gray-400">Sin líneas. Añade partidas para desglosar la certificación.</p>
+        <p className="text-xs text-gray-400">
+          Sin líneas. Añade partidas para desglosar la certificación.
+        </p>
       )}
 
       {lines.length > 0 && (
@@ -544,10 +591,18 @@ function LinesPanel({ certId }: { certId: string }) {
           <tbody>
             {lines.map((ln) => (
               <tr key={ln.id} className="border-t border-gray-100">
-                <td className="py-1 pr-4 font-mono text-gray-600">{ln.budgetItemId.slice(0, 8)}…</td>
-                <td className="py-1 pr-4 text-right font-mono">{ln.cumulativePct.toFixed(2)} %</td>
-                <td className="py-1 pr-4 text-right font-mono">{formatEur(ln.periodAmount)}</td>
-                <td className="py-1 pr-4 text-right font-mono">{formatEur(ln.cumulativeAmount)}</td>
+                <td className="py-1 pr-4 font-mono text-gray-600">
+                  {ln.budgetItemId.slice(0, 8)}…
+                </td>
+                <td className="py-1 pr-4 text-right font-mono">
+                  {ln.cumulativePct.toFixed(2)} %
+                </td>
+                <td className="py-1 pr-4 text-right font-mono">
+                  {formatEur(ln.periodAmount)}
+                </td>
+                <td className="py-1 pr-4 text-right font-mono">
+                  {formatEur(ln.cumulativeAmount)}
+                </td>
                 <td className="py-1">
                   <button
                     onClick={() => removeLine.mutate(ln.id)}
@@ -566,7 +621,9 @@ function LinesPanel({ certId }: { certId: string }) {
       <NuevaLineaModal
         open={addOpen}
         certId={certId}
-        onSuccess={() => qc.invalidateQueries({ queryKey: ['cert-lines', certId] })}
+        onSuccess={() =>
+          qc.invalidateQueries({ queryKey: ['cert-lines', certId] })
+        }
         onClose={() => setAddOpen(false)}
       />
     </div>
@@ -588,7 +645,9 @@ function KpiCard({
 }) {
   return (
     <div className="rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
-      <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">{label}</p>
+      <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+        {label}
+      </p>
       <p className={`mt-1 text-2xl font-bold ${accent}`}>{value}</p>
       {sub && <p className="mt-0.5 text-xs text-gray-400">{sub}</p>}
     </div>
@@ -599,12 +658,11 @@ function KpiCard({
 
 interface CertTableProps {
   certs: CertificationDto[];
-  contacts: Array<{ id: string; legalName: string }>;
   onFacturar: (c: CertificationDto) => void;
   onDelete: (c: CertificationDto) => void;
 }
 
-function CertTable({ certs, contacts, onFacturar, onDelete }: CertTableProps) {
+function CertTable({ certs, onFacturar, onDelete }: CertTableProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   return (
@@ -625,71 +683,80 @@ function CertTable({ certs, contacts, onFacturar, onDelete }: CertTableProps) {
         <tbody>
           {certs.map((cert) => (
             <>
-            <tr key={cert.id} className="border-b border-gray-50 hover:bg-gray-50/50">
-              <td className="px-4 py-3 text-center font-semibold text-amber-600">
-                {cert.seq}
-              </td>
-              <td className="px-4 py-3 text-gray-600">{formatDate(cert.certDate)}</td>
-              <td className="px-4 py-3 text-right font-mono font-medium">
-                {pct(cert.cumulativePct)}
-              </td>
-              <td className="px-4 py-3 text-right font-mono">
-                <div>{formatEur(cert.periodAmount)}</div>
-                <div className="text-xs text-gray-400">
-                  acum. {formatEur(cert.cumulativeAmount)}
-                </div>
-              </td>
-              <td className="px-4 py-3 text-right font-mono text-amber-600">
-                {formatEur(cert.retentionAmount)}
-                <div className="text-xs text-gray-400">{cert.retentionPct.toFixed(1)} %</div>
-              </td>
-              <td className="px-4 py-3 text-right font-mono font-semibold text-emerald-600">
-                {formatEur(cert.periodAmount - cert.retentionAmount)}
-              </td>
-              <td className="px-4 py-3">
-                <CertBadge status={cert.status} />
-              </td>
-              <td className="px-4 py-3">
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    onClick={() => setExpandedId(expandedId === cert.id ? null : cert.id)}
-                    className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-                    title="Ver líneas"
-                  >
-                    {expandedId === cert.id ? (
-                      <IconChevronUp size={14} />
-                    ) : (
-                      <IconChevronDown size={14} />
+              <tr
+                key={cert.id}
+                className="border-b border-gray-50 hover:bg-gray-50/50"
+              >
+                <td className="px-4 py-3 text-center font-semibold text-amber-600">
+                  {cert.seq}
+                </td>
+                <td className="px-4 py-3 text-gray-600">
+                  {formatDate(cert.certDate)}
+                </td>
+                <td className="px-4 py-3 text-right font-mono font-medium">
+                  {pct(cert.cumulativePct)}
+                </td>
+                <td className="px-4 py-3 text-right font-mono">
+                  <div>{formatEur(cert.periodAmount)}</div>
+                  <div className="text-xs text-gray-400">
+                    acum. {formatEur(cert.cumulativeAmount)}
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-right font-mono text-amber-600">
+                  {formatEur(cert.retentionAmount)}
+                  <div className="text-xs text-gray-400">
+                    {cert.retentionPct.toFixed(1)} %
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-right font-mono font-semibold text-emerald-600">
+                  {formatEur(cert.periodAmount - cert.retentionAmount)}
+                </td>
+                <td className="px-4 py-3">
+                  <CertBadge status={cert.status} />
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      onClick={() =>
+                        setExpandedId(expandedId === cert.id ? null : cert.id)
+                      }
+                      className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                      title="Ver líneas"
+                    >
+                      {expandedId === cert.id ? (
+                        <IconChevronUp size={14} />
+                      ) : (
+                        <IconChevronDown size={14} />
+                      )}
+                    </button>
+                    {cert.status === 'borrador' && (
+                      <button
+                        onClick={() => onFacturar(cert)}
+                        className={btnGhostCls + ' gap-1.5 text-xs'}
+                      >
+                        <IconReceipt size={14} />
+                        Facturar
+                      </button>
                     )}
-                  </button>
-                  {cert.status === 'borrador' && (
-                    <button
-                      onClick={() => onFacturar(cert)}
-                      className={btnGhostCls + ' gap-1.5 text-xs'}
-                    >
-                      <IconReceipt size={14} />
-                      Facturar
-                    </button>
-                  )}
-                  {cert.status === 'borrador' && (
-                    <button
-                      onClick={() => onDelete(cert)}
-                      className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-500"
-                      title="Eliminar"
-                    >
-                      <IconTrash size={14} />
-                    </button>
-                  )}
-                </div>
-              </td>
-            </tr>
-            {expandedId === cert.id && (
-              <tr key={`${cert.id}-lines`}>
-                <td colSpan={8} className="p-0">
-                  <LinesPanel certId={cert.id} />
+                    {cert.status === 'borrador' && (
+                      <button
+                        onClick={() => onDelete(cert)}
+                        className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-500"
+                        title="Eliminar"
+                      >
+                        <IconTrash size={14} />
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
-            )}
+              {expandedId === cert.id && (
+                <tr key={`${cert.id}-lines`}>
+                  <td colSpan={8} className="p-0">
+                    <LinesPanel certId={cert.id} />
+                  </td>
+                </tr>
+              )}
             </>
           ))}
         </tbody>
@@ -706,8 +773,12 @@ export default function CertificacionesPage() {
 
   const [projectId, setProjectId] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
-  const [facturarTarget, setFacturarTarget] = useState<CertificationDto | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<CertificationDto | null>(null);
+  const [facturarTarget, setFacturarTarget] = useState<CertificationDto | null>(
+    null,
+  );
+  const [deleteTarget, setDeleteTarget] = useState<CertificationDto | null>(
+    null,
+  );
 
   const projectsQuery = useQuery({
     queryKey: ['projects', '', ''],
@@ -751,9 +822,15 @@ export default function CertificacionesPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <PageHeader title="Certificaciones" subtitle="Avance a origen por obra con facturación automática">
+      <PageHeader
+        title="Certificaciones"
+        subtitle="Avance a origen por obra con facturación automática"
+      >
         {projectId && (
-          <button onClick={() => setCreateOpen(true)} className={btnPrimaryCls + ' gap-1.5'}>
+          <button
+            onClick={() => setCreateOpen(true)}
+            className={btnPrimaryCls + ' gap-1.5'}
+          >
             <IconPlus size={16} />
             Nueva certificación
           </button>
@@ -762,7 +839,9 @@ export default function CertificacionesPage() {
 
       {/* Selector de obra */}
       <div className="max-w-sm">
-        <label className="mb-1.5 block text-sm font-medium text-gray-700">Obra</label>
+        <label className="mb-1.5 block text-sm font-medium text-gray-700">
+          Obra
+        </label>
         <select
           value={projectId}
           onChange={(e) => setProjectId(e.target.value)}
@@ -779,7 +858,10 @@ export default function CertificacionesPage() {
 
       {/* Sin obra seleccionada */}
       {!projectId && (
-        <EmptyState icon={<IconClipboard size={40} />} title="Selecciona una obra">
+        <EmptyState
+          icon={<IconClipboard size={40} />}
+          title="Selecciona una obra"
+        >
           <p className="text-sm text-gray-500">
             Elige una obra para ver y gestionar sus certificaciones
           </p>
@@ -818,12 +900,18 @@ export default function CertificacionesPage() {
           )}
 
           {certsQuery.isLoading && <TableSkeleton rows={4} />}
-          {certsQuery.error && <ErrorBanner message={errText(certsQuery.error)} />}
+          {certsQuery.error && (
+            <ErrorBanner message={errText(certsQuery.error)} />
+          )}
 
           {!certsQuery.isLoading && !certsQuery.error && certs.length === 0 && (
-            <EmptyState icon={<IconClipboard size={40} />} title="Sin certificaciones">
+            <EmptyState
+              icon={<IconClipboard size={40} />}
+              title="Sin certificaciones"
+            >
               <p className="text-sm text-gray-500">
-                Crea la primera certificación para registrar el avance de la obra
+                Crea la primera certificación para registrar el avance de la
+                obra
               </p>
             </EmptyState>
           )}
@@ -831,7 +919,6 @@ export default function CertificacionesPage() {
           {certs.length > 0 && (
             <CertTable
               certs={certs}
-              contacts={contactsQuery.data ?? []}
               onFacturar={setFacturarTarget}
               onDelete={setDeleteTarget}
             />
