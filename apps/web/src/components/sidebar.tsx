@@ -4,13 +4,16 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ComponentType } from 'react';
 import {
+  IconAlertTriangle,
   IconBell,
   IconBuilding,
   IconCalculator,
   IconCalendar,
+  IconCheck,
   IconChart,
   IconClipboard,
   IconDashboard,
+  IconEuro,
   IconFileText,
   IconInbox,
   IconLock,
@@ -49,6 +52,14 @@ const GESTION: NavItem[] = [
   { href: '/tesoreria', label: 'Tesorería', icon: IconWallet },
   { href: '/cumplimiento', label: 'Homologación', icon: IconLock },
   { href: '/homologacion/alertas', label: 'Alertas PRL', icon: IconBell },
+  { href: '/permisos', label: 'Permisos y licencias', icon: IconFileText },
+  { href: '/contratos', label: 'Contratos de obra', icon: IconEuro },
+  { href: '/actas-recepcion', label: 'Actas de recepción', icon: IconCheck },
+  {
+    href: '/incidencias-prl',
+    label: 'Incidencias PRL',
+    icon: IconAlertTriangle,
+  },
   { href: '/informes', label: 'Informes', icon: IconChart },
 ];
 

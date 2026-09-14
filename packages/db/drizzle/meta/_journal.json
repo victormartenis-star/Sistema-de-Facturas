@@ -92,6 +92,13 @@
       "when": 1789405832194,
       "tag": "0012_bright_sinister_six",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1789406867274,
+      "tag": "0013_regular_captain_stacy",
+      "breakpoints": true
     }
   ]
 }

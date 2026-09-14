@@ -1144,3 +1144,439 @@ export type PartePersonal = typeof partesPersonal.$inferSelect;
 export type NewPartePersonal = typeof partesPersonal.$inferInsert;
 export type ParteMaquinaria = typeof partesMaquinaria.$inferSelect;
 export type NewParteMaquinaria = typeof partesMaquinaria.$inferInsert;
+
+// ─── Proveedores y subcontratas: ficha extendida (Fase 11) ────────────────
+/**
+ * Ficha extendida de proveedor/subcontrata, complementaria a `contacts`
+ * (que sigue siendo el maestro unificado proveedor/cliente usado por
+ * facturas y pedidos). Esta tabla añade los datos específicos de
+ * homologación de origen/ejecución que pide compras internacional
+ * (país de origen, país de ejecución, país de origen de materiales) y no
+ * tienen sitio natural en `contacts`. `contactId` es opcional: permite dar
+ * de alta la ficha antes de tener el contacto de facturación enlazado.
+ */
+export const proveedorTipoEnum = pgEnum('proveedor_tipo', [
+  'proveedor',
+  'subcontrata',
+]);
+
+export const proveedores = pgTable(
+  'proveedores',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    contactId: uuid('contact_id').references(() => contacts.id),
+    razonSocial: text('razon_social').notNull(),
+    /** CIF/NIF del proveedor (obligatorio y único por empresa) */
+    cifNif: text('cif_nif').notNull(),
+    tipo: proveedorTipoEnum('tipo').notNull().default('proveedor'),
+    categoriaPrincipal: text('categoria_principal'),
+    pais: text('pais').notNull().default('ES'),
+    paisEjecucion: text('pais_ejecucion').notNull().default('ES'),
+    paisOrigenMateriales: text('pais_origen_materiales'),
+    codigoExterno: text('codigo_externo'),
+    sedeCentral: text('sede_central'),
+    contactoComercial: text('contacto_comercial'),
+    telefonoContacto: text('telefono_contacto'),
+    emailContacto: text('email_contacto'),
+    condicionesPagoDias: integer('condiciones_pago_dias').notNull().default(30),
+    retencionGarantiaPct: numeric('retencion_garantia_pct', {
+      precision: 5,
+      scale: 2,
+    })
+      .notNull()
+      .default('5.00'),
+    activo: boolean('activo').notNull().default(true),
+    notas: text('notas'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('proveedores_company_cif_nif_unique')
+      .on(t.companyId, t.cifNif)
+      .where(sql`deleted_at IS NULL`),
+  ],
+);
+
+export const contratoSubcontrataStatusEnum = pgEnum(
+  'contrato_subcontrata_status',
+  ['borrador', 'activo', 'completado', 'cancelado'],
+);
+
+/** Contratos de subcontrata con una obra determinada. */
+export const contratosSubcontrata = pgTable(
+  'contratos_subcontrata',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    proveedorId: uuid('proveedor_id')
+      .notNull()
+      .references(() => proveedores.id),
+    proyectoId: uuid('proyecto_id')
+      .notNull()
+      .references(() => projects.id),
+    numeroContrato: text('numero_contrato').notNull(),
+    fechaInicio: date('fecha_inicio').notNull(),
+    fechaFinPrevista: date('fecha_fin_prevista').notNull(),
+    fechaFinReal: date('fecha_fin_real'),
+    importeTotal: numeric('importe_total', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    importeEjecutado: numeric('importe_ejecutado', {
+      precision: 14,
+      scale: 2,
+    })
+      .notNull()
+      .default('0'),
+    pctEjecutado: numeric('pct_ejecutado', { precision: 5, scale: 2 })
+      .notNull()
+      .default('0'),
+    retencionGarantiaPct: numeric('retencion_garantia_pct', {
+      precision: 5,
+      scale: 2,
+    })
+      .notNull()
+      .default('5.00'),
+    status: contratoSubcontrataStatusEnum('status')
+      .notNull()
+      .default('borrador'),
+    condicionesEspeciales: text('condiciones_especiales'),
+    firmaFecha: date('firma_fecha'),
+    notas: text('notas'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('contratos_subcontrata_company_numero_unique')
+      .on(t.companyId, t.numeroContrato)
+      .where(sql`deleted_at IS NULL`),
+  ],
+);
+
+export const documentoPRLTypeEnum = pgEnum('documento_prl_type', [
+  'plan_seguridad',
+  'seguro_rc',
+  'certificado_ss',
+  'itinerario_formativo',
+  'epi',
+  'otro',
+]);
+
+export const documentoPRLStatusEnum = pgEnum('documento_prl_status', [
+  'vigente',
+  'proximo_vencimiento',
+  'vencido',
+  'rechazado',
+]);
+
+/** Documentos de PRL (Prevención de Riesgos Laborales) por proveedor/subcontrata. */
+export const documentosPRL = pgTable(
+  'documentos_prl',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    proveedorId: uuid('proveedor_id')
+      .notNull()
+      .references(() => proveedores.id),
+    docType: documentoPRLTypeEnum('doc_type').notNull(),
+    numeroExpediente: text('numero_expediente').notNull(),
+    fechaEmision: date('fecha_emision').notNull(),
+    fechaVencimiento: date('fecha_vencimiento').notNull(),
+    status: documentoPRLStatusEnum('status').notNull().default('vigente'),
+    /** Archivo asociado (opcional): reaprovecha el módulo documental. */
+    documentId: uuid('document_id').references(() => documents.id),
+    notas: text('notas'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('documentos_prl_proveedor_numero_unique')
+      .on(t.proveedorId, t.numeroExpediente)
+      .where(sql`deleted_at IS NULL`),
+  ],
+);
+
+export type Proveedor = typeof proveedores.$inferSelect;
+export type NewProveedor = typeof proveedores.$inferInsert;
+export type ContratoSubcontrata = typeof contratosSubcontrata.$inferSelect;
+export type NewContratoSubcontrata = typeof contratosSubcontrata.$inferInsert;
+export type DocumentoPRL = typeof documentosPRL.$inferSelect;
+export type NewDocumentoPRL = typeof documentosPRL.$inferInsert;
+
+// ─── Permisos públicos y licencias (Fase 12) ───────────────────────────────
+/**
+ * Trámites municipales/administrativos de una obra: licencia de obra, vado,
+ * ocupación de vía pública, gestión de residuos. Cada uno tiene su propio
+ * ciclo de vida (solicitado → en_tramite → concedido/denegado) y, salvo la
+ * licencia de obra, suele caducar y requerir renovación — de ahí
+ * `fechaVencimiento` y el servicio de alertas previas a la caducidad.
+ */
+export const permisoTipoEnum = pgEnum('permiso_tipo', [
+  'licencia_obra',
+  'vado',
+  'ocupacion_via_publica',
+  'gestion_residuos',
+]);
+
+export const permisoStatusEnum = pgEnum('permiso_status', [
+  'solicitado',
+  'en_tramite',
+  'concedido',
+  'denegado',
+]);
+
+export const permisosPublicos = pgTable('permisos_publicos', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id),
+  tipo: permisoTipoEnum('tipo').notNull(),
+  organismoPublico: text('organismo_publico').notNull(),
+  numeroExpediente: text('numero_expediente'),
+  fechaSolicitud: date('fecha_solicitud').notNull(),
+  /** Fecha en la que el organismo resolvió (concedió o denegó). */
+  fechaResolucion: date('fecha_resolucion'),
+  /** Nula en trámites que no caducan (p. ej. una licencia de obra ya cerrada). */
+  fechaVencimiento: date('fecha_vencimiento'),
+  status: permisoStatusEnum('status').notNull().default('solicitado'),
+  canonImporte: numeric('canon_importe', { precision: 12, scale: 2 }),
+  /** Documento adjunto (resolución, justificante de tasa…), opcional. */
+  documentId: uuid('document_id').references(() => documents.id),
+  notas: text('notas'),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type PermisoPublico = typeof permisosPublicos.$inferSelect;
+export type NewPermisoPublico = typeof permisosPublicos.$inferInsert;
+
+// ─── Contratación y gestión documental de obra (Fase 12) ───────────────────
+/**
+ * Contratos con subcontratistas, proveedores y clientes ligados a una obra
+ * concreta (distintos de `contratos_subcontrata`, que es la ficha de
+ * ejecución/certificación de la subcontrata en `proveedores`; este es el
+ * documento legal firmado con su PDF adjunto y sus cláusulas). El PDF se
+ * reaprovecha del módulo documental (`documents`, con dedupe por hash).
+ */
+export const contratoObraTipoEnum = pgEnum('contrato_obra_tipo', [
+  'subcontrata',
+  'suministro',
+  'cliente',
+  'alquiler',
+  'servicios',
+  'otro',
+]);
+
+export const contratoObraEstadoFirmaEnum = pgEnum(
+  'contrato_obra_estado_firma',
+  ['borrador', 'pendiente_firma', 'firmado', 'rescindido'],
+);
+
+export const contratosObra = pgTable('contratos_obra', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id),
+  /** Subcontratista, proveedor o cliente — reaprovecha el maestro unificado. */
+  contactId: uuid('contact_id')
+    .notNull()
+    .references(() => contacts.id),
+  tipo: contratoObraTipoEnum('tipo').notNull(),
+  importe: numeric('importe', { precision: 14, scale: 2 }).notNull(),
+  fechaFirma: date('fecha_firma'),
+  /** PDF firmado u otro anexo técnico principal del contrato. */
+  documentId: uuid('document_id').references(() => documents.id),
+  estadoFirma: contratoObraEstadoFirmaEnum('estado_firma')
+    .notNull()
+    .default('borrador'),
+  retencionPct: numeric('retencion_pct', { precision: 5, scale: 2 })
+    .notNull()
+    .default('5.00'),
+  /** Cláusulas de abonos/pagos a cuenta, en texto libre (no estructurado). */
+  condicionesAbono: text('condiciones_abono'),
+  notas: text('notas'),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type ContratoObra = typeof contratosObra.$inferSelect;
+export type NewContratoObra = typeof contratosObra.$inferInsert;
+
+/** Anexo técnico adicional de un contrato (además del PDF principal). */
+export const contratoObraAnexos = pgTable('contrato_obra_anexos', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  contratoId: uuid('contrato_id')
+    .notNull()
+    .references(() => contratosObra.id, { onDelete: 'cascade' }),
+  documentId: uuid('document_id')
+    .notNull()
+    .references(() => documents.id),
+  descripcion: text('descripcion').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type ContratoObraAnexo = typeof contratoObraAnexos.$inferSelect;
+export type NewContratoObraAnexo = typeof contratoObraAnexos.$inferInsert;
+
+// ─── Actas de recepción (Fase 12) ───────────────────────────────────────────
+/**
+ * Recepción provisional/definitiva de la obra, con su lista de repasos
+ * (defectos pendientes de subsanar antes de poder firmar sin reservas).
+ */
+export const actaRecepcionTipoEnum = pgEnum('acta_recepcion_tipo', [
+  'provisional',
+  'definitiva',
+]);
+
+export const actaRecepcionEstadoEnum = pgEnum('acta_recepcion_estado', [
+  'pendiente_firma',
+  'firmada_sin_reservas',
+  'firmada_con_reservas',
+]);
+
+export const actasRecepcion = pgTable('actas_recepcion', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id),
+  tipo: actaRecepcionTipoEnum('tipo').notNull(),
+  fecha: date('fecha').notNull(),
+  estado: actaRecepcionEstadoEnum('estado')
+    .notNull()
+    .default('pendiente_firma'),
+  /** Acta firmada escaneada, opcional. */
+  documentId: uuid('document_id').references(() => documents.id),
+  notas: text('notas'),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type ActaRecepcion = typeof actasRecepcion.$inferSelect;
+export type NewActaRecepcion = typeof actasRecepcion.$inferInsert;
+
+export const repasoEstadoEnum = pgEnum('repaso_estado', [
+  'pendiente',
+  'subsanado',
+]);
+
+/** Ítem de la lista de repasos de un acta: un defecto a subsanar. */
+export const actaRecepcionRepasos = pgTable('acta_recepcion_repasos', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  actaId: uuid('acta_id')
+    .notNull()
+    .references(() => actasRecepcion.id, { onDelete: 'cascade' }),
+  descripcion: text('descripcion').notNull(),
+  responsable: text('responsable'),
+  fechaLimite: date('fecha_limite'),
+  estado: repasoEstadoEnum('estado').notNull().default('pendiente'),
+  fechaSubsanacion: date('fecha_subsanacion'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type ActaRecepcionRepaso = typeof actaRecepcionRepasos.$inferSelect;
+export type NewActaRecepcionRepaso = typeof actaRecepcionRepasos.$inferInsert;
+
+// ─── Incidencias y control de seguridad PRL (Fase 12) ───────────────────────
+/**
+ * Puntos de inspección de seguridad en obra: alta rápida de una incidencia
+ * (andamios, acopios, EPIs…), con seguimiento de su subsanación. Distinto de
+ * `contact_compliance_docs` (documentación PRL de la subcontrata): esto es
+ * seguridad física en el tajo, no papeleo.
+ */
+export const incidenciaPRLGravedadEnum = pgEnum('incidencia_prl_gravedad', [
+  'leve',
+  'grave',
+  'muy_grave',
+]);
+
+export const incidenciaPRLEstadoEnum = pgEnum('incidencia_prl_estado', [
+  'abierta',
+  'en_subsanacion',
+  'cerrada',
+]);
+
+export const incidenciasPRL = pgTable('incidencias_prl', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id),
+  fecha: date('fecha').notNull(),
+  /** Punto de inspección: "Andamios planta 3", "Acopio de residuos"… */
+  puntoInspeccion: text('punto_inspeccion').notNull(),
+  descripcion: text('descripcion').notNull(),
+  gravedad: incidenciaPRLGravedadEnum('gravedad').notNull().default('leve'),
+  estado: incidenciaPRLEstadoEnum('estado').notNull().default('abierta'),
+  responsableSubsanacion: text('responsable_subsanacion'),
+  fechaLimiteSubsanacion: date('fecha_limite_subsanacion'),
+  fechaCierre: date('fecha_cierre'),
+  /** Foto/evidencia adjunta, opcional. */
+  documentId: uuid('document_id').references(() => documents.id),
+  notas: text('notas'),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type IncidenciaPRL = typeof incidenciasPRL.$inferSelect;
+export type NewIncidenciaPRL = typeof incidenciasPRL.$inferInsert;

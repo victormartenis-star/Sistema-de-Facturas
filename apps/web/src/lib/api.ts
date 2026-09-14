@@ -1,6 +1,30 @@
 import { DOCUMENT_MAX_SIZE_MB } from '@erp/shared';
 import type { AuditLogDto, AuditQuery, ComplianceAlertDto } from '@erp/shared';
 import type {
+  ActaRecepcionCreateInput,
+  ActaRecepcionDto,
+  ActaRecepcionRepasoDto,
+  ActaRecepcionTipo,
+  ActaRecepcionUpdateInput,
+  ContratoObraAnexoCreateInput,
+  ContratoObraAnexoDto,
+  ContratoObraCreateInput,
+  ContratoObraDto,
+  ContratoObraEstadoFirma,
+  ContratoObraUpdateInput,
+  IncidenciaPRLCreateInput,
+  IncidenciaPRLDto,
+  IncidenciaPRLEstado,
+  IncidenciaPRLUpdateInput,
+  PermisoAlertItem,
+  PermisoCreateInput,
+  PermisoPublicoDto,
+  PermisoStatus,
+  PermisoUpdateInput,
+  RepasoCreateInput,
+  RepasoUpdateInput,
+} from '@erp/shared';
+import type {
   Bc3ImportResultDto,
   BudgetCreateInput,
   BudgetDetailDto,
@@ -646,6 +670,135 @@ export const complianceApi = {
     }),
   alertas: (days = 30) =>
     request<ComplianceAlertDto[]>(`/cumplimiento/alertas?days=${days}`),
+};
+
+export const permisosApi = {
+  list: (projectId?: string, status?: PermisoStatus) => {
+    const params = new URLSearchParams();
+    if (projectId) params.set('projectId', projectId);
+    if (status) params.set('status', status);
+    const qs = params.toString();
+    return request<PermisoPublicoDto[]>(`/permisos${qs ? `?${qs}` : ''}`);
+  },
+  alertas: (projectId?: string) =>
+    request<PermisoAlertItem[]>(
+      `/permisos/alertas${projectId ? `?projectId=${projectId}` : ''}`,
+    ),
+  get: (id: string) => request<PermisoPublicoDto>(`/permisos/${id}`),
+  create: (input: PermisoCreateInput) =>
+    request<PermisoPublicoDto>('/permisos', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  update: (id: string, input: PermisoUpdateInput) =>
+    request<PermisoPublicoDto>(`/permisos/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  remove: (id: string) =>
+    request<void>(`/permisos/${id}`, { method: 'DELETE' }),
+};
+
+export const contratosObraApi = {
+  list: (projectId?: string, estadoFirma?: ContratoObraEstadoFirma) => {
+    const params = new URLSearchParams();
+    if (projectId) params.set('projectId', projectId);
+    if (estadoFirma) params.set('estadoFirma', estadoFirma);
+    const qs = params.toString();
+    return request<ContratoObraDto[]>(`/contratos-obra${qs ? `?${qs}` : ''}`);
+  },
+  get: (id: string) => request<ContratoObraDto>(`/contratos-obra/${id}`),
+  create: (input: ContratoObraCreateInput) =>
+    request<ContratoObraDto>('/contratos-obra', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  update: (id: string, input: ContratoObraUpdateInput) =>
+    request<ContratoObraDto>(`/contratos-obra/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  remove: (id: string) =>
+    request<void>(`/contratos-obra/${id}`, { method: 'DELETE' }),
+  listAnexos: (id: string) =>
+    request<ContratoObraAnexoDto[]>(`/contratos-obra/${id}/anexos`),
+  addAnexo: (id: string, input: ContratoObraAnexoCreateInput) =>
+    request<ContratoObraAnexoDto>(`/contratos-obra/${id}/anexos`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  validarCAE: (id: string) =>
+    request<ComplianceSummaryDto>(`/contratos-obra/${id}/cae`),
+};
+
+export const actasRecepcionApi = {
+  list: (projectId?: string, tipo?: ActaRecepcionTipo) => {
+    const params = new URLSearchParams();
+    if (projectId) params.set('projectId', projectId);
+    if (tipo) params.set('tipo', tipo);
+    const qs = params.toString();
+    return request<ActaRecepcionDto[]>(`/actas-recepcion${qs ? `?${qs}` : ''}`);
+  },
+  get: (id: string) => request<ActaRecepcionDto>(`/actas-recepcion/${id}`),
+  create: (input: ActaRecepcionCreateInput) =>
+    request<ActaRecepcionDto>('/actas-recepcion', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  update: (id: string, input: ActaRecepcionUpdateInput) =>
+    request<ActaRecepcionDto>(`/actas-recepcion/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  remove: (id: string) =>
+    request<void>(`/actas-recepcion/${id}`, { method: 'DELETE' }),
+  listRepasos: (id: string) =>
+    request<ActaRecepcionRepasoDto[]>(`/actas-recepcion/${id}/repasos`),
+  progreso: (id: string) =>
+    request<{ total: number; subsanados: number; pctSubsanado: number }>(
+      `/actas-recepcion/${id}/progreso`,
+    ),
+  addRepaso: (id: string, input: RepasoCreateInput) =>
+    request<ActaRecepcionRepasoDto>(`/actas-recepcion/${id}/repasos`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateRepaso: (repasoId: string, input: RepasoUpdateInput) =>
+    request<ActaRecepcionRepasoDto>(`/actas-recepcion/repasos/${repasoId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  firmar: (id: string) =>
+    request<ActaRecepcionDto>(`/actas-recepcion/${id}/firmar`, {
+      method: 'POST',
+    }),
+};
+
+export const incidenciasPRLApi = {
+  list: (projectId?: string, estado?: IncidenciaPRLEstado) => {
+    const params = new URLSearchParams();
+    if (projectId) params.set('projectId', projectId);
+    if (estado) params.set('estado', estado);
+    const qs = params.toString();
+    return request<IncidenciaPRLDto[]>(`/incidencias-prl${qs ? `?${qs}` : ''}`);
+  },
+  fueraDePlazo: (projectId?: string) =>
+    request<IncidenciaPRLDto[]>(
+      `/incidencias-prl/fuera-de-plazo${projectId ? `?projectId=${projectId}` : ''}`,
+    ),
+  get: (id: string) => request<IncidenciaPRLDto>(`/incidencias-prl/${id}`),
+  create: (input: IncidenciaPRLCreateInput) =>
+    request<IncidenciaPRLDto>('/incidencias-prl', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  update: (id: string, input: IncidenciaPRLUpdateInput) =>
+    request<IncidenciaPRLDto>(`/incidencias-prl/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  remove: (id: string) =>
+    request<void>(`/incidencias-prl/${id}`, { method: 'DELETE' }),
 };
 
 export const treasuryApi = {

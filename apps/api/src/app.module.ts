@@ -25,6 +25,11 @@ import { OcrModule } from './ocr/ocr.module';
 import { PartesDiariosModule } from './modules/partes-diarios/partes-diarios.module';
 import { PhasesModule } from './phases/phases.module';
 import { ProjectsModule } from './projects/projects.module';
+import { ProveedoresModule } from './modules/proveedores/proveedores.module';
+import { PermisosModule } from './modules/permisos/permisos.module';
+import { ContratosObraModule } from './modules/contratos-obra/contratos-obra.module';
+import { ActasRecepcionModule } from './modules/actas-recepcion/actas-recepcion.module';
+import { IncidenciasPRLModule } from './modules/incidencias-prl/incidencias-prl.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { TreasuryModule } from './treasury/treasury.module';
 
@@ -61,6 +66,11 @@ import { TreasuryModule } from './treasury/treasury.module';
     DashboardModule,
     UsersModule,
     CopilotoModule,
+    ProveedoresModule,
+    PermisosModule,
+    ContratosObraModule,
+    ActasRecepcionModule,
+    IncidenciasPRLModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
