@@ -45,6 +45,7 @@ import {
   todayIso,
 } from '@erp/shared';
 import { ComplianceService } from '../compliance/compliance.service';
+import { ProveedoresService } from '../modules/proveedores/proveedores.service';
 import { AuditService } from '../audit/audit.service';
 import { DbService } from '../db/db.service';
 
@@ -58,6 +59,7 @@ export class InvoicesService {
   constructor(
     private readonly dbs: DbService,
     private readonly compliance: ComplianceService,
+    private readonly proveedores: ProveedoresService,
     private readonly audit: AuditService,
   ) {}
 
@@ -286,6 +288,15 @@ export class InvoicesService {
     // documentación al día (responsabilidad solidaria del contratista).
     if (invoice.kind === 'compra') {
       await this.compliance.assertCanTransact(
+        invoice.contactId,
+        'aprobar la factura',
+      );
+      // Guard adicional (Fase 11): si el contacto tiene ficha extendida de
+      // proveedor/subcontrata, sus documentos PRL específicos (plan de
+      // seguridad, EPI, itinerario formativo...) también deben estar al
+      // día — homologación general (`contacts`) y PRL de obra
+      // (`proveedores`) son controles independientes, los dos aplican.
+      await this.proveedores.assertAptoParaPago(
         invoice.contactId,
         'aprobar la factura',
       );

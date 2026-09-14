@@ -12,6 +12,10 @@ const nextConfig: NextConfig = {
   // package-lock.json), y se deja fuera del standalone lo que hace falta
   // de packages/shared. Explícito en vez de fiarlo a la autodetección.
   outputFileTracingRoot: path.join(__dirname, '../../'),
+  experimental: {
+    // Desactiva symlinks en Windows (causa EINVAL en interception routes)
+    webpackBuildWorker: false,
+  },
 };
 
 export default nextConfig;

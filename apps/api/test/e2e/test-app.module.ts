@@ -6,6 +6,7 @@ import { CertificationsModule } from '../../src/certifications/certifications.mo
 import { ContactsModule } from '../../src/contacts/contacts.module';
 import { CostControlModule } from '../../src/cost-control/cost-control.module';
 import { DbModule } from '../../src/db/db.module';
+import { DeliveryNotesModule } from '../../src/delivery-notes/delivery-notes.module';
 import { ComparativosModule } from '../../src/modules/comparativos/comparativos.module';
 import { PartesDiariosModule } from '../../src/modules/partes-diarios/partes-diarios.module';
 import { PhasesModule } from '../../src/phases/phases.module';
@@ -17,26 +18,23 @@ import { UsersModule } from '../../src/users/users.module';
  * Módulo raíz recortado para las pruebas de integración: los mismos
  * módulos reales de negocio y de identidad que `AppModule` (mismos guards
  * globales — `JwtAuthGuard`/`RolesGuard`, vienen con `AuthModule` —, mismo
- * `RequestContextInterceptor`), pero **sin** `ProveedoresModule`,
- * `HealthModule`, `MetricsModule` ni `ThrottlerModule`.
- *
- * `ProveedoresModule` es la exclusión que importa: su `schema.ts` tiene un
- * error de sintaxis real (`Argument expression expected`, obra en curso de
- * otro proceso, no de esta tarea — ver Roadmap y Fases, deuda técnica), y
- * como `apps/api/tsconfig.json` compila todo `src/` junto, cualquier cosa
- * que importe `AppModule` de verdad hereda ese error. Este módulo importa
- * los mismos ficheros de negocio pero ensamblados aparte, así que compila
- * limpio y las pruebas de integración pueden correr hoy sin esperar a que
- * ese módulo externo se arregle. `HealthModule`/`MetricsModule`/
- * `ThrottlerModule` se dejan fuera porque ningún spec de esta fase los
+ * `RequestContextInterceptor`), pero **sin** `HealthModule`,
+ * `MetricsModule` ni `ThrottlerModule` (ningún spec de esta fase los
  * necesita — añadirlos no cambiaría el resultado de ningún test, solo
- * peso de arranque.
+ * peso de arranque).
  *
- * Si `ProveedoresModule` se arregla, lo correcto es que estos tests pasen
- * a importar `AppModule` real y este fichero deje de hacer falta — de
- * momento el paralelismo con `AppModule` es intencional y hay que
- * mantenerlo a mano: un módulo nuevo de negocio en `AppModule` que las
- * pruebas de integración deban ejercitar hay que añadirlo aquí también.
+ * `ProveedoresModule` ya NO se excluye (Fase 11, 14-sep-2026): su
+ * `schema.ts` era un error de sintaxis real de otro proceso concurrente,
+ * resuelto por esa misma sesión — hoy compila limpio y además
+ * `InvoicesModule`/`PurchaseOrdersModule` lo importan directamente (guard
+ * de compliance PRL, `assertAptoParaPago`), así que entra transitivamente
+ * sin listarlo aquí aparte. Se deja esta nota porque durante buena parte
+ * de la sesión fue justo la exclusión que explicaba por qué este fichero
+ * existía en vez de usar `AppModule` directamente — sigue existiendo por
+ * la otra razón (Health/Metrics/Throttler fuera), no por esa.
+ *
+ * Un módulo nuevo de negocio en `AppModule` que las pruebas de
+ * integración deban ejercitar hay que añadirlo aquí también a mano.
  */
 @Module({
   imports: [
@@ -47,11 +45,12 @@ import { UsersModule } from '../../src/users/users.module';
     ContactsModule,
     PhasesModule,
     BudgetsModule,
-    CertificationsModule, // importa InvoicesModule, que a su vez importa ComplianceModule
+    CertificationsModule, // importa InvoicesModule, que a su vez importa ComplianceModule y ProveedoresModule
     ComparativosModule,
     PartesDiariosModule,
     CostControlModule,
-    PurchaseOrdersModule,
+    PurchaseOrdersModule, // importa ProveedoresModule (guard PRL)
+    DeliveryNotesModule,
     UsersModule,
   ],
 })

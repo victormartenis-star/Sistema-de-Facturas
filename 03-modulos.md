@@ -34,6 +34,11 @@ mindmap
       Import BC3
       Certificación a origen
       Retenciones de garantía
+    Proveedores y Subcontratas
+      Gestión de proveedores y subcontratas
+      Contratos de subcontrata por obra
+      Documentación PRL y homologación
+      Retenciones de garantía por proveedor
     Compras
       Pedidos
       Albaranes

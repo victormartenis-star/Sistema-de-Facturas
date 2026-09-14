@@ -40,6 +40,7 @@ import {
   traceabilityReading,
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
+import { ProveedoresService } from '../modules/proveedores/proveedores.service';
 
 /** Importes servidos y facturados de un pedido, sacados de sus albaranes. */
 interface Delivered {
@@ -50,7 +51,10 @@ interface Delivered {
 
 @Injectable()
 export class PurchaseOrdersService {
-  constructor(private readonly dbs: DbService) {}
+  constructor(
+    private readonly dbs: DbService,
+    private readonly proveedores: ProveedoresService,
+  ) {}
 
   async list(options: {
     search?: string;
@@ -132,6 +136,14 @@ export class PurchaseOrdersService {
     const data = purchaseOrderCreateSchema.parse(input);
     const project = await this.findProject(data.projectId);
     await this.assertContactExists(data.contactId);
+    // Guard PRL (Fase 11): no se emite un pedido a una subcontrata cuya
+    // documentación de prevención de riesgos laborales no está al día —
+    // más temprano que el guard de `InvoicesService.approve()`, corta el
+    // compromiso antes de que llegue a generar gasto.
+    await this.proveedores.assertAptoParaPago(
+      data.contactId,
+      'emitir el pedido',
+    );
 
     const id = await this.dbs.db.transaction(async (tx) => {
       const [last] = await tx

@@ -356,4 +356,44 @@ export class ProveedoresService {
     const docs = await this.listDocumentosPRL(proveedorId);
     return validarAptoParaPagoPuro(docs, todayIso());
   }
+
+  /** Busca la ficha extendida de proveedor enlazada a un `contacts.id`, si existe. */
+  async findByContactId(contactId: string): Promise<Proveedor | null> {
+    const companyId = await this.getCompanyId();
+    const [row] = await this.db
+      .select()
+      .from(proveedores)
+      .where(
+        and(
+          eq(proveedores.contactId, contactId),
+          eq(proveedores.companyId, companyId),
+          isNull(proveedores.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  /**
+   * Guard de compliance PRL (Fase 11): lanza 409 si el contacto tiene ficha
+   * de proveedor/subcontrata con algún documento PRL bloqueante vencido o
+   * próximo a vencer. Mismo patrón que `ComplianceService.assertCanTransact`
+   * (homologación general vía `contacts`), pero para la documentación PRL
+   * específica de obra que vive en `documentos_prl`.
+   *
+   * Sin ficha de proveedor (la mayoría de contactos con `kind: 'proveedor'`
+   * de `contacts` no tienen una ficha extendida en `proveedores` — es
+   * opcional, ver la cabecera de la tabla): no hay nada que validar, no
+   * bloquea. El guard es aditivo, nunca más laxo que `assertCanTransact`.
+   */
+  async assertAptoParaPago(contactId: string, action: string): Promise<void> {
+    const proveedor = await this.findByContactId(contactId);
+    if (!proveedor) return;
+    const { apto, razones } = await this.validarAptoParaPago(proveedor.id);
+    if (apto) return;
+    throw new ConflictException(
+      `No se puede ${action}: ${proveedor.razonSocial} no está apto por PRL. ` +
+        `${razones.join('; ')}.`,
+    );
+  }
 }
