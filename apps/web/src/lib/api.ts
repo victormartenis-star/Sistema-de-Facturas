@@ -24,9 +24,18 @@ import type {
   CertificationInvoiceInput,
   CertificationLineDto,
   CertificationLineCreateInput,
+  ComparativoAdjudicarInput,
+  ComparativoCreateInput,
+  ComparativoDto,
+  ComparativoMatrizDto,
+  ComparativoOfertaCreateInput,
+  ComparativoOfertaDto,
+  ComparativoOfertaUpdateInput,
+  ComparativoUpdateInput,
   ContactCreateInput,
   ContactDto,
   ContactUpdateInput,
+  CostControlDto,
   DeliveryNoteCreateInput,
   DeliveryNoteDto,
   DeliveryNoteStatus,
@@ -40,6 +49,12 @@ import type {
   InvoiceUpdateInput,
   LoginInput,
   MilestoneDto,
+  ParteMaquinariaCreateInput,
+  ParteMaquinariaDto,
+  ParteMaquinariaUpdateInput,
+  PartePersonalCreateInput,
+  PartePersonalDto,
+  PartePersonalUpdateInput,
   PhaseCreateInput,
   PhaseDto,
   PhaseUpdateInput,
@@ -299,6 +314,118 @@ export const phasesApi = {
   /** Presupuesto teórico vs. gasto imputado real. */
   deviation: (projectId: string) =>
     request<DeviationReportDto>(`/projects/${projectId}/desvio`),
+};
+
+export const comparativosApi = {
+  list: (projectId?: string) =>
+    request<ComparativoDto[]>(
+      `/comparativos${projectId ? `?projectId=${projectId}` : ''}`,
+    ),
+  matriz: (id: string) =>
+    request<ComparativoMatrizDto>(`/comparativos/${id}/matriz`),
+  create: (input: ComparativoCreateInput) =>
+    request<ComparativoDto>('/comparativos', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  update: (id: string, input: ComparativoUpdateInput) =>
+    request<ComparativoDto>(`/comparativos/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  remove: (id: string) =>
+    request<void>(`/comparativos/${id}`, { method: 'DELETE' }),
+  addOferta: (comparativoId: string, input: ComparativoOfertaCreateInput) =>
+    request<ComparativoOfertaDto>(`/comparativos/${comparativoId}/ofertas`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateOferta: (
+    comparativoId: string,
+    ofertaId: string,
+    input: ComparativoOfertaUpdateInput,
+  ) =>
+    request<ComparativoOfertaDto>(
+      `/comparativos/${comparativoId}/ofertas/${ofertaId}`,
+      { method: 'PATCH', body: JSON.stringify(input) },
+    ),
+  removeOferta: (comparativoId: string, ofertaId: string) =>
+    request<void>(`/comparativos/${comparativoId}/ofertas/${ofertaId}`, {
+      method: 'DELETE',
+    }),
+  adjudicar: (id: string, input: ComparativoAdjudicarInput) =>
+    request<ComparativoDto>(`/comparativos/${id}/adjudicar`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+};
+
+export const partesDiariosApi = {
+  listPersonal: (filter: {
+    projectId?: string;
+    from?: string;
+    to?: string;
+  }) => {
+    const params = new URLSearchParams();
+    if (filter.projectId) params.set('projectId', filter.projectId);
+    if (filter.from) params.set('from', filter.from);
+    if (filter.to) params.set('to', filter.to);
+    const qs = params.toString();
+    return request<PartePersonalDto[]>(
+      `/partes-diarios/personal${qs ? `?${qs}` : ''}`,
+    );
+  },
+  createPersonal: (input: PartePersonalCreateInput) =>
+    request<PartePersonalDto>('/partes-diarios/personal', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updatePersonal: (id: string, input: PartePersonalUpdateInput) =>
+    request<PartePersonalDto>(`/partes-diarios/personal/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  removePersonal: (id: string) =>
+    request<void>(`/partes-diarios/personal/${id}`, { method: 'DELETE' }),
+  approvePersonal: (id: string) =>
+    request<PartePersonalDto>(`/partes-diarios/personal/${id}/aprobar`, {
+      method: 'POST',
+    }),
+  listMaquinaria: (filter: {
+    projectId?: string;
+    from?: string;
+    to?: string;
+  }) => {
+    const params = new URLSearchParams();
+    if (filter.projectId) params.set('projectId', filter.projectId);
+    if (filter.from) params.set('from', filter.from);
+    if (filter.to) params.set('to', filter.to);
+    const qs = params.toString();
+    return request<ParteMaquinariaDto[]>(
+      `/partes-diarios/maquinaria${qs ? `?${qs}` : ''}`,
+    );
+  },
+  createMaquinaria: (input: ParteMaquinariaCreateInput) =>
+    request<ParteMaquinariaDto>('/partes-diarios/maquinaria', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateMaquinaria: (id: string, input: ParteMaquinariaUpdateInput) =>
+    request<ParteMaquinariaDto>(`/partes-diarios/maquinaria/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  removeMaquinaria: (id: string) =>
+    request<void>(`/partes-diarios/maquinaria/${id}`, { method: 'DELETE' }),
+  approveMaquinaria: (id: string) =>
+    request<ParteMaquinariaDto>(`/partes-diarios/maquinaria/${id}/aprobar`, {
+      method: 'POST',
+    }),
+};
+
+export const costControlApi = {
+  get: (projectId: string) =>
+    request<CostControlDto>(`/projects/${projectId}/cost-control`),
 };
 
 export const invoicesApi = {

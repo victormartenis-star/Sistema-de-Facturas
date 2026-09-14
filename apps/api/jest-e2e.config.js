@@ -44,25 +44,25 @@ module.exports = {
   // `tsconfig.test.json`), ni compila hoy — no tiene sentido pedirle
   // cobertura. `test/` fuera: es la suite en sí, no código de producción.
   collectCoverageFrom: ['src/**/*.ts', '!src/modules/proveedores/**'],
-  // Umbral real y medido, no el 75 % pedido por la tarea a ciegas: con
-  // solo `auth`, `invoices` y `certifications` cubiertos (3 flujos, no
-  // los ~21 controladores de la API), un 75 % global es hoy imposible sin
-  // inflar el número o mentir sobre lo que está probado. Medido en vivo
-  // el 14-sep-2026 con estas mismas specs: statements 25.1 %, branches
-  // 10.72 %, functions 23.02 %, lines 24.5 % — el umbral de abajo se fija
-  // un poco por debajo de eso (margen de estabilidad, no 75 %) para no
-  // romper `verify` por una variación mínima entre ejecuciones. El
-  // detalle exacto — qué SÍ llega al 75-90 % (auth, certifications) y qué
-  // se queda en 0 % (budgets, dashboard, ocr, la mitad de los módulos)
-  // vive en «Estrategia de Testing y Calidad.md»; este es el suelo de
-  // hoy, pensado para subir según se añadan más specs, no para quedarse
-  // aquí.
+  // Umbral real y medido, no el 75 % pedido a ciegas (Fase 9) ni de un
+  // salto (Fase 10). Con `auth`, `invoices`, `certifications`,
+  // `comparativos`, `partes-diarios` y `cost-control` cubiertos — ya no
+  // son 3 flujos, pero siguen siendo menos de la mitad de los ~24
+  // controladores de la API — un 75 % global sigue siendo imposible sin
+  // inflar el número. Medido en vivo el 14-sep-2026 (Fase 10, con las
+  // specs nuevas): statements 37.71 %, branches 19.43 %, functions
+  // 35.5 %, lines 37.34 % (subida real desde el 25.1/10.72/23.02/24.5 %
+  // de la Fase 9). El umbral de abajo se fija un poco por debajo de eso
+  // (margen de estabilidad) para no romper `verify` por una variación
+  // mínima entre ejecuciones — el detalle exacto de qué SÍ y qué NO está
+  // cubierto vive en «Estrategia de Testing y Calidad.md»; este es el
+  // suelo de hoy, pensado para seguir subiendo, no para quedarse aquí.
   coverageThreshold: {
     global: {
-      statements: 22,
-      branches: 8,
-      functions: 18,
-      lines: 22,
+      statements: 34,
+      branches: 16,
+      functions: 30,
+      lines: 34,
     },
   },
 };

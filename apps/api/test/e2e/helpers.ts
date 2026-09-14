@@ -121,6 +121,89 @@ export async function createContact(
   return res.body as ContactShape;
 }
 
+interface PhaseShape {
+  id: string;
+  code: string;
+  [key: string]: unknown;
+}
+
+/** `POST /projects/:projectId/phases` como el usuario del token dado. */
+export async function createPhase(
+  app: INestApplication,
+  token: string,
+  projectId: string,
+  overrides: Record<string, unknown> = {},
+): Promise<PhaseShape> {
+  const res = await authed(app, token)
+    .post(`/projects/${projectId}/phases`)
+    .send({
+      code: `FASE-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      name: 'Fase de pruebas',
+      ...overrides,
+    })
+    .expect(201);
+  return res.body as PhaseShape;
+}
+
+interface BudgetShape {
+  id: string;
+  status: string;
+  [key: string]: unknown;
+}
+
+/** `POST /projects/:projectId/budgets` como el usuario del token dado. */
+export async function createBudget(
+  app: INestApplication,
+  token: string,
+  projectId: string,
+  overrides: Record<string, unknown> = {},
+): Promise<BudgetShape> {
+  const res = await authed(app, token)
+    .post(`/projects/${projectId}/budgets`)
+    .send({ name: 'Presupuesto de pruebas', ...overrides })
+    .expect(201);
+  return res.body as BudgetShape;
+}
+
+/** `PATCH /budgets/:id` para pasarlo a `activo` (necesario para el BAC del control de costes). */
+export async function activateBudget(
+  app: INestApplication,
+  token: string,
+  budgetId: string,
+): Promise<void> {
+  await authed(app, token)
+    .patch(`/budgets/${budgetId}`)
+    .send({ status: 'activo' })
+    .expect(200);
+}
+
+interface BudgetItemShape {
+  id: string;
+  [key: string]: unknown;
+}
+
+/** `POST /budgets/:budgetId/items` como el usuario del token dado. */
+export async function addBudgetItem(
+  app: INestApplication,
+  token: string,
+  budgetId: string,
+  overrides: Record<string, unknown> = {},
+): Promise<BudgetItemShape> {
+  const res = await authed(app, token)
+    .post(`/budgets/${budgetId}/items`)
+    .send({
+      code: `PARTIDA-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      name: 'Partida de pruebas',
+      unit: 'm2',
+      unitPrice: 10,
+      quantity: 100,
+      level: 3,
+      ...overrides,
+    })
+    .expect(201);
+  return res.body as BudgetItemShape;
+}
+
 /**
  * Crea un usuario con rol `obra` vía `POST /users` (como admin), le asigna
  * acceso a las obras dadas y devuelve sus tokens ya logueado — el atajo

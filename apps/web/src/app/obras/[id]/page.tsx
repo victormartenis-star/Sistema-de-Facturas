@@ -26,6 +26,7 @@ import {
 } from '@/lib/api';
 import { StatusBadge } from '@/components/status-badge';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { CostControlDashboard } from '@/components/cost-control-dashboard';
 import { useToast } from '@/components/toast';
 import {
   IconPencil,
@@ -950,6 +951,16 @@ export default function ObraDetallePage() {
             </table>
           </div>
         )}
+      </section>
+
+      {/* Control de costes en tiempo real (Fase 10): BAC/AC/EV, margen, CPI,
+          EAC y alertas de sobrecoste por partida — ver
+          CostControlDashboard. */}
+      <section className="mt-8">
+        <h2 className="mb-3 text-sm font-semibold">
+          Control de costes en tiempo real
+        </h2>
+        <CostControlDashboard projectId={id} />
       </section>
 
       {/* Modales */}

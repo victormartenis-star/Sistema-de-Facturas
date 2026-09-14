@@ -10,7 +10,9 @@ import { CopilotoModule } from './copiloto/copiloto.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CertificationsModule } from './certifications/certifications.module';
 import { ComplianceModule } from './compliance/compliance.module';
+import { ComparativosModule } from './modules/comparativos/comparativos.module';
 import { ContactsModule } from './contacts/contacts.module';
+import { CostControlModule } from './cost-control/cost-control.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { DbModule } from './db/db.module';
@@ -20,6 +22,7 @@ import { HealthModule } from './health/health.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { OcrModule } from './ocr/ocr.module';
+import { PartesDiariosModule } from './modules/partes-diarios/partes-diarios.module';
 import { PhasesModule } from './phases/phases.module';
 import { ProjectsModule } from './projects/projects.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
@@ -46,6 +49,9 @@ import { TreasuryModule } from './treasury/treasury.module';
     PhasesModule,
     InvoicesModule,
     CertificationsModule,
+    ComparativosModule,
+    PartesDiariosModule,
+    CostControlModule,
     PurchaseOrdersModule,
     DeliveryNotesModule,
     TreasuryModule,

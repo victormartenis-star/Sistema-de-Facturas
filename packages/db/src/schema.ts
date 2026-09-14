@@ -899,3 +899,235 @@ export const auditLog = pgTable('audit_log', {
 
 export type AuditLogEntry = typeof auditLog.$inferSelect;
 export type NewAuditLogEntry = typeof auditLog.$inferInsert;
+
+// ─── Comparativos de ofertas y adjudicación de subcontratas (Fase 10) ─────
+/**
+ * Un comparativo cubre una fase/capítulo de obra (`phaseId`): la matriz de
+ * precios es "una fila por partida de esa fase, una columna por oferta de
+ * proveedor" — cada partida es una fila de `budgetItems` con ese `phaseId`,
+ * cada oferta es una fila de `comparativoOfertas` con sus líneas de precio
+ * en `comparativoOfertaLineas`.
+ *
+ * La oferta adjudicada no se guarda como FK en `comparativos` (evitaría una
+ * dependencia circular comparativos↔comparativoOfertas, incómoda de
+ * migrar): se marca `isAwarded` en la propia oferta, con un índice único
+ * parcial que garantiza que nunca hay dos ofertas adjudicadas a la vez
+ * para el mismo comparativo.
+ */
+export const comparativoStatusEnum = pgEnum('comparativo_status', [
+  'abierto',
+  'adjudicado',
+  'cancelado',
+]);
+
+export const comparativos = pgTable('comparativos', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id),
+  /** Fase/capítulo que se está comparando — fija qué partidas entran en la matriz. */
+  phaseId: uuid('phase_id')
+    .notNull()
+    .references(() => projectPhases.id),
+  title: text('title').notNull(),
+  status: comparativoStatusEnum('status').notNull().default('abierto'),
+  awardedAt: timestamp('awarded_at', { withTimezone: true }),
+  /** Pedido/subcontrata borrador generado al adjudicar (ver `adjudicar()`). */
+  purchaseOrderId: uuid('purchase_order_id').references(
+    () => purchaseOrders.id,
+  ),
+  notes: text('notes'),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/** Oferta de un proveedor/subcontrata para un comparativo. */
+export const comparativoOfertas = pgTable(
+  'comparativo_ofertas',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    comparativoId: uuid('comparativo_id')
+      .notNull()
+      .references(() => comparativos.id, { onDelete: 'cascade' }),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id),
+    /** Plazo de ejecución ofertado, en días. */
+    leadTimeDays: integer('lead_time_days'),
+    /** Condiciones de pago ofertadas (texto libre: "30 días fin de mes",...). */
+    paymentTerms: text('payment_terms'),
+    isAwarded: boolean('is_awarded').notNull().default(false),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Un proveedor no puede pujar dos veces en el mismo comparativo
+    unique('comparativo_ofertas_comparativo_contact_unique').on(
+      t.comparativoId,
+      t.contactId,
+    ),
+    // Como mucho una oferta adjudicada por comparativo, a nivel de base de datos
+    uniqueIndex('comparativo_ofertas_awarded_unique')
+      .on(t.comparativoId)
+      .where(sql`is_awarded = true`),
+  ],
+);
+
+/** Precio unitario ofertado por una oferta para una partida concreta de la fase. */
+export const comparativoOfertaLineas = pgTable(
+  'comparativo_oferta_lineas',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ofertaId: uuid('oferta_id')
+      .notNull()
+      .references(() => comparativoOfertas.id, { onDelete: 'cascade' }),
+    budgetItemId: uuid('budget_item_id')
+      .notNull()
+      .references(() => budgetItems.id, { onDelete: 'restrict' }),
+    unitPrice: numeric('unit_price', { precision: 14, scale: 4 }).notNull(),
+    /** Medición ofertada; normalmente la de `budget_items`, pero el proveedor puede remedir. */
+    quantity: numeric('quantity', { precision: 14, scale: 4 }).notNull(),
+    /** Precalculado: unit_price × quantity. */
+    totalAmount: numeric('total_amount', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+  },
+  (t) => [
+    unique('comparativo_oferta_lineas_oferta_item_unique').on(
+      t.ofertaId,
+      t.budgetItemId,
+    ),
+  ],
+);
+
+export type Comparativo = typeof comparativos.$inferSelect;
+export type NewComparativo = typeof comparativos.$inferInsert;
+export type ComparativoOferta = typeof comparativoOfertas.$inferSelect;
+export type NewComparativoOferta = typeof comparativoOfertas.$inferInsert;
+export type ComparativoOfertaLinea =
+  typeof comparativoOfertaLineas.$inferSelect;
+export type NewComparativoOfertaLinea =
+  typeof comparativoOfertaLineas.$inferInsert;
+
+// ─── Partes de trabajo diario: personal y maquinaria (Fase 10) ────────────
+/**
+ * Imputación diaria de coste real, la pieza que le falta al "Coste Real
+ * Imputado" del control de desviaciones: hasta ahora solo se contaba lo
+ * que llegaba por factura de compra, que en construcción siempre va por
+ * detrás del gasto real (el operario trabaja hoy, la factura del
+ * subcontratista llega a fin de mes). Ambas tablas llevan `approvedBy`/
+ * `approvedAt` como aprobación simple de un encargado — no hay firma
+ * digital ni biométrica, solo qué usuario aprobó y cuándo.
+ */
+
+export const parteMaquinariaOwnershipEnum = pgEnum(
+  'parte_maquinaria_ownership',
+  ['propia', 'alquilada'],
+);
+
+/** Parte de personal: horas ordinarias/extra de un operario, imputadas a obra y partida. */
+export const partesPersonal = pgTable('partes_personal', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id),
+  /** Partida de imputación; nulo = coste general de obra sin partida concreta. */
+  phaseId: uuid('phase_id').references(() => projectPhases.id, {
+    onDelete: 'set null',
+  }),
+  /** Personal propio: no hay maestro de trabajadores todavía, se anota el nombre. */
+  workerName: text('worker_name').notNull(),
+  categoryId: uuid('category_id').references(() => categories.id),
+  workDate: date('work_date').notNull(),
+  ordinaryHours: numeric('ordinary_hours', { precision: 5, scale: 2 })
+    .notNull()
+    .default('0'),
+  overtimeHours: numeric('overtime_hours', { precision: 5, scale: 2 })
+    .notNull()
+    .default('0'),
+  /** Coste €/hora de la empresa por ese operario, no su nómina bruta. */
+  ordinaryRate: numeric('ordinary_rate', {
+    precision: 10,
+    scale: 2,
+  }).notNull(),
+  overtimeRate: numeric('overtime_rate', {
+    precision: 10,
+    scale: 2,
+  }).notNull(),
+  /** Precalculado: ordinary_hours×ordinary_rate + overtime_hours×overtime_rate. */
+  totalCost: numeric('total_cost', { precision: 14, scale: 2 }).notNull(),
+  notes: text('notes'),
+  approvedBy: uuid('approved_by').references(() => users.id, {
+    onDelete: 'set null',
+  }),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/** Parte de maquinaria: horas de uso, combustible y coste, propia o alquilada. */
+export const partesMaquinaria = pgTable('partes_maquinaria', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id),
+  phaseId: uuid('phase_id').references(() => projectPhases.id, {
+    onDelete: 'set null',
+  }),
+  /** No hay maestro de maquinaria todavía: se anota el nombre/matrícula. */
+  machineName: text('machine_name').notNull(),
+  ownership: parteMaquinariaOwnershipEnum('ownership')
+    .notNull()
+    .default('propia'),
+  workDate: date('work_date').notNull(),
+  hoursUsed: numeric('hours_used', { precision: 6, scale: 2 })
+    .notNull()
+    .default('0'),
+  fuelLiters: numeric('fuel_liters', { precision: 8, scale: 2 }),
+  /** Coste €/hora — amortización+mantenimiento si es propia, tarifa si es alquilada. */
+  hourlyRate: numeric('hourly_rate', { precision: 10, scale: 2 }).notNull(),
+  /** Precalculado: hours_used × hourly_rate (el combustible se anota, no se sobreprecia aparte). */
+  totalCost: numeric('total_cost', { precision: 14, scale: 2 }).notNull(),
+  notes: text('notes'),
+  approvedBy: uuid('approved_by').references(() => users.id, {
+    onDelete: 'set null',
+  }),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type PartePersonal = typeof partesPersonal.$inferSelect;
+export type NewPartePersonal = typeof partesPersonal.$inferInsert;
+export type ParteMaquinaria = typeof partesMaquinaria.$inferSelect;
+export type NewParteMaquinaria = typeof partesMaquinaria.$inferInsert;
