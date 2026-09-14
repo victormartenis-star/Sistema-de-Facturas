@@ -139,15 +139,20 @@ export class FacturaeService {
 
   /**
    * Recorre todas las facturas de venta de la empresa, de la más antigua a
-   * la más reciente, recalculando el encadenamiento hasta llegar a la
-   * factura pedida.
+   * la más reciente, hasta llegar a la factura pedida — pero, a diferencia
+   * de la versión original, **reutiliza la huella ya persistida** en
+   * `invoices.verifactu_hash` para cada fila que la tenga, en vez de
+   * recalcular el SHA-256 de todas las facturas anteriores en cada
+   * petición (Fase 11, ver deuda técnica en [[Módulo Facturación]]).
    *
-   * No hay columna que persista la huella: se recalcula en cada petición.
-   * El resultado es determinista (misma huella cada vez para la misma
-   * factura), pero no escala con el número de facturas — un sistema real
-   * guardaría `hash`/`previous_hash` en `invoices` al aprobarla y
-   * encadenaría de forma incremental, sin recalcular desde el origen en
-   * cada consulta. Ver [[Módulo Facturación]] en Obsidian.
+   * Solo se recalcula (y se persiste) a partir de la primera fila cuya
+   * huella guardada ya no es válida: o no la tiene todavía (factura nueva,
+   * el caso normal — "la cola" de la cadena), o su `verifactuPreviousHash`
+   * guardado no coincide con lo que acabamos de calcular para la fila
+   * anterior (la cadena por delante de ella cambió — p. ej. se insertó a
+   * posteriori una factura con `issueDate` más antigua que rompe el orden;
+   * caso raro, pero el chequeo de integridad lo detecta y se autocorrige
+   * en vez de servir una huella obsoleta).
    */
   private async computeVerifactuChain(
     companyId: string,
@@ -162,6 +167,9 @@ export class FacturaeService {
         vatAmount: invoices.vatAmount,
         totalAmount: invoices.totalAmount,
         createdAt: invoices.createdAt,
+        verifactuHash: invoices.verifactuHash,
+        verifactuPreviousHash: invoices.verifactuPreviousHash,
+        verifactuGeneratedAt: invoices.verifactuGeneratedAt,
       })
       .from(invoices)
       .where(
@@ -174,28 +182,53 @@ export class FacturaeService {
       .orderBy(asc(invoices.issueDate), asc(invoices.createdAt));
 
     let previousHash = VERIFACTU_GENESIS_HASH;
+    let target: FacturaeVerifactuInfo | undefined;
     for (const row of rows) {
-      const generatedAt = row.createdAt.toISOString();
-      const canonical = verifactuCanonicalString(
-        {
-          issuerTaxId,
-          invoiceNumber: row.invoiceNumber,
-          issueDate: row.issueDate,
-          vatAmount: Number(row.vatAmount),
-          totalAmount: Number(row.totalAmount),
-          generatedAt,
-        },
-        previousHash,
-      );
-      const hash = createHash('sha256').update(canonical, 'utf8').digest('hex');
+      const cached =
+        row.verifactuHash !== null &&
+        row.verifactuPreviousHash === previousHash;
+
+      let hash: string;
+      let generatedAt: string;
+      if (cached) {
+        hash = row.verifactuHash!;
+        generatedAt = row.verifactuGeneratedAt!.toISOString();
+      } else {
+        generatedAt = row.createdAt.toISOString();
+        const canonical = verifactuCanonicalString(
+          {
+            issuerTaxId,
+            invoiceNumber: row.invoiceNumber,
+            issueDate: row.issueDate,
+            vatAmount: Number(row.vatAmount),
+            totalAmount: Number(row.totalAmount),
+            generatedAt,
+          },
+          previousHash,
+        );
+        hash = createHash('sha256').update(canonical, 'utf8').digest('hex');
+        await this.dbs.db
+          .update(invoices)
+          .set({
+            verifactuHash: hash,
+            verifactuPreviousHash: previousHash,
+            verifactuGeneratedAt: new Date(generatedAt),
+          })
+          .where(eq(invoices.id, row.id));
+      }
+
       if (row.id === targetInvoiceId) {
-        return { hash, previousHash, generatedAt };
+        target = { hash, previousHash, generatedAt };
+        break;
       }
       previousHash = hash;
     }
-    // No debería ocurrir: `generate()` ya comprobó que es una factura de venta.
-    throw new NotFoundException(
-      'Factura no encontrada al reconstruir la cadena VeriFactu',
-    );
+    if (!target) {
+      // No debería ocurrir: `generate()` ya comprobó que es una factura de venta.
+      throw new NotFoundException(
+        'Factura no encontrada al reconstruir la cadena VeriFactu',
+      );
+    }
+    return target;
   }
 }

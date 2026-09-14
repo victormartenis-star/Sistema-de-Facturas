@@ -4,6 +4,13 @@ node_modules
 package-lock.json
 packages/db/drizzle
 
+# Estado local de Claude Code (permisos concedidos, etc.): ya está en el
+# .gitignore global del usuario, nunca se commitea, pero Prettier no hereda
+# ignores globales de git — sin esta línea, `format:check` puede fallar de
+# forma intermitente según cuándo se haya escrito ese fichero, sin relación
+# ninguna con la calidad del código del repo.
+.claude/
+
 # La documentación de diseño es el contrato de alcance: se edita a mano y no
 # la repagina una herramienta (Prettier ensancha las tablas y llena el diff
 # de cambios que nadie ha decidido).

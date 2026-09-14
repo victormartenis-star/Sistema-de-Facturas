@@ -287,6 +287,19 @@ export const invoices = pgTable(
       .default('0.00'),
     retentionReleaseDate: date('retention_release_date'),
     notes: text('notes'),
+    // Huella VeriFactu persistida (Fase 11): antes se recalculaba la cadena
+    // entera desde la primera factura de venta en cada `GET .../facturae`.
+    // `verifactuHash` cachea el resultado ya calculado para esta factura;
+    // `verifactuPreviousHash` guarda con qué huella anterior se calculó, así
+    // `FacturaeService` puede detectar si la cadena por delante de esta fila
+    // cambió (p. ej. una factura anterior insertada a posteriori con fecha
+    // más antigua) y solo recalcular desde ahí, no desde el origen. Ver
+    // `apps/api/src/invoices/facturae.service.ts` y [[Módulo Facturación]].
+    verifactuHash: varchar('verifactu_hash', { length: 64 }),
+    verifactuPreviousHash: varchar('verifactu_previous_hash', { length: 64 }),
+    verifactuGeneratedAt: timestamp('verifactu_generated_at', {
+      withTimezone: true,
+    }),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
