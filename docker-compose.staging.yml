@@ -1,0 +1,151 @@
+# Orquestación de staging para el ERP Dintel. NO es el compose de
+# desarrollo local (ese es infra/docker/docker-compose.yml, solo Postgres):
+# este construye y arranca las 3 apps completas además de la base de datos.
+#
+# Uso: `npm run staging:up` (o `bash scripts/deploy-staging.sh`), que invoca
+#   docker compose --env-file .env.staging -f docker-compose.staging.yml up -d --build
+#
+# Requiere `.env.staging` en la raíz (copiar de `.env.staging.example`).
+# Detalle completo, incluida la distinción entre nombres de servicio Docker
+# y URLs públicas, en [[CI-CD y Despliegue Staging]].
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-erp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD en .env.staging}
+      POSTGRES_DB: ${POSTGRES_DB:-erp_dev}
+      # Collation determinista: mismo criterio que infra/docker/docker-compose.yml
+      # (los ORDER BY sobre nombres deben ordenar igual en dev, CI y staging).
+      POSTGRES_INITDB_ARGS: '--encoding=UTF8 --locale=C'
+    volumes:
+      - pgdata_staging:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U ${POSTGRES_USER:-erp} -d ${POSTGRES_DB:-erp_dev}',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks: [dintel-network]
+    restart: unless-stopped
+
+  # Job de un solo uso: aplica las migraciones de Drizzle y termina. La
+  # imagen `api` de producción no lleva drizzle-kit (se poda como
+  # devDependency), así que esto usa el stage intermedio `builder`, que sí
+  # lo conserva — no hace falta una tercera imagen solo para migrar.
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: builder
+    working_dir: /app
+    command: ['npm', 'run', 'db:migrate']
+    env_file: .env.staging
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [dintel-network]
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: runner
+    ports:
+      - '${API_PORT:-3001}:3001'
+    env_file: .env.staging
+    volumes:
+      - storage_data:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks: [dintel-network]
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Se incrusta en el JS del navegador en tiempo de build: tiene que
+        # venir de aquí (interpolado por `docker compose --env-file
+        # .env.staging`), un env_file de contenedor ya arrancado llega tarde.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    ports:
+      - '3000:3000'
+    env_file: .env.staging
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [dintel-network]
+    restart: unless-stopped
+
+  # El servidor MCP habla por stdio (ver apps/mcp/Dockerfile): no es un
+  # servicio de fondo. Perfil `tools` → `docker compose up` no lo arranca;
+  # se invoca a demanda:
+  #   docker compose --env-file .env.staging -f docker-compose.staging.yml \
+  #     run --rm -e ERP_API_TOKEN=<jwt> mcp
+  mcp:
+    build:
+      context: .
+      dockerfile: apps/mcp/Dockerfile
+    profiles: ['tools']
+    stdin_open: true
+    tty: true
+    env_file: .env.staging
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [dintel-network]
+
+  # Observabilidad (Fase 8) — perfil `monitoring`, no arranca con un `up`
+  # normal:
+  #   docker compose --env-file .env.staging -f docker-compose.staging.yml \
+  #     --profile monitoring up -d
+  # Detalle de qué scrapea y qué dashboards traer en
+  # [[Observabilidad y Telemetria]].
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    profiles: ['monitoring']
+    volumes:
+      - ./infrastructure/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - '9090:9090'
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [dintel-network]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    profiles: ['monitoring']
+    ports:
+      - '3002:3000'
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks: [dintel-network]
+    restart: unless-stopped
+
+networks:
+  dintel-network:
+    driver: bridge
+
+volumes:
+  pgdata_staging:
+  storage_data:
+  prometheus_data:
+  grafana_data:

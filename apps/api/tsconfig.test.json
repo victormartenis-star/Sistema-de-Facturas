@@ -1,0 +1,30 @@
+{
+  // Usado solo por ts-jest (`jest-e2e.config.js`) para las pruebas de
+  // integración en `test/e2e/`. No es el `tsconfig.json` de build/typecheck
+  // normal de `apps/api` (ese solo incluye `src`).
+  //
+  // Lo que de verdad hace posible correr estos tests hoy pese al
+  // bloqueante externo de `src/modules/proveedores/schema.ts` (error de
+  // sintaxis real, obra en curso de otro proceso — ver Roadmap y Fases,
+  // deuda técnica) no es el `exclude` de aquí abajo (comprobado: sigue sin
+  // sacar esos ficheros del Program de un `tsc -p` completo, no se ha
+  // investigado más a fondo por qué) sino dos cosas: `test-app.module.ts`
+  // nunca importa `ProveedoresModule` (ts-jest solo transforma/tipa lo que
+  // de verdad se `require()`, no todo el Program), y `collectCoverageFrom`
+  // en `jest-e2e.config.js` niega explícitamente esa carpeta para que
+  // tampoco la fuerce el cálculo de cobertura. El `exclude` se deja puesto
+  // por si algún día empieza a funcionar como cabría esperar, no porque
+  // hoy esté haciendo algo.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist-test",
+    "rootDir": ".",
+    "declaration": false,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "types": ["jest", "node"]
+  },
+  "include": ["src", "test"],
+  "exclude": ["src/modules/proveedores"]
+}

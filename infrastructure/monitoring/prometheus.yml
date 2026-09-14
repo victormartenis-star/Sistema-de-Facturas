@@ -1,0 +1,20 @@
+# Configuración de scraping de Prometheus para ERP Dintel (Fase 8).
+#
+# Uso: montado de solo lectura en el contenedor `prometheus` de
+# docker-compose.staging.yml (perfil `monitoring`):
+#   docker compose --env-file .env.staging -f docker-compose.staging.yml \
+#     --profile monitoring up -d
+#
+# `api:3001` es el nombre de servicio Docker y el puerto interno del
+# contenedor (API_PORT por defecto), no una URL pública — mismo criterio
+# que .env.staging.example. Detalle completo en la nota Obsidian
+# «Observabilidad y Telemetría».
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: erp-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['api:3001']

@@ -28,6 +28,28 @@ jobs:
   calidad:
     name: Tipos, estilo y tests
     runs-on: ubuntu-latest
+    # Postgres (Fase 9): `test:integration` (apps/api, Supertest contra una
+    # `INestApplication` real) necesita una base de verdad — `erp_test`, que
+    # el propio `globalSetup` de Jest crea y migra sola (ver
+    # `apps/api/test/e2e/global-setup.ts`), nunca `erp_dev`. Mismo patrón
+    # que los jobs `migraciones`/`e2e` de abajo.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: erp
+          POSTGRES_PASSWORD: erp
+          POSTGRES_DB: erp_dev
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_DATABASE_URL: postgres://erp:erp@localhost:5432/erp_test
+      TEST_DATABASE_ADMIN_URL: postgres://erp:erp@localhost:5432/postgres
+      JWT_SECRET: erp-dintel-ci-secret-no-usar-en-produccion-1234567890
     steps:
       - uses: actions/checkout@v4
 
@@ -52,8 +74,14 @@ jobs:
       - name: Formato
         run: npm run format:check
 
-      - name: Tests
+      - name: Tests unitarios (packages/shared)
         run: npm test
+
+      # Independiente de `erp_dev`: crea y migra `erp_test` sola (ver el
+      # comentario del `services.postgres` de arriba), la vacía con
+      # TRUNCATE entre cada test y no toca los datos de desarrollo.
+      - name: Tests de integración (apps/api, Supertest)
+        run: npm run test:integration -w @erp/api
 
   migraciones:
     name: Migraciones sobre PostgreSQL limpio
@@ -141,11 +169,11 @@ jobs:
       - name: Compilar paquetes compartidos
         run: npm run build:packages
 
-      # Chromium es el único navegador que usa la suite (ver
-      # `apps/e2e/playwright.config.ts`); `--with-deps` instala también las
-      # librerías del sistema que hacen falta en un runner desnudo.
-      - name: Instalar navegador de Playwright
-        run: npx playwright install --with-deps chromium
+      # Chromium y Firefox (Fase 9, ver `apps/e2e/playwright.config.ts`);
+      # `--with-deps` instala también las librerías del sistema que hacen
+      # falta en un runner desnudo.
+      - name: Instalar navegadores de Playwright
+        run: npx playwright install --with-deps chromium firefox
 
       - name: Aplicar migraciones
         run: npm run db:migrate

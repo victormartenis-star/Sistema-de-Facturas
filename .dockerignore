@@ -1,0 +1,38 @@
+# Contexto de build de Docker para el monorepo. Sin esto, cada `docker build`
+# sube node_modules/.next/dist enteros al daemon antes de poder usar la
+# caché de capas — más lento y, si algo se cuela, una imagen más pesada.
+
+node_modules
+**/node_modules
+
+# Builds — se generan dentro de cada stage del Dockerfile, no se copian del host.
+dist
+**/dist
+.next
+**/.next
+
+# Playwright: reportes, capturas y estado de sesión de una corrida local.
+apps/e2e/playwright-report
+apps/e2e/test-results
+apps/e2e/.auth
+
+# Secretos y config local: nunca deben acabar dentro de una imagen. Las
+# variables de staging entran por `env_file`/`environment` en
+# docker-compose.staging.yml, no horneadas en la imagen.
+.env
+.env.*
+!.env.*.example
+
+# Git, editores, cobertura, logs
+.git
+.gitignore
+.github
+.vscode
+.idea
+coverage
+*.log
+*.tsbuildinfo
+
+# Documentación de diseño y vault de Obsidian: no forman parte de la app.
+*.md
+storage

@@ -16,6 +16,11 @@ import { defineConfig, devices } from '@playwright/test';
  * `seed.ts`) después de que `webServer` confirme que la API está arriba —
  * incluido el usuario `E2E_EMAIL` / `E2E_PASSWORD` que usa
  * `tests/auth.setup.ts`, que hasta ahora había que crear a mano.
+ *
+ * Dos navegadores (Fase 9, 14-sep-2026): `chromium` y `firefox`, ambos
+ * dependientes del mismo `setup` — el `storageState` que guarda
+ * `auth.setup.ts` es JSON portable (cookies/localStorage del origen), no
+ * específico de un motor, así que un solo login sirve para los dos.
  */
 export default defineConfig({
   testDir: './tests',
@@ -50,6 +55,14 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
+        storageState: '.auth/user.json',
+      },
+      dependencies: ['setup'],
+    },
+    {
+      name: 'firefox',
+      use: {
+        ...devices['Desktop Firefox'],
         storageState: '.auth/user.json',
       },
       dependencies: ['setup'],

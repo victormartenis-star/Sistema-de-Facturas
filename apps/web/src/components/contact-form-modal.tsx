@@ -121,10 +121,13 @@ export function ContactFormModal({
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="contact-modal-title"
         className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="mb-4 text-lg font-semibold">
+        <h2 id="contact-modal-title" className="mb-4 text-lg font-semibold">
           {contact ? 'Editar contacto' : 'Nuevo contacto'}
         </h2>
 

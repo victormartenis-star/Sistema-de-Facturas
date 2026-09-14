@@ -116,10 +116,13 @@ export function ProjectFormModal({
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="project-modal-title"
         className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="mb-4 text-lg font-semibold">
+        <h2 id="project-modal-title" className="mb-4 text-lg font-semibold">
           {project ? 'Editar obra' : 'Nueva obra'}
         </h2>
 

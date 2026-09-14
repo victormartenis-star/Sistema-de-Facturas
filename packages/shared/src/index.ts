@@ -8,6 +8,8 @@ export * from './contacts';
 export * from './facturae';
 export * from './documents';
 export * from './extractions';
+export * from './logging';
+export * from './metrics';
 export * from './projects';
 export * from './phases';
 export * from './invoices';

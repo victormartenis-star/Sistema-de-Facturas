@@ -23,6 +23,12 @@ export default tseslint.config(
       'apps/e2e/test-results/**',
       // Lo genera Next en cada arranque; no es código nuestro.
       'apps/web/next-env.d.ts',
+      // Informes de cobertura (Fase 9): HTML/JS generados por
+      // vitest/jest/nyc (incluye JS de terceros como sorter.js/prettify.js
+      // embebido en cada `lcov-report`), no código nuestro.
+      '**/coverage/**',
+      '.coverage-merge-input/**',
+      'apps/api/dist-test/**',
     ],
   },
   js.configs.recommended,
@@ -55,8 +61,13 @@ export default tseslint.config(
     rules: { '@typescript-eslint/no-explicit-any': 'off' },
   },
   {
-    // Scripts de siembra y migración: la consola es su interfaz.
-    files: ['packages/db/src/**', 'apps/e2e/seed.ts', '**/*.config.*'],
+    // Scripts de siembra, migración y reporte: la consola es su interfaz.
+    files: [
+      'packages/db/src/**',
+      'apps/e2e/seed.ts',
+      '**/*.config.*',
+      'scripts/**',
+    ],
     rules: { 'no-console': 'off' },
   },
 );

@@ -11,3 +11,9 @@ storage/
 apps/e2e/.auth/
 apps/e2e/playwright-report/
 apps/e2e/test-results/
+
+# Cobertura (Fase 9): vitest (packages/shared), jest (apps/api) y el
+# informe unificado de la raíz (scripts/merge-coverage.mjs)
+coverage/
+.coverage-merge-input/
+apps/api/dist-test/
