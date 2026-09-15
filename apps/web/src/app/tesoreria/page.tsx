@@ -15,8 +15,11 @@ import {
 } from 'recharts';
 import {
   MILESTONE_KIND_LABELS,
+  PAYMENT_INSTRUMENTS,
+  PAYMENT_INSTRUMENT_LABELS,
   type CashflowGrouping,
   type MilestoneDto,
+  type PaymentInstrument,
 } from '@erp/shared';
 import { formatDate, formatEur, treasuryApi } from '@/lib/api';
 import { useToast } from '@/components/toast';
@@ -29,6 +32,7 @@ import {
 } from '@/components/icons';
 import { ErrorBanner, PageHeader, selectCls } from '@/components/ui';
 import { BankAccountsPanel } from './bank-accounts-panel';
+import { CrossedMaturitiesPanel } from './crossed-maturities-panel';
 import { IlliquidityPanel } from './illiquidity-panel';
 
 // ─── Tooltip personalizado del gráfico ────────────────────────────────────────
@@ -86,6 +90,7 @@ export default function TesoreriaPage() {
     qc.invalidateQueries({ queryKey: ['cashflow'] });
     qc.invalidateQueries({ queryKey: ['milestones'] });
     qc.invalidateQueries({ queryKey: ['invoices'] });
+    qc.invalidateQueries({ queryKey: ['crossed-maturities'] });
   };
 
   const payMutation = useMutation({
@@ -103,6 +108,18 @@ export default function TesoreriaPage() {
       toast('Vencimiento reabierto');
       invalidate();
     },
+    onError: (e) => toast(errText(e), 'error'),
+  });
+
+  const instrumentMutation = useMutation({
+    mutationFn: ({
+      id,
+      paymentInstrument,
+    }: {
+      id: string;
+      paymentInstrument: PaymentInstrument;
+    }) => treasuryApi.setPaymentInstrument(id, { paymentInstrument }),
+    onSuccess: () => invalidate(),
     onError: (e) => toast(errText(e), 'error'),
   });
 
@@ -211,6 +228,8 @@ export default function TesoreriaPage() {
             <IlliquidityPanel />
             <BankAccountsPanel />
           </div>
+
+          <CrossedMaturitiesPanel />
 
           {/* Gráfico de flujo de caja */}
           <section className="mt-6 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -343,6 +362,7 @@ export default function TesoreriaPage() {
                   <th className="px-3 py-2 font-medium">Factura</th>
                   <th className="px-3 py-2 font-medium">Contacto</th>
                   <th className="px-3 py-2 font-medium">Tipo</th>
+                  <th className="px-3 py-2 font-medium">Instrumento</th>
                   <th className="px-3 py-2 text-right font-medium">Importe</th>
                   <th className="px-3 py-2" />
                 </tr>
@@ -380,6 +400,25 @@ export default function TesoreriaPage() {
                           : m.direction === 'cobro'
                             ? 'Cobro'
                             : 'Pago'}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <select
+                          className="rounded-md border border-gray-200 bg-transparent px-1.5 py-1 text-xs text-gray-600"
+                          value={m.paymentInstrument}
+                          onChange={(e) =>
+                            instrumentMutation.mutate({
+                              id: m.id,
+                              paymentInstrument: e.target
+                                .value as PaymentInstrument,
+                            })
+                          }
+                        >
+                          {PAYMENT_INSTRUMENTS.map((pi) => (
+                            <option key={pi} value={pi}>
+                              {PAYMENT_INSTRUMENT_LABELS[pi]}
+                            </option>
+                          ))}
+                        </select>
                       </td>
                       <td
                         className={`px-3 py-2.5 text-right font-medium tabular-nums ${

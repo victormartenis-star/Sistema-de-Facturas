@@ -40,6 +40,8 @@ import { ESignatureModule } from './modules/e-signature/e-signature.module';
 import { BimModule } from './modules/bim/bim.module';
 import { ContractAiModule } from './modules/contract-ai/contract-ai.module';
 import { InvestorsModule } from './modules/investors/investors.module';
+import { RealEstateModule } from './modules/real-estate/real-estate.module';
+import { OfflineFieldModule } from './modules/offline-field/offline-field.module';
 
 @Module({
   imports: [
@@ -87,6 +89,8 @@ import { InvestorsModule } from './modules/investors/investors.module';
     BimModule,
     ContractAiModule,
     InvestorsModule,
+    RealEstateModule,
+    OfflineFieldModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

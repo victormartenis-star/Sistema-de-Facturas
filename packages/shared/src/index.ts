@@ -34,3 +34,5 @@ export * from './fleet-iot';
 export * from './change-orders';
 export * from './e-signature';
 export * from './portals';
+export * from './real-estate';
+export * from './offline-field';

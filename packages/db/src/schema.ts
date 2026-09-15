@@ -516,6 +516,20 @@ export const milestoneKindEnum = pgEnum('milestone_kind', [
   'retencion',
 ]);
 
+/**
+ * Instrumento de cobro/pago de un vencimiento — informativo, se marca a
+ * mano (el ERP no integra con el banco): permite cruzar en tesorería los
+ * pagos aplazados vía confirming/pagaré (que tensan caja más adelante de
+ * lo que sugiere `due_date`) frente al resto.
+ */
+export const paymentInstrumentEnum = pgEnum('payment_instrument', [
+  'transferencia',
+  'confirming',
+  'pagare',
+  'efectivo',
+  'domiciliacion',
+]);
+
 export const milestoneStatusEnum = pgEnum('milestone_status', [
   'previsto',
   'pagado',
@@ -536,6 +550,9 @@ export const paymentMilestones = pgTable('payment_milestones', {
     .references(() => invoices.id, { onDelete: 'cascade' }),
   direction: milestoneDirectionEnum('direction').notNull(),
   kind: milestoneKindEnum('kind').notNull().default('ordinario'),
+  paymentInstrument: paymentInstrumentEnum('payment_instrument')
+    .notNull()
+    .default('transferencia'),
   dueDate: date('due_date').notNull(),
   amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
   status: milestoneStatusEnum('status').notNull().default('previsto'),
@@ -1772,6 +1789,66 @@ export const esgRegistrosEmision = pgTable('esg_registros_emision', {
 export type EsgRegistroEmision = typeof esgRegistrosEmision.$inferSelect;
 export type NewEsgRegistroEmision = typeof esgRegistrosEmision.$inferInsert;
 
+/**
+ * Trazabilidad RCD (residuos de construcción y demolición) — obligación
+ * legal española distinta del cálculo de huella de carbono de arriba: cada
+ * salida de residuo de obra a un gestor autorizado se documenta con un
+ * vale/albarán de entrega a planta, identificando el residuo por su código
+ * LER (Lista Europea de Residuos) y si el destino es valorización o
+ * eliminación — el ratio entre ambos es el KPI que piden BREEAM/LEED y la
+ * normativa de RCD.
+ */
+export const rcdTreatmentEnum = pgEnum('rcd_treatment', [
+  'valorizacion',
+  'eliminacion',
+]);
+
+export const rcdVales = pgTable(
+  'rcd_vales',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    /** Código LER (p.ej. "17 01 01" hormigón, "17 04 05" hierro y acero). */
+    lerCode: text('ler_code').notNull(),
+    description: text('description').notNull(),
+    quantity: numeric('quantity', { precision: 12, scale: 3 }).notNull(),
+    /** "tn" (toneladas) o "m3"; el gestor certifica en la unidad que pesa/mide. */
+    unit: text('unit').notNull().default('tn'),
+    treatment: rcdTreatmentEnum('treatment').notNull().default('valorizacion'),
+    /** Gestor autorizado de residuos que recibe el vale — un `contact` más. */
+    managerContactId: uuid('manager_contact_id')
+      .notNull()
+      .references(() => contacts.id, { onDelete: 'restrict' }),
+    /** Número de vale/albarán tal como lo emite el gestor. */
+    ticketNumber: text('ticket_number').notNull(),
+    ticketDate: date('ticket_date').notNull(),
+    /** Foto o PDF del vale escaneado, si se sube (reutiliza `documents`). */
+    documentId: uuid('document_id').references(() => documents.id),
+    notes: text('notes'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    unique('rcd_vales_manager_ticket_unique').on(
+      t.managerContactId,
+      t.ticketNumber,
+    ),
+  ],
+);
+
+export type RcdVale = typeof rcdVales.$inferSelect;
+export type NewRcdVale = typeof rcdVales.$inferInsert;
+
 // ─── Mantenimiento preventivo e IoT de flota (Fase 14) ─────────────────────
 /**
  * Telemetría de maquinaria y alertas de avería, encima del maestro de
@@ -2393,3 +2470,301 @@ export type BimModel = typeof bimModels.$inferSelect;
 export type NewBimModel = typeof bimModels.$inferInsert;
 export type BimElementLink = typeof bimElementLinks.$inferSelect;
 export type NewBimElementLink = typeof bimElementLinks.$inferInsert;
+
+/* ═══════════════ Promoción inmobiliaria, comercialización y postventa ═══════════════
+ * Unidades en venta de una promoción (obra), su reserva/venta a un
+ * comprador (`contacts`, mismo maestro que proveedores/clientes — un
+ * comprador es un cliente más), el plan de cobros pactado, el acta de
+ * entrega de llaves y las incidencias de postventa/garantía una vez
+ * entregada. No reutiliza `payment_milestones` (que nace de facturas):
+ * el plan de cobros de un comprador puede pactarse antes de que exista
+ * factura alguna (reserva → contrato privado → aplazados → escritura).
+ */
+
+export const realEstateUnitKindEnum = pgEnum('real_estate_unit_kind', [
+  'vivienda',
+  'local',
+  'garaje',
+  'trastero',
+  'otro',
+]);
+
+export const realEstateUnitStatusEnum = pgEnum('real_estate_unit_status', [
+  'disponible',
+  'reservada',
+  'vendida',
+  'entregada',
+]);
+
+export const realEstateUnits = pgTable(
+  'real_estate_units',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    /** Identificador comercial dentro de la promoción, p.ej. "1ºA", "Local 3". */
+    code: text('code').notNull(),
+    kind: realEstateUnitKindEnum('kind').notNull().default('vivienda'),
+    surfaceM2: numeric('surface_m2', { precision: 8, scale: 2 }),
+    salePrice: numeric('sale_price', { precision: 14, scale: 2 }).notNull(),
+    status: realEstateUnitStatusEnum('status').notNull().default('disponible'),
+    notes: text('notes'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('real_estate_units_project_code_unique')
+      .on(t.projectId, t.code)
+      .where(sql`deleted_at IS NULL`),
+  ],
+);
+
+export const realEstateReservationStatusEnum = pgEnum(
+  'real_estate_reservation_status',
+  ['reservada', 'contrato_firmado', 'escriturada', 'cancelada'],
+);
+
+export const realEstateReservations = pgTable('real_estate_reservations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  unitId: uuid('unit_id')
+    .notNull()
+    .references(() => realEstateUnits.id, { onDelete: 'restrict' }),
+  buyerContactId: uuid('buyer_contact_id')
+    .notNull()
+    .references(() => contacts.id, { onDelete: 'restrict' }),
+  status: realEstateReservationStatusEnum('status')
+    .notNull()
+    .default('reservada'),
+  reservationDate: date('reservation_date').notNull(),
+  /** Precio pactado con este comprador; puede diferir del `salePrice` de tarifa de la unidad. */
+  agreedPrice: numeric('agreed_price', { precision: 14, scale: 2 }).notNull(),
+  signalAmount: numeric('signal_amount', { precision: 14, scale: 2 })
+    .notNull()
+    .default('0'),
+  contractDate: date('contract_date'),
+  deedDate: date('deed_date'),
+  notes: text('notes'),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const realEstatePaymentStatusEnum = pgEnum(
+  'real_estate_payment_status',
+  ['previsto', 'cobrado'],
+);
+
+/** Plan de cobros pactado con el comprador (señal, contrato, aplazados, escritura…). */
+export const realEstatePaymentMilestones = pgTable(
+  'real_estate_payment_milestones',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    reservationId: uuid('reservation_id')
+      .notNull()
+      .references(() => realEstateReservations.id, { onDelete: 'cascade' }),
+    concept: text('concept').notNull(),
+    dueDate: date('due_date').notNull(),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    status: realEstatePaymentStatusEnum('status').notNull().default('previsto'),
+    paidAt: date('paid_at'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+);
+
+/** Acta de entrega de llaves: una por reserva (índice único). */
+export const realEstateKeyHandovers = pgTable(
+  'real_estate_key_handovers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    reservationId: uuid('reservation_id')
+      .notNull()
+      .references(() => realEstateReservations.id, { onDelete: 'cascade' }),
+    handoverDate: date('handover_date').notNull(),
+    /** Acta firmada digitalizada, si se sube (reutiliza `documents`). */
+    documentId: uuid('document_id').references(() => documents.id),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('real_estate_key_handovers_reservation_unique').on(
+      t.reservationId,
+    ),
+  ],
+);
+
+export const postventaIncidentCategoryEnum = pgEnum(
+  'postventa_incident_category',
+  [
+    'albanileria',
+    'fontaneria',
+    'electricidad',
+    'carpinteria',
+    'climatizacion',
+    'otros',
+  ],
+);
+
+export const postventaIncidentStatusEnum = pgEnum('postventa_incident_status', [
+  'abierta',
+  'en_reparacion',
+  'cerrada',
+]);
+
+/** Incidencia de postventa/garantía sobre una unidad ya entregada. */
+export const postventaIncidents = pgTable('postventa_incidents', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  unitId: uuid('unit_id')
+    .notNull()
+    .references(() => realEstateUnits.id, { onDelete: 'restrict' }),
+  /** Propietario que reporta la incidencia; nulo si la reporta el propio equipo. */
+  reportedByContactId: uuid('reported_by_contact_id').references(
+    () => contacts.id,
+  ),
+  category: postventaIncidentCategoryEnum('category')
+    .notNull()
+    .default('otros'),
+  description: text('description').notNull(),
+  status: postventaIncidentStatusEnum('status').notNull().default('abierta'),
+  reportedAt: date('reported_at').notNull(),
+  resolvedAt: date('resolved_at'),
+  /** Fin del plazo de garantía aplicable a esta incidencia (LOE: 1/3/10 años según defecto). */
+  warrantyDeadline: date('warranty_deadline'),
+  notes: text('notes'),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type RealEstateUnit = typeof realEstateUnits.$inferSelect;
+export type NewRealEstateUnit = typeof realEstateUnits.$inferInsert;
+export type RealEstateReservation = typeof realEstateReservations.$inferSelect;
+export type NewRealEstateReservation =
+  typeof realEstateReservations.$inferInsert;
+export type RealEstatePaymentMilestone =
+  typeof realEstatePaymentMilestones.$inferSelect;
+export type NewRealEstatePaymentMilestone =
+  typeof realEstatePaymentMilestones.$inferInsert;
+export type RealEstateKeyHandover = typeof realEstateKeyHandovers.$inferSelect;
+export type NewRealEstateKeyHandover =
+  typeof realEstateKeyHandovers.$inferInsert;
+export type PostventaIncident = typeof postventaIncidents.$inferSelect;
+export type NewPostventaIncident = typeof postventaIncidents.$inferInsert;
+
+/* ═══════════════ App de obra offline-first: fichajes y checklist PRL ═══════════════
+ * Datos de campo que la PWA (`apps/web`) puede crear sin cobertura y
+ * sincronizar después en segundo plano (IndexedDB → cola → API). Cada fila
+ * lleva un `client_id` opcional (UUID generado en el dispositivo en el
+ * momento del fichaje/checklist, no al sincronizar) con índice único por
+ * empresa: si la sincronización reintenta un envío que en realidad ya
+ * llegó (app cerrada a media subida, reintento automático…), el segundo
+ * POST es un no-op en vez de duplicar el registro — la idempotencia vive
+ * en la clave, no en lógica de deduplicación a posteriori.
+ *
+ * Personal propio: mismo criterio que `partes_personal` (Fase 10) — no
+ * hay maestro de trabajadores todavía, se anota el nombre.
+ */
+
+export const fichajeTypeEnum = pgEnum('fichaje_type', ['entrada', 'salida']);
+
+export const fichajes = pgTable(
+  'fichajes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    workerName: text('worker_name').notNull(),
+    type: fichajeTypeEnum('type').notNull(),
+    /** Momento real del fichaje (lo fija el dispositivo) — puede ser anterior a `createdAt` si se sincronizó offline más tarde. */
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    /** Coordenadas del dispositivo al fichar, si el navegador las dio — justifica presencia en obra. */
+    latitude: numeric('latitude', { precision: 10, scale: 7 }),
+    longitude: numeric('longitude', { precision: 10, scale: 7 }),
+    clientId: text('client_id'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('fichajes_company_client_unique')
+      .on(t.companyId, t.clientId)
+      .where(sql`client_id IS NOT NULL`),
+  ],
+);
+
+export type Fichaje = typeof fichajes.$inferSelect;
+export type NewFichaje = typeof fichajes.$inferInsert;
+
+/** Checklist PRL diario antes de empezar a trabajar (lista fija de comprobaciones, ver `packages/shared/src/offline-field.ts`). */
+export const prlChecklists = pgTable(
+  'prl_checklists',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    workerName: text('worker_name').notNull(),
+    checkDate: date('check_date').notNull(),
+    /** `{ label: string, checked: boolean }[]`, una fila por ítem del checklist fijo. */
+    items: jsonb('items').notNull(),
+    allChecked: boolean('all_checked').notNull().default(false),
+    notes: text('notes'),
+    clientId: text('client_id'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('prl_checklists_company_client_unique')
+      .on(t.companyId, t.clientId)
+      .where(sql`client_id IS NOT NULL`),
+  ],
+);
+
+export type PrlChecklist = typeof prlChecklists.$inferSelect;
+export type NewPrlChecklist = typeof prlChecklists.$inferInsert;

@@ -15,6 +15,7 @@ import {
   CertificationLineDto,
   CertificationLineUpdateInput,
 } from '@erp/shared';
+import { ChangeOrdersService } from '../modules/change-orders/change-orders.service';
 import { DbService } from '../db/db.service';
 
 function toDto(row: CertificationLine): CertificationLineDto {
@@ -33,7 +34,10 @@ function toDto(row: CertificationLine): CertificationLineDto {
 
 @Injectable()
 export class CertificationLinesService {
-  constructor(private readonly dbs: DbService) {}
+  constructor(
+    private readonly dbs: DbService,
+    private readonly changeOrders: ChangeOrdersService,
+  ) {}
 
   private get db() {
     return this.dbs.db;
@@ -85,6 +89,10 @@ export class CertificationLinesService {
       throw new NotFoundException(
         `Partida ${input.budgetItemId} no encontrada`,
       );
+    // Bloqueo de ejecución/gasto: no se certifica una partida con un
+    // contradictorio/modificado todavía pendiente de la Dirección
+    // Facultativa (Fase 17, ver Módulo Contradictorios y Modificados).
+    await this.changeOrders.assertBudgetItemNotBlocked(input.budgetItemId);
 
     try {
       const [row] = await this.db

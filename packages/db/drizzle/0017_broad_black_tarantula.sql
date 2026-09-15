@@ -1,0 +1,2 @@
+CREATE TYPE "public"."payment_instrument" AS ENUM('transferencia', 'confirming', 'pagare', 'efectivo', 'domiciliacion');--> statement-breakpoint
+ALTER TABLE "payment_milestones" ADD COLUMN "payment_instrument" "payment_instrument" DEFAULT 'transferencia' NOT NULL;

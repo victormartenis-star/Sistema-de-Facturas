@@ -7,6 +7,7 @@ import { and, asc, eq, gte, inArray, isNull, lte, ne, SQL } from 'drizzle-orm';
 import {
   BankAccount,
   bankAccounts,
+  certifications,
   contacts,
   invoiceLines,
   invoices,
@@ -19,18 +20,22 @@ import {
   CashflowBucketDto,
   CashflowGrouping,
   CashflowReportDto,
+  CrossedMaturitiesReportDto,
   ILLIQUIDITY_HORIZONS,
   IlliquidityHorizonDto,
   IlliquidityProjectionDto,
+  MaturityGroupDto,
   MilestoneDirection,
   MilestoneDto,
   MilestoneStatus,
+  PaymentInstrument,
   addDays,
   addMonths,
   bankAccountCreateSchema,
   bankAccountUpdateSchema,
   hasAllowedProject,
   round2,
+  setPaymentInstrumentSchema,
   startOfMonth,
   startOfWeek,
   todayIso,
@@ -207,25 +212,114 @@ export class TreasuryService {
         milestone: paymentMilestones,
         invoiceNumber: invoices.invoiceNumber,
         contactName: contacts.legalName,
+        certificationId: certifications.id,
       })
       .from(paymentMilestones)
       .innerJoin(invoices, eq(paymentMilestones.invoiceId, invoices.id))
       .innerJoin(contacts, eq(invoices.contactId, contacts.id))
+      .leftJoin(
+        certifications,
+        and(
+          eq(certifications.invoiceId, invoices.id),
+          isNull(certifications.deletedAt),
+        ),
+      )
       .where(and(...filters))
       .orderBy(asc(paymentMilestones.dueDate));
 
-    return rows.map(({ milestone, invoiceNumber, contactName }) => ({
+    return rows.map(
+      ({ milestone, invoiceNumber, contactName, certificationId }) =>
+        this.milestoneToDto(
+          milestone,
+          invoiceNumber,
+          contactName,
+          certificationId !== null,
+        ),
+    );
+  }
+
+  private milestoneToDto(
+    milestone: typeof paymentMilestones.$inferSelect,
+    invoiceNumber: string,
+    contactName: string,
+    fromCertification: boolean,
+  ): MilestoneDto {
+    return {
       id: milestone.id,
       invoiceId: milestone.invoiceId,
       invoiceNumber,
       contactName,
       direction: milestone.direction as MilestoneDirection,
       kind: milestone.kind as MilestoneDto['kind'],
+      paymentInstrument: milestone.paymentInstrument as PaymentInstrument,
+      fromCertification,
       dueDate: milestone.dueDate,
       amount: Number(milestone.amount),
       status: milestone.status as MilestoneStatus,
       paidAt: milestone.paidAt,
-    }));
+    };
+  }
+
+  /** Marca a mano el instrumento de cobro/pago de un vencimiento (informativo, sin integración bancaria). */
+  async setPaymentInstrument(
+    id: string,
+    input: { paymentInstrument: PaymentInstrument },
+  ): Promise<void> {
+    const data = setPaymentInstrumentSchema.parse(input);
+    const [row] = await this.dbs.db
+      .update(paymentMilestones)
+      .set({ paymentInstrument: data.paymentInstrument, updatedAt: new Date() })
+      .where(eq(paymentMilestones.id, id))
+      .returning({ id: paymentMilestones.id });
+    if (!row) throw new NotFoundException('Vencimiento no encontrado');
+  }
+
+  /**
+   * Cruce de vencimientos: cobros por certificación de obra frente al resto,
+   * y pagos aplazados por confirming/pagaré frente al resto — la pregunta
+   * real de tesorería en construcción es si lo que se espera certificar
+   * llega a tiempo de cubrir lo ya comprometido en instrumentos aplazados.
+   */
+  async crossedMaturities(
+    from?: string,
+    to?: string,
+  ): Promise<CrossedMaturitiesReportDto> {
+    const start = from ?? todayIso();
+    const end = to ?? addDays(start, 90);
+    const items = await this.milestones({
+      status: 'previsto',
+      from: start,
+      to: end,
+    });
+
+    const group = (rows: MilestoneDto[]): MaturityGroupDto => ({
+      total: round2(rows.reduce((s, r) => s + r.amount, 0)),
+      items: rows,
+    });
+
+    const cobros = items.filter((m) => m.direction === 'cobro');
+    const pagos = items.filter((m) => m.direction === 'pago');
+
+    return {
+      from: start,
+      to: end,
+      cobrosPorCertificacion: group(cobros.filter((m) => m.fromCertification)),
+      cobrosOtros: group(cobros.filter((m) => !m.fromCertification)),
+      pagosConfirmingPagare: group(
+        pagos.filter(
+          (m) =>
+            m.paymentInstrument === 'confirming' ||
+            m.paymentInstrument === 'pagare',
+        ),
+      ),
+      pagosOtros: group(
+        pagos.filter(
+          (m) =>
+            m.paymentInstrument !== 'confirming' &&
+            m.paymentInstrument !== 'pagare',
+        ),
+      ),
+    };
   }
 
   /** Liquida o reabre un vencimiento y sincroniza el estado de la factura. */

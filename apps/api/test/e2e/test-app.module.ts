@@ -13,8 +13,11 @@ import { DocumentsModule } from '../../src/documents/documents.module';
 import { BimModule } from '../../src/modules/bim/bim.module';
 import { ContractAiModule } from '../../src/modules/contract-ai/contract-ai.module';
 import { InvestorsModule } from '../../src/modules/investors/investors.module';
+import { RealEstateModule } from '../../src/modules/real-estate/real-estate.module';
+import { OfflineFieldModule } from '../../src/modules/offline-field/offline-field.module';
 import { ComparativosModule } from '../../src/modules/comparativos/comparativos.module';
 import { EquiposModule } from '../../src/modules/equipos/equipos.module';
+import { EsgModule } from '../../src/modules/esg/esg.module';
 import { PartesDiariosModule } from '../../src/modules/partes-diarios/partes-diarios.module';
 import { OcrModule } from '../../src/ocr/ocr.module';
 import { PhasesModule } from '../../src/phases/phases.module';
@@ -63,13 +66,16 @@ import { UsersModule } from '../../src/users/users.module';
     ContactsModule,
     PhasesModule,
     BudgetsModule,
-    CertificationsModule, // importa InvoicesModule, que a su vez importa ComplianceModule y ProveedoresModule
+    CertificationsModule, // importa InvoicesModule (-> ComplianceModule, ProveedoresModule) y ChangeOrdersModule (bloqueo de certificación)
     ComparativosModule,
     PartesDiariosModule,
     EquiposModule,
+    EsgModule,
     BimModule,
     ContractAiModule,
     InvestorsModule,
+    RealEstateModule,
+    OfflineFieldModule,
     CostControlModule,
     PurchaseOrdersModule, // importa ProveedoresModule (guard PRL)
     DeliveryNotesModule,

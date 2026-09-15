@@ -309,6 +309,45 @@ export const IconPercent = (p: IconProps) => (
     <circle cx="17.5" cy="17.5" r="2.5" />
   </Base>
 );
+export const IconCamera = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" />
+    <circle cx="12" cy="14" r="3.5" />
+  </Base>
+);
+export const IconMapPin = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M12 21s7-6.5 7-12a7 7 0 1 0-14 0c0 5.5 7 12 7 12Z" />
+    <circle cx="12" cy="9" r="2.5" />
+  </Base>
+);
+export const IconClock = (p: IconProps) => (
+  <Base {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3 3" />
+  </Base>
+);
+export const IconLeaf = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M11 20A7 7 0 0 1 4 13c0-6 8-11 16-11 0 8-5 16-11 16-1.3 0-2.5-.3-3.5-.8" />
+    <path d="M4 21c4-4 9-6 15-16" />
+  </Base>
+);
+export const IconHome = (p: IconProps) => (
+  <Base {...p}>
+    <path d="m3 11 9-8 9 8" />
+    <path d="M5 10v10h14V10" />
+    <path d="M9 20v-6h6v6" />
+  </Base>
+);
+export const IconKey = (p: IconProps) => (
+  <Base {...p}>
+    <circle cx="8" cy="15" r="4" />
+    <path d="m10.5 12.5 8.5-8.5" />
+    <path d="m16 7 3 3" />
+    <path d="m14 9 2 2" />
+  </Base>
+);
 export const IconGavel = (p: IconProps) => (
   <Base {...p}>
     <path d="m14 13-8.5 8.5a1.5 1.5 0 0 1-2-2L12 11" />

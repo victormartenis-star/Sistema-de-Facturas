@@ -30,6 +30,35 @@ export const MILESTONE_STATUS_LABELS: Record<MilestoneStatus, string> = {
   pagado: 'Liquidado',
 };
 
+/**
+ * Instrumento de cobro/pago de un vencimiento — informativo, se marca a
+ * mano (el ERP no integra con el banco). Sirve para cruzar en tesorería
+ * los pagos aplazados vía confirming/pagaré frente al resto.
+ */
+export const PAYMENT_INSTRUMENTS = [
+  'transferencia',
+  'confirming',
+  'pagare',
+  'efectivo',
+  'domiciliacion',
+] as const;
+export type PaymentInstrument = (typeof PAYMENT_INSTRUMENTS)[number];
+
+export const PAYMENT_INSTRUMENT_LABELS: Record<PaymentInstrument, string> = {
+  transferencia: 'Transferencia',
+  confirming: 'Confirming',
+  pagare: 'Pagaré',
+  efectivo: 'Efectivo',
+  domiciliacion: 'Domiciliación',
+};
+
+export const setPaymentInstrumentSchema = z.object({
+  paymentInstrument: z.enum(PAYMENT_INSTRUMENTS),
+});
+export type SetPaymentInstrumentInput = z.input<
+  typeof setPaymentInstrumentSchema
+>;
+
 export interface MilestoneDto {
   id: string;
   invoiceId: string;
@@ -37,10 +66,34 @@ export interface MilestoneDto {
   contactName: string;
   direction: MilestoneDirection;
   kind: MilestoneKind;
+  paymentInstrument: PaymentInstrument;
+  /** true si el cobro proviene de una certificación de obra (`certifications.invoiceId`). */
+  fromCertification: boolean;
   dueDate: string;
   amount: number;
   status: MilestoneStatus;
   paidAt: string | null;
+}
+
+/**
+ * Cruce de vencimientos: cobros por certificación de obra frente a otros
+ * cobros, y pagos aplazados (confirming/pagaré) frente al resto — la
+ * pregunta real de tesorería en construcción es si lo que se espera cobrar
+ * de las certificaciones llega a tiempo de cubrir lo que ya está
+ * comprometido a pagar más adelante por confirming/pagaré.
+ */
+export interface MaturityGroupDto {
+  total: number;
+  items: MilestoneDto[];
+}
+
+export interface CrossedMaturitiesReportDto {
+  from: string;
+  to: string;
+  cobrosPorCertificacion: MaturityGroupDto;
+  cobrosOtros: MaturityGroupDto;
+  pagosConfirmingPagare: MaturityGroupDto;
+  pagosOtros: MaturityGroupDto;
 }
 
 export const CASHFLOW_GROUPINGS = ['semana', 'mes'] as const;

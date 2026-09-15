@@ -20,6 +20,7 @@ import {
   changeOrderResolverSchema,
   changeOrderUpdateSchema,
 } from '@erp/shared';
+import { Roles } from '../../auth/roles';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { ChangeOrdersService } from './change-orders.service';
 
@@ -41,6 +42,7 @@ export class ChangeOrdersController {
   }
 
   @Post()
+  @Roles('admin', 'gerente', 'administracion', 'obra')
   create(
     @Body(new ZodValidationPipe(changeOrderCreateSchema))
     body: ChangeOrderCreateInput,
@@ -49,6 +51,7 @@ export class ChangeOrdersController {
   }
 
   @Patch(':id')
+  @Roles('admin', 'gerente', 'administracion', 'obra')
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(changeOrderUpdateSchema))
@@ -58,6 +61,7 @@ export class ChangeOrdersController {
   }
 
   @Delete(':id')
+  @Roles('admin', 'gerente', 'administracion', 'obra')
   @HttpCode(204)
   async remove(@Param('id', ParseUUIDPipe) id: string) {
     await this.service.remove(id);
@@ -65,6 +69,7 @@ export class ChangeOrdersController {
 
   /** Envía el borrador a la Dirección Facultativa. */
   @Post(':id/enviar')
+  @Roles('admin', 'gerente', 'administracion', 'obra')
   enviar(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(changeOrderEnviarSchema))
@@ -73,8 +78,9 @@ export class ChangeOrdersController {
     return this.service.enviar(id, body);
   }
 
-  /** Resolución de la Dirección Facultativa: aprueba o rechaza. */
+  /** Resolución de la Dirección Facultativa: aprueba o rechaza — la registra el staff interno, no la DF directamente. */
   @Post(':id/resolver')
+  @Roles('admin', 'gerente', 'administracion')
   resolver(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(changeOrderResolverSchema))

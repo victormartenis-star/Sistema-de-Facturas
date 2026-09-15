@@ -120,6 +120,34 @@
       "when": 1789464714379,
       "tag": "0016_violet_pepper_potts",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1789468837385,
+      "tag": "0017_broad_black_tarantula",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1789469455013,
+      "tag": "0018_funny_shen",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789470108001,
+      "tag": "0019_closed_lockjaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1789470819280,
+      "tag": "0020_chief_ender_wiggin",
+      "breakpoints": true
     }
   ]
 }

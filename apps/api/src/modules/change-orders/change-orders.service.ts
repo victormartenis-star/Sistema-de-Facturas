@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import {
   ChangeOrder,
   ChangeOrderLinea,
@@ -82,6 +82,37 @@ export class ChangeOrdersService {
     private readonly dbs: DbService,
     private readonly audit: AuditService,
   ) {}
+
+  /**
+   * Bloqueo de ejecución/gasto: una partida con un contradictorio/modificado
+   * todavía sin resolver por la Dirección Facultativa (`borrador` o
+   * `enviado_df`) no se puede certificar — llamado desde
+   * `CertificationLinesService.create()`. Una vez `aprobado`/`rechazado`/
+   * `cancelado`, deja de bloquear: la resolución (en cualquier sentido) es
+   * lo que libera la partida, no el simple paso del tiempo.
+   */
+  async assertBudgetItemNotBlocked(budgetItemId: string): Promise<void> {
+    const [blocking] = await this.dbs.db
+      .select({ numero: changeOrders.numero, estado: changeOrders.estado })
+      .from(changeOrderLineas)
+      .innerJoin(
+        changeOrders,
+        eq(changeOrderLineas.changeOrderId, changeOrders.id),
+      )
+      .where(
+        and(
+          eq(changeOrderLineas.budgetItemId, budgetItemId),
+          isNull(changeOrders.deletedAt),
+          inArray(changeOrders.estado, ['borrador', 'enviado_df']),
+        ),
+      )
+      .limit(1);
+    if (blocking) {
+      throw new ConflictException(
+        `No se puede certificar: la partida tiene el contradictorio/modificado ${blocking.numero} pendiente de resolución de la Dirección Facultativa`,
+      );
+    }
+  }
 
   async list(filter: {
     projectId?: string;

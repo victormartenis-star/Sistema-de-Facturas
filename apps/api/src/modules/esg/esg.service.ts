@@ -1,10 +1,17 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { and, asc, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
 import {
   EsgFactorEmision,
   EsgRegistroEmision,
+  RcdVale,
+  contacts,
   esgFactoresEmision,
   esgRegistrosEmision,
+  rcdVales,
 } from '@erp/db';
 import {
   EsgFactorCreateInput,
@@ -14,12 +21,19 @@ import {
   EsgRegistroCreateInput,
   EsgRegistroEmisionDto,
   EsgRegistroUpdateInput,
+  RcdInformeDto,
+  RcdValeCreateInput,
+  RcdValeDto,
+  RcdValeUpdateInput,
   computeEmisionesKgCo2e,
   esgFactorCreateSchema,
   esgFactorUpdateSchema,
   esgRegistroCreateSchema,
   esgRegistroUpdateSchema,
+  rcdValeCreateSchema,
+  rcdValeUpdateSchema,
   summarizeEmisiones,
+  summarizeRcd,
 } from '@erp/shared';
 import { AuditService } from '../../audit/audit.service';
 import { DbService } from '../../db/db.service';
@@ -58,6 +72,25 @@ function registroToDto(
     emisionesKgCo2e: Number(row.emisionesKgCo2e),
     documentId: row.documentId,
     notas: row.notas,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function valeToDto(row: RcdVale, managerName: string): RcdValeDto {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    lerCode: row.lerCode,
+    description: row.description,
+    quantity: Number(row.quantity),
+    unit: row.unit as RcdValeDto['unit'],
+    treatment: row.treatment,
+    managerContactId: row.managerContactId,
+    managerName,
+    ticketNumber: row.ticketNumber,
+    ticketDate: row.ticketDate,
+    documentId: row.documentId,
+    notes: row.notes,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -270,7 +303,183 @@ export class EsgService {
     };
   }
 
+  /* ────────────────────── vales RCD ────────────────────── */
+
+  async listVales(filter: {
+    projectId?: string;
+    desde?: string;
+    hasta?: string;
+  }): Promise<RcdValeDto[]> {
+    const companyId = await this.dbs.getCompanyId();
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (allowed !== null) {
+      if (allowed.length === 0) return [];
+      if (filter.projectId && !allowed.includes(filter.projectId)) return [];
+    }
+
+    const conditions = [
+      eq(rcdVales.companyId, companyId),
+      isNull(rcdVales.deletedAt),
+    ];
+    if (filter.projectId)
+      conditions.push(eq(rcdVales.projectId, filter.projectId));
+    if (filter.desde) conditions.push(gte(rcdVales.ticketDate, filter.desde));
+    if (filter.hasta) conditions.push(lte(rcdVales.ticketDate, filter.hasta));
+
+    const rows = await this.dbs.db
+      .select({ vale: rcdVales, managerName: contacts.legalName })
+      .from(rcdVales)
+      .innerJoin(contacts, eq(rcdVales.managerContactId, contacts.id))
+      .where(and(...conditions))
+      .orderBy(asc(rcdVales.ticketDate));
+
+    const visible =
+      allowed === null
+        ? rows
+        : rows.filter((r) => allowed.includes(r.vale.projectId));
+    return visible.map((r) => valeToDto(r.vale, r.managerName));
+  }
+
+  async createVale(input: RcdValeCreateInput): Promise<RcdValeDto> {
+    const companyId = await this.dbs.getCompanyId();
+    const data = rcdValeCreateSchema.parse(input);
+    await this.assertProjectAccessible(data.projectId);
+    const manager = await this.findManager(data.managerContactId);
+
+    let row: RcdVale;
+    try {
+      [row] = await this.dbs.db
+        .insert(rcdVales)
+        .values({
+          companyId,
+          projectId: data.projectId,
+          lerCode: data.lerCode,
+          description: data.description,
+          quantity: data.quantity.toFixed(3),
+          unit: data.unit,
+          treatment: data.treatment,
+          managerContactId: data.managerContactId,
+          ticketNumber: data.ticketNumber,
+          ticketDate: data.ticketDate,
+          documentId: data.documentId ?? null,
+          notes: data.notes ?? null,
+        })
+        .returning();
+    } catch (err) {
+      this.rethrowDuplicateVale(err, data.ticketNumber);
+    }
+    void this.audit.log({
+      entityType: 'rcd_vale',
+      entityId: row.id,
+      action: 'create',
+      newData: row,
+    });
+    return valeToDto(row, manager.legalName);
+  }
+
+  async updateVale(id: string, input: RcdValeUpdateInput): Promise<RcdValeDto> {
+    const existing = await this.findVale(id);
+    const data = rcdValeUpdateSchema.parse(input);
+    const manager = await this.findManager(existing.managerContactId);
+
+    const [row] = await this.dbs.db
+      .update(rcdVales)
+      .set({
+        ...(data.lerCode !== undefined && { lerCode: data.lerCode }),
+        ...(data.description !== undefined && {
+          description: data.description,
+        }),
+        ...(data.quantity !== undefined && {
+          quantity: data.quantity.toFixed(3),
+        }),
+        ...(data.unit !== undefined && { unit: data.unit }),
+        ...(data.treatment !== undefined && { treatment: data.treatment }),
+        ...(data.ticketNumber !== undefined && {
+          ticketNumber: data.ticketNumber,
+        }),
+        ...(data.ticketDate !== undefined && { ticketDate: data.ticketDate }),
+        ...(data.documentId !== undefined && {
+          documentId: data.documentId ?? null,
+        }),
+        ...(data.notes !== undefined && { notes: data.notes ?? null }),
+        updatedAt: new Date(),
+      })
+      .where(eq(rcdVales.id, id))
+      .returning();
+    return valeToDto(row, manager.legalName);
+  }
+
+  async removeVale(id: string): Promise<void> {
+    await this.findVale(id);
+    await this.dbs.db
+      .update(rcdVales)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(eq(rcdVales.id, id));
+  }
+
+  /** Informe RCD: totales por LER y % de valorización, para BREEAM/LEED. */
+  async informeRcd(
+    projectId: string,
+    desde?: string,
+    hasta?: string,
+  ): Promise<RcdInformeDto> {
+    await this.assertProjectAccessible(projectId);
+    const vales = await this.listVales({ projectId, desde, hasta });
+    const { totalToneladas, totalM3, valorizacionPct, porLer } =
+      summarizeRcd(vales);
+    return {
+      projectId,
+      desde: desde ?? null,
+      hasta: hasta ?? null,
+      totalToneladas,
+      totalM3,
+      valorizacionPct,
+      porLer,
+    };
+  }
+
   /* ────────────────────── privados ────────────────────── */
+
+  private async findVale(id: string): Promise<RcdVale> {
+    const companyId = await this.dbs.getCompanyId();
+    const [row] = await this.dbs.db
+      .select()
+      .from(rcdVales)
+      .where(
+        and(
+          eq(rcdVales.id, id),
+          eq(rcdVales.companyId, companyId),
+          isNull(rcdVales.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!row) throw new NotFoundException('Vale RCD no encontrado');
+    return row;
+  }
+
+  private async findManager(id: string) {
+    const [row] = await this.dbs.db
+      .select({ id: contacts.id, legalName: contacts.legalName })
+      .from(contacts)
+      .where(and(eq(contacts.id, id), isNull(contacts.deletedAt)))
+      .limit(1);
+    if (!row) throw new NotFoundException('Gestor no encontrado');
+    return row;
+  }
+
+  /** El índice único es `(managerContactId, ticketNumber)`: cada gestor numera sus vales por su cuenta. */
+  private rethrowDuplicateVale(err: unknown, ticketNumber: string): never {
+    if (
+      err instanceof Error &&
+      'code' in err &&
+      (err as { code?: string }).code === '23505'
+    ) {
+      throw new ConflictException(
+        `Ya existe un vale con el número "${ticketNumber}" para ese gestor`,
+      );
+    }
+    throw err;
+  }
 
   private async attachFactores(
     rows: EsgRegistroEmision[],

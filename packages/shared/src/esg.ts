@@ -157,3 +157,145 @@ export function summarizeEmisiones(
   );
   return { totalKgCo2e, porCategoria };
 }
+
+/* ════════════════ Trazabilidad RCD (residuos de construcción y demolición) ════════════════
+ * Obligación legal distinta del cálculo de huella de carbono de arriba:
+ * cada salida de residuo a un gestor autorizado se documenta con un vale
+ * de entrega a planta, identificado por su código LER.
+ */
+
+export const RCD_TREATMENTS = ['valorizacion', 'eliminacion'] as const;
+export type RcdTreatment = (typeof RCD_TREATMENTS)[number];
+
+export const RCD_TREATMENT_LABELS: Record<RcdTreatment, string> = {
+  valorizacion: 'Valorización',
+  eliminacion: 'Eliminación',
+};
+
+export const RCD_UNITS = ['tn', 'm3'] as const;
+export type RcdUnit = (typeof RCD_UNITS)[number];
+
+export const rcdValeCreateSchema = z.object({
+  projectId: z.string().uuid('La obra es obligatoria'),
+  lerCode: z
+    .string()
+    .trim()
+    .regex(/^\d{2} ?\d{2} ?\d{2}\*?$/, 'Formato LER esperado: "17 01 01"')
+    .max(15),
+  description: z
+    .string()
+    .trim()
+    .min(1, 'La descripción es obligatoria')
+    .max(300),
+  quantity: z
+    .number({ invalid_type_error: 'Debe ser un número' })
+    .positive('La cantidad debe ser mayor que cero')
+    .max(999_999),
+  unit: z.enum(RCD_UNITS).default('tn'),
+  treatment: z.enum(RCD_TREATMENTS).default('valorizacion'),
+  managerContactId: z.string().uuid('El gestor es obligatorio'),
+  ticketNumber: z
+    .string()
+    .trim()
+    .min(1, 'El número de vale es obligatorio')
+    .max(60),
+  ticketDate: isoDate,
+  documentId: z.string().uuid('Documento no válido').nullish(),
+  notes: z.string().trim().max(1000).nullish(),
+});
+
+export const rcdValeUpdateSchema = rcdValeCreateSchema
+  .omit({ projectId: true, managerContactId: true })
+  .partial();
+
+export type RcdValeCreateInput = z.input<typeof rcdValeCreateSchema>;
+export type RcdValeUpdateInput = z.input<typeof rcdValeUpdateSchema>;
+
+export interface RcdValeDto {
+  id: string;
+  projectId: string;
+  lerCode: string;
+  description: string;
+  quantity: number;
+  unit: RcdUnit;
+  treatment: RcdTreatment;
+  managerContactId: string;
+  managerName: string;
+  ticketNumber: string;
+  ticketDate: string;
+  documentId: string | null;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface RcdLerSummaryDto {
+  lerCode: string;
+  description: string;
+  quantity: number;
+  unit: RcdUnit;
+}
+
+export interface RcdInformeDto {
+  projectId: string;
+  desde: string | null;
+  hasta: string | null;
+  /** Solo suma cantidades en toneladas (`unit = 'tn'`) — m³ se informa aparte, no son sumables. */
+  totalToneladas: number;
+  totalM3: number;
+  /** % en toneladas destinado a valorización sobre el total en toneladas. */
+  valorizacionPct: number | null;
+  porLer: RcdLerSummaryDto[];
+}
+
+/* ────────────────────── cálculo puro ────────────────────── */
+
+/** Agrega vales RCD: totales por unidad, % valorizado (solo sobre toneladas) y desglose por código LER. */
+export function summarizeRcd(
+  vales: {
+    lerCode: string;
+    description: string;
+    quantity: number;
+    unit: RcdUnit;
+    treatment: RcdTreatment;
+  }[],
+): {
+  totalToneladas: number;
+  totalM3: number;
+  valorizacionPct: number | null;
+  porLer: RcdLerSummaryDto[];
+} {
+  const tn = vales.filter((v) => v.unit === 'tn');
+  const m3 = vales.filter((v) => v.unit === 'm3');
+  const totalToneladas = round2(tn.reduce((s, v) => s + v.quantity, 0));
+  const totalM3 = round2(m3.reduce((s, v) => s + v.quantity, 0));
+  const valorizadoTn = round2(
+    tn
+      .filter((v) => v.treatment === 'valorizacion')
+      .reduce((s, v) => s + v.quantity, 0),
+  );
+  const valorizacionPct =
+    totalToneladas > 0
+      ? Math.round((valorizadoTn / totalToneladas) * 1000) / 10
+      : null;
+
+  const porLerMap = new Map<string, RcdLerSummaryDto>();
+  for (const v of vales) {
+    const key = `${v.lerCode}__${v.unit}`;
+    const existing = porLerMap.get(key);
+    if (existing) {
+      existing.quantity = round2(existing.quantity + v.quantity);
+    } else {
+      porLerMap.set(key, {
+        lerCode: v.lerCode,
+        description: v.description,
+        quantity: v.quantity,
+        unit: v.unit,
+      });
+    }
+  }
+  const porLer = [...porLerMap.values()].sort(
+    (a, b) => b.quantity - a.quantity,
+  );
+
+  return { totalToneladas, totalM3, valorizacionPct, porLer };
+}

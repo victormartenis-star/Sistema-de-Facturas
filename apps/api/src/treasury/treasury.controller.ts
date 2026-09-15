@@ -18,8 +18,10 @@ import {
   MILESTONE_STATUSES,
   MilestoneDirection,
   MilestoneStatus,
+  SetPaymentInstrumentInput,
   bankAccountCreateSchema,
   bankAccountUpdateSchema,
+  setPaymentInstrumentSchema,
 } from '@erp/shared';
 import { Roles } from '../auth/roles';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
@@ -61,6 +63,27 @@ export class TreasuryController {
   @HttpCode(204)
   async reopen(@Param('id', ParseUUIDPipe) id: string) {
     await this.service.setStatus(id, 'previsto');
+  }
+
+  /** Marca a mano el instrumento de cobro/pago (transferencia/confirming/pagaré…) de un vencimiento. */
+  @Patch('milestones/:id/instrumento')
+  @Roles('admin', 'gerente', 'administracion')
+  @HttpCode(204)
+  async setPaymentInstrument(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(setPaymentInstrumentSchema))
+    body: SetPaymentInstrumentInput,
+  ) {
+    await this.service.setPaymentInstrument(id, body);
+  }
+
+  /** Cruce de vencimientos: cobros por certificación vs. otros, pagos por confirming/pagaré vs. otros. */
+  @Get('vencimientos-cruzados')
+  crossedMaturities(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.service.crossedMaturities(
+      ISO_DATE.test(from ?? '') ? from : undefined,
+      ISO_DATE.test(to ?? '') ? to : undefined,
+    );
   }
 
   /** Previsión de flujo de caja agrupada por semanas o meses. */

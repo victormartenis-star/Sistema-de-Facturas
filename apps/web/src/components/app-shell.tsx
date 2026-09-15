@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { Sidebar } from '@/components/sidebar';
 import { Copiloto } from '@/components/copiloto';
+import { OfflineSyncIndicator } from '@/components/offline-sync-indicator';
 import { useAuth } from '@/lib/auth';
 
 const AUTH_PATHS = ['/login', '/registro'];
@@ -35,6 +36,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <main className="mx-auto max-w-6xl px-4 py-8 lg:px-8">{children}</main>
       </div>
       <Copiloto />
+      <OfflineSyncIndicator />
     </>
   );
 }

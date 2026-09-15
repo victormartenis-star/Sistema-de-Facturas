@@ -10,7 +10,49 @@ import type {
   BankAccountCreateInput,
   BankAccountDto,
   BankAccountUpdateInput,
+  CrossedMaturitiesReportDto,
   IlliquidityProjectionDto,
+  SetPaymentInstrumentInput,
+} from '@erp/shared';
+import type {
+  PostventaIncidentCreateInput,
+  PostventaIncidentDto,
+  PostventaIncidentUpdateStatusInput,
+  RealEstateKeyHandoverCreateInput,
+  RealEstateKeyHandoverDto,
+  RealEstatePaymentMilestoneCreateInput,
+  RealEstatePaymentMilestoneDto,
+  RealEstateReservationCancelInput,
+  RealEstateReservationContractInput,
+  RealEstateReservationCreateInput,
+  RealEstateReservationDeedInput,
+  RealEstateReservationDto,
+  RealEstateUnitCreateInput,
+  RealEstateUnitDto,
+  RealEstateUnitUpdateInput,
+} from '@erp/shared';
+import type {
+  EsgFactorCreateInput,
+  EsgFactorDto,
+  EsgInformeDto,
+  EsgRegistroCreateInput,
+  EsgRegistroEmisionDto,
+  RcdInformeDto,
+  RcdValeCreateInput,
+  RcdValeDto,
+} from '@erp/shared';
+import type {
+  FichajeCreateInput,
+  FichajeDto,
+  PrlChecklistCreateInput,
+  PrlChecklistDto,
+} from '@erp/shared';
+import type {
+  ChangeOrderCreateInput,
+  ChangeOrderDto,
+  ChangeOrderEnviarInput,
+  ChangeOrderResolverInput,
+  ChangeOrderUpdateInput,
 } from '@erp/shared';
 import type {
   DistributeDividendInput,
@@ -940,6 +982,20 @@ export const treasuryApi = {
     request<void>(`/treasury/milestones/${id}/pagar`, { method: 'POST' }),
   reopen: (id: string) =>
     request<void>(`/treasury/milestones/${id}/reabrir`, { method: 'POST' }),
+  setPaymentInstrument: (id: string, input: SetPaymentInstrumentInput) =>
+    request<void>(`/treasury/milestones/${id}/instrumento`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  crossedMaturities: (from?: string, to?: string) => {
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    const qs = params.toString();
+    return request<CrossedMaturitiesReportDto>(
+      `/treasury/vencimientos-cruzados${qs ? `?${qs}` : ''}`,
+    );
+  },
   cashflow: (groupBy: CashflowGrouping, from?: string, to?: string) => {
     const params = new URLSearchParams({ groupBy });
     if (from) params.set('from', from);
@@ -961,6 +1017,202 @@ export const treasuryApi = {
     }),
   updateBankAccount: (id: string, input: BankAccountUpdateInput) =>
     request<BankAccountDto>(`/treasury/cuentas/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+};
+
+export const changeOrdersApi = {
+  list: (filter: { projectId?: string; estado?: string }) => {
+    const params = new URLSearchParams();
+    if (filter.projectId) params.set('projectId', filter.projectId);
+    if (filter.estado) params.set('estado', filter.estado);
+    const qs = params.toString();
+    return request<ChangeOrderDto[]>(`/change-orders${qs ? `?${qs}` : ''}`);
+  },
+  get: (id: string) => request<ChangeOrderDto>(`/change-orders/${id}`),
+  create: (input: ChangeOrderCreateInput) =>
+    request<ChangeOrderDto>('/change-orders', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  update: (id: string, input: ChangeOrderUpdateInput) =>
+    request<ChangeOrderDto>(`/change-orders/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  remove: (id: string) =>
+    request<void>(`/change-orders/${id}`, { method: 'DELETE' }),
+  enviar: (id: string, input: ChangeOrderEnviarInput) =>
+    request<ChangeOrderDto>(`/change-orders/${id}/enviar`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  resolver: (id: string, input: ChangeOrderResolverInput) =>
+    request<ChangeOrderDto>(`/change-orders/${id}/resolver`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+};
+
+export const offlineFieldApi = {
+  listFichajes: (projectId?: string) =>
+    request<FichajeDto[]>(
+      `/fichajes${projectId ? `?projectId=${projectId}` : ''}`,
+    ),
+  createFichaje: (input: FichajeCreateInput) =>
+    request<FichajeDto>('/fichajes', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  listChecklists: (projectId?: string) =>
+    request<PrlChecklistDto[]>(
+      `/checklist-prl${projectId ? `?projectId=${projectId}` : ''}`,
+    ),
+  createChecklist: (input: PrlChecklistCreateInput) =>
+    request<PrlChecklistDto>('/checklist-prl', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+};
+
+export const esgApi = {
+  listFactores: (activo?: boolean) =>
+    request<EsgFactorDto[]>(
+      `/esg/factores${activo !== undefined ? `?activo=${activo}` : ''}`,
+    ),
+  createFactor: (input: EsgFactorCreateInput) =>
+    request<EsgFactorDto>('/esg/factores', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  listRegistros: (projectId?: string) =>
+    request<EsgRegistroEmisionDto[]>(
+      `/esg/registros${projectId ? `?projectId=${projectId}` : ''}`,
+    ),
+  createRegistro: (input: EsgRegistroCreateInput) =>
+    request<EsgRegistroEmisionDto>('/esg/registros', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  removeRegistro: (id: string) =>
+    request<void>(`/esg/registros/${id}`, { method: 'DELETE' }),
+  informe: (projectId: string) =>
+    request<EsgInformeDto>(`/esg/informe?projectId=${projectId}`),
+  listVales: (projectId?: string) =>
+    request<RcdValeDto[]>(
+      `/esg/rcd/vales${projectId ? `?projectId=${projectId}` : ''}`,
+    ),
+  createVale: (input: RcdValeCreateInput) =>
+    request<RcdValeDto>('/esg/rcd/vales', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  removeVale: (id: string) =>
+    request<void>(`/esg/rcd/vales/${id}`, { method: 'DELETE' }),
+  informeRcd: (projectId: string) =>
+    request<RcdInformeDto>(`/esg/rcd/informe?projectId=${projectId}`),
+};
+
+export const realEstateApi = {
+  listUnits: (projectId?: string) =>
+    request<RealEstateUnitDto[]>(
+      `/real-estate/units${projectId ? `?projectId=${projectId}` : ''}`,
+    ),
+  getUnit: (id: string) =>
+    request<RealEstateUnitDto>(`/real-estate/units/${id}`),
+  createUnit: (input: RealEstateUnitCreateInput) =>
+    request<RealEstateUnitDto>('/real-estate/units', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateUnit: (id: string, input: RealEstateUnitUpdateInput) =>
+    request<RealEstateUnitDto>(`/real-estate/units/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  removeUnit: (id: string) =>
+    request<void>(`/real-estate/units/${id}`, { method: 'DELETE' }),
+  commercialization: (projectId: string) =>
+    request<{
+      projectId: string;
+      vendidasPct: number;
+      entregadasPct: number;
+      total: number;
+    }>(`/real-estate/comercializacion?projectId=${projectId}`),
+  listReservations: (unitId?: string) =>
+    request<RealEstateReservationDto[]>(
+      `/real-estate/reservations${unitId ? `?unitId=${unitId}` : ''}`,
+    ),
+  createReservation: (input: RealEstateReservationCreateInput) =>
+    request<RealEstateReservationDto>('/real-estate/reservations', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  cancelReservation: (id: string, input: RealEstateReservationCancelInput) =>
+    request<RealEstateReservationDto>(
+      `/real-estate/reservations/${id}/cancelar`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    ),
+  signContract: (id: string, input: RealEstateReservationContractInput) =>
+    request<RealEstateReservationDto>(
+      `/real-estate/reservations/${id}/contrato`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    ),
+  signDeed: (id: string, input: RealEstateReservationDeedInput) =>
+    request<RealEstateReservationDto>(
+      `/real-estate/reservations/${id}/escritura`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    ),
+  listPayments: (reservationId: string) =>
+    request<RealEstatePaymentMilestoneDto[]>(
+      `/real-estate/reservations/${reservationId}/cobros`,
+    ),
+  createPayment: (
+    reservationId: string,
+    input: RealEstatePaymentMilestoneCreateInput,
+  ) =>
+    request<RealEstatePaymentMilestoneDto>(
+      `/real-estate/reservations/${reservationId}/cobros`,
+      { method: 'POST', body: JSON.stringify(input) },
+    ),
+  payPayment: (id: string) =>
+    request<void>(`/real-estate/cobros/${id}/cobrar`, { method: 'POST' }),
+  getKeyHandover: (reservationId: string) =>
+    request<RealEstateKeyHandoverDto | null>(
+      `/real-estate/reservations/${reservationId}/entrega-llaves`,
+    ),
+  createKeyHandover: (
+    reservationId: string,
+    input: RealEstateKeyHandoverCreateInput,
+  ) =>
+    request<RealEstateKeyHandoverDto>(
+      `/real-estate/reservations/${reservationId}/entrega-llaves`,
+      { method: 'POST', body: JSON.stringify(input) },
+    ),
+  listIncidents: (unitId?: string) =>
+    request<PostventaIncidentDto[]>(
+      `/real-estate/postventa${unitId ? `?unitId=${unitId}` : ''}`,
+    ),
+  createIncident: (input: PostventaIncidentCreateInput) =>
+    request<PostventaIncidentDto>('/real-estate/postventa', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateIncidentStatus: (
+    id: string,
+    input: PostventaIncidentUpdateStatusInput,
+  ) =>
+    request<PostventaIncidentDto>(`/real-estate/postventa/${id}/estado`, {
       method: 'PATCH',
       body: JSON.stringify(input),
     }),
