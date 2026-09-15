@@ -7,9 +7,14 @@
  * perezosa en su primera llamada, así que basta con fijarla aquí antes de
  * que ningún test haga una consulta real.
  */
+import { resolve } from 'node:path';
 import { TEST_DATABASE_URL, TEST_JWT_SECRET } from './test-db';
 
 process.env.DATABASE_URL = TEST_DATABASE_URL;
 process.env.JWT_SECRET = TEST_JWT_SECRET;
 process.env.WEB_ORIGIN = 'http://localhost:3000';
 process.env.NODE_ENV = 'test';
+// `StorageService` (documents) escribe en disco de verdad — un subdirectorio
+// propio bajo `storage/` (ya en `.gitignore`) para que `documents.e2e-spec.ts`
+// no mezcle sus ficheros con los del `storage/` de desarrollo.
+process.env.STORAGE_DIR = resolve(__dirname, '../../../../storage/test');

@@ -30,8 +30,16 @@ import { PermisosModule } from './modules/permisos/permisos.module';
 import { ContratosObraModule } from './modules/contratos-obra/contratos-obra.module';
 import { ActasRecepcionModule } from './modules/actas-recepcion/actas-recepcion.module';
 import { IncidenciasPRLModule } from './modules/incidencias-prl/incidencias-prl.module';
+import { EquiposModule } from './modules/equipos/equipos.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { TreasuryModule } from './treasury/treasury.module';
+import { EsgModule } from './modules/esg/esg.module';
+import { FleetIotModule } from './modules/fleet-iot/fleet-iot.module';
+import { ChangeOrdersModule } from './modules/change-orders/change-orders.module';
+import { ESignatureModule } from './modules/e-signature/e-signature.module';
+import { BimModule } from './modules/bim/bim.module';
+import { ContractAiModule } from './modules/contract-ai/contract-ai.module';
+import { InvestorsModule } from './modules/investors/investors.module';
 
 @Module({
   imports: [
@@ -71,6 +79,14 @@ import { TreasuryModule } from './treasury/treasury.module';
     ContratosObraModule,
     ActasRecepcionModule,
     IncidenciasPRLModule,
+    EquiposModule,
+    EsgModule,
+    FleetIotModule,
+    ChangeOrdersModule,
+    ESignatureModule,
+    BimModule,
+    ContractAiModule,
+    InvestorsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

@@ -226,3 +226,87 @@ export function computeCertification(
     retentionAmount: round2((periodAmount * retentionPct) / 100),
   };
 }
+
+/* ──────────────────────── inversores: TIR / VAN ──────────────────────── */
+
+export interface CashflowPoint {
+  /** Fecha ISO del movimiento. */
+  date: string;
+  /** Importe con signo: negativo = sale dinero del inversor (aportación), positivo = entra (reparto/venta/valoración). */
+  amount: number;
+}
+
+/**
+ * VAN (valor actual neto) de una serie de flujos con fecha, descontados a
+ * `rate` anual y referidos a la fecha del **primer** flujo (no necesariamente
+ * hoy: quien llama decide qué punto es "el presente" ordenando la serie).
+ * Es la misma función que `computeIrr` busca poner a cero.
+ */
+export function computeNpv(rate: number, flows: CashflowPoint[]): number {
+  if (flows.length === 0) return 0;
+  const t0 = flows[0].date;
+  return round2(
+    flows.reduce((sum, f) => {
+      const years = daysBetween(t0, f.date) / 365;
+      return sum + f.amount / Math.pow(1 + rate, years);
+    }, 0),
+  );
+}
+
+/**
+ * TIR (tasa interna de retorno) anualizada de una serie de flujos con fecha
+ * real — método XIRR, no el TIR periódico de Excel que asume periodos
+ * regulares (aquí las aportaciones y repartos caen en fechas cualquiera).
+ *
+ * Newton-Raphson desde `guess`, con bisección como red de seguridad cuando
+ * no converge (pasa con series de importes muy desiguales). Devuelve `null`
+ * si no se puede calcular: menos de 2 flujos, todos del mismo signo (no hay
+ * retorno que buscar), o no converge en el rango [-99 %, 1000 %].
+ */
+export function computeIrr(flows: CashflowPoint[], guess = 0.1): number | null {
+  if (flows.length < 2) return null;
+  const hasPositive = flows.some((f) => f.amount > 0);
+  const hasNegative = flows.some((f) => f.amount < 0);
+  if (!hasPositive || !hasNegative) return null;
+
+  const t0 = flows[0].date;
+  const npv = (rate: number) => computeNpv(rate, flows);
+  const derivative = (rate: number) =>
+    flows.reduce((sum, cf) => {
+      const years = daysBetween(t0, cf.date) / 365;
+      if (years === 0) return sum;
+      return sum - (years * cf.amount) / Math.pow(1 + rate, years + 1);
+    }, 0);
+
+  let rate = guess;
+  for (let i = 0; i < 50; i++) {
+    const value = npv(rate);
+    const slope = derivative(rate);
+    if (Math.abs(slope) < 1e-9) break;
+    const next = rate - value / slope;
+    if (!Number.isFinite(next) || next <= -1) break;
+    if (Math.abs(next - rate) < 1e-7) return Math.round(next * 10000) / 10000;
+    rate = next;
+  }
+
+  // Newton no convergió: bisección en un rango amplio de tasas plausibles.
+  let lo = -0.99;
+  let hi = 10;
+  let fLo = npv(lo);
+  const fHi = npv(hi);
+  if (!Number.isFinite(fLo) || !Number.isFinite(fHi) || fLo * fHi > 0) {
+    return null;
+  }
+  for (let i = 0; i < 200; i++) {
+    const mid = (lo + hi) / 2;
+    const fMid = npv(mid);
+    if (Math.abs(fMid) < 0.01) return Math.round(mid * 10000) / 10000;
+    if (fLo * fMid < 0) {
+      hi = mid;
+    } else {
+      lo = mid;
+      fLo = fMid;
+    }
+  }
+  return Math.round(((lo + hi) / 2) * 10000) / 10000;
+}

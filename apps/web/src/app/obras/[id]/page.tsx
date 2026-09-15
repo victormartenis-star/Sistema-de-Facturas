@@ -29,6 +29,7 @@ import { ConfirmDialog } from '@/components/confirm-dialog';
 import { CostControlDashboard } from '@/components/cost-control-dashboard';
 import { useToast } from '@/components/toast';
 import {
+  IconCube,
   IconPencil,
   IconPlus,
   IconReceipt,
@@ -597,6 +598,12 @@ export default function ObraDetallePage() {
         <div className="mt-1 flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-bold tracking-tight">{project.name}</h1>
           <StatusBadge status={project.status} />
+          <Link
+            href={`/obras/${project.id}/bim`}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-100"
+          >
+            <IconCube size={14} /> Visor BIM
+          </Link>
         </div>
         <p className="mt-1 text-sm text-gray-500">
           <span className="font-mono">{project.code}</span>

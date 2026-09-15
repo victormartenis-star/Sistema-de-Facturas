@@ -282,3 +282,39 @@ export const IconBell = (p: IconProps) => (
     <path d="M13.73 21a2 2 0 0 1-3.46 0" />
   </Base>
 );
+export const IconTruck = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M14 18V6a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h1" />
+    <path d="M14 9h4l3 3v5a1 1 0 0 1-1 1h-1" />
+    <circle cx="7" cy="18" r="2" />
+    <circle cx="17" cy="18" r="2" />
+  </Base>
+);
+export const IconWrench = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M14.7 6.3a4 4 0 0 0-5.6 5.6L3 18l3 3 6.1-6.1a4 4 0 0 0 5.6-5.6l-3.1 3.1-2-2Z" />
+  </Base>
+);
+export const IconCube = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" />
+    <path d="M3 7l9 5 9-5" />
+    <path d="M12 12v10" />
+  </Base>
+);
+export const IconPercent = (p: IconProps) => (
+  <Base {...p}>
+    <line x1="19" y1="5" x2="5" y2="19" />
+    <circle cx="6.5" cy="6.5" r="2.5" />
+    <circle cx="17.5" cy="17.5" r="2.5" />
+  </Base>
+);
+export const IconGavel = (p: IconProps) => (
+  <Base {...p}>
+    <path d="m14 13-8.5 8.5a1.5 1.5 0 0 1-2-2L12 11" />
+    <path d="m16 16 6-6" />
+    <path d="m8 8 6-6" />
+    <path d="m9 7 8 8" />
+    <path d="m21 3-3 3" />
+  </Base>
+);

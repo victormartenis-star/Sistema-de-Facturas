@@ -96,6 +96,8 @@ export const parteMaquinariaCreateSchema = z.object({
     .trim()
     .min(1, 'El nombre/matrícula de la máquina es obligatorio')
     .max(200, 'Máximo 200 caracteres'),
+  /** Ficha del maestro de equipos (Fase 13); opcional para no romper partes ya existentes. */
+  equipoId: z.string().uuid('Equipo no válido').nullish(),
   ownership: z.enum(MAQUINARIA_OWNERSHIPS).default('propia'),
   workDate: isoDate,
   hoursUsed: z
@@ -132,6 +134,8 @@ export interface ParteMaquinariaDto {
   phaseId: string | null;
   phaseCode: string | null;
   machineName: string;
+  equipoId: string | null;
+  equipoNombre: string | null;
   ownership: MaquinariaOwnership;
   workDate: string;
   hoursUsed: number;

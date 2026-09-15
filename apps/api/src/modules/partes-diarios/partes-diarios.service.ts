@@ -3,6 +3,7 @@ import { and, asc, desc, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
 import {
   ParteMaquinaria,
   PartePersonal,
+  equipos,
   partesMaquinaria,
   partesPersonal,
   projectPhases,
@@ -52,6 +53,7 @@ function personalToDto(
 function maquinariaToDto(
   row: ParteMaquinaria,
   phaseCode: string | null,
+  equipoNombre: string | null,
 ): ParteMaquinariaDto {
   return {
     id: row.id,
@@ -59,6 +61,8 @@ function maquinariaToDto(
     phaseId: row.phaseId,
     phaseCode,
     machineName: row.machineName,
+    equipoId: row.equipoId,
+    equipoNombre,
     ownership: row.ownership,
     workDate: row.workDate,
     hoursUsed: Number(row.hoursUsed),
@@ -246,16 +250,23 @@ export class PartesDiariosService {
     if (filter.to) conditions.push(lte(partesMaquinaria.workDate, filter.to));
 
     const rows = await this.dbs.db
-      .select({ parte: partesMaquinaria, phaseCode: projectPhases.code })
+      .select({
+        parte: partesMaquinaria,
+        phaseCode: projectPhases.code,
+        equipoNombre: equipos.nombre,
+      })
       .from(partesMaquinaria)
       .leftJoin(projectPhases, eq(partesMaquinaria.phaseId, projectPhases.id))
+      .leftJoin(equipos, eq(partesMaquinaria.equipoId, equipos.id))
       .where(and(...conditions))
       .orderBy(
         desc(partesMaquinaria.workDate),
         asc(partesMaquinaria.machineName),
       );
 
-    return rows.map((r) => maquinariaToDto(r.parte, r.phaseCode));
+    return rows.map((r) =>
+      maquinariaToDto(r.parte, r.phaseCode, r.equipoNombre),
+    );
   }
 
   async createMaquinaria(
@@ -267,6 +278,9 @@ export class PartesDiariosService {
     const phase = data.phaseId
       ? await this.findPhase(data.phaseId, data.projectId)
       : null;
+    const equipo = data.equipoId
+      ? await this.findEquipo(data.equipoId, companyId)
+      : null;
     const totalCost = computeParteMaquinariaCost(data);
 
     const [row] = await this.dbs.db
@@ -276,6 +290,7 @@ export class PartesDiariosService {
         projectId: data.projectId,
         phaseId: data.phaseId ?? null,
         machineName: data.machineName,
+        equipoId: data.equipoId ?? null,
         ownership: data.ownership,
         workDate: data.workDate,
         hoursUsed: data.hoursUsed.toFixed(2),
@@ -292,7 +307,7 @@ export class PartesDiariosService {
       action: 'create',
       newData: row,
     });
-    return maquinariaToDto(row, phase?.code ?? null);
+    return maquinariaToDto(row, phase?.code ?? null, equipo?.nombre ?? null);
   }
 
   async updateMaquinaria(
@@ -300,10 +315,12 @@ export class PartesDiariosService {
     input: ParteMaquinariaUpdateInput,
   ): Promise<ParteMaquinariaDto> {
     const existing = await this.findMaquinaria(id);
+    const companyId = await this.dbs.getCompanyId();
     const data = parteMaquinariaUpdateSchema.parse(input);
     const phaseId =
       data.phaseId !== undefined ? data.phaseId : existing.phaseId;
     if (data.phaseId) await this.findPhase(data.phaseId, existing.projectId);
+    if (data.equipoId) await this.findEquipo(data.equipoId, companyId);
 
     const merged = {
       hoursUsed: data.hoursUsed ?? Number(existing.hoursUsed),
@@ -317,6 +334,9 @@ export class PartesDiariosService {
         ...(data.phaseId !== undefined && { phaseId: data.phaseId ?? null }),
         ...(data.machineName !== undefined && {
           machineName: data.machineName,
+        }),
+        ...(data.equipoId !== undefined && {
+          equipoId: data.equipoId ?? null,
         }),
         ...(data.ownership !== undefined && { ownership: data.ownership }),
         ...(data.workDate !== undefined && { workDate: data.workDate }),
@@ -333,7 +353,10 @@ export class PartesDiariosService {
       .returning();
 
     const phase = phaseId ? await this.findPhase(phaseId, row.projectId) : null;
-    return maquinariaToDto(row, phase?.code ?? null);
+    const equipo = row.equipoId
+      ? await this.findEquipo(row.equipoId, companyId)
+      : null;
+    return maquinariaToDto(row, phase?.code ?? null, equipo?.nombre ?? null);
   }
 
   async removeMaquinaria(id: string): Promise<void> {
@@ -361,7 +384,10 @@ export class PartesDiariosService {
     const phase = existing.phaseId
       ? await this.findPhase(existing.phaseId, existing.projectId)
       : null;
-    return maquinariaToDto(row, phase?.code ?? null);
+    const equipo = existing.equipoId
+      ? await this.findEquipo(existing.equipoId, await this.dbs.getCompanyId())
+      : null;
+    return maquinariaToDto(row, phase?.code ?? null, equipo?.nombre ?? null);
   }
 
   /* ────────────────────── privados ────────────────────── */
@@ -391,6 +417,22 @@ export class PartesDiariosService {
     if (!row || (allowed !== null && !allowed.includes(row.projectId))) {
       throw new NotFoundException('Parte de maquinaria no encontrado');
     }
+    return row;
+  }
+
+  private async findEquipo(equipoId: string, companyId: string) {
+    const [row] = await this.dbs.db
+      .select()
+      .from(equipos)
+      .where(
+        and(
+          eq(equipos.id, equipoId),
+          eq(equipos.companyId, companyId),
+          isNull(equipos.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!row) throw new NotFoundException('Equipo no encontrado');
     return row;
   }
 

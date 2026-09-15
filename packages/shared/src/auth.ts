@@ -5,6 +5,8 @@ export const USER_ROLES = [
   'gerente',
   'administracion',
   'obra',
+  'subcontrata',
+  'cliente',
 ] as const;
 
 export type UserRole = (typeof USER_ROLES)[number];
@@ -14,7 +16,17 @@ export const USER_ROLE_LABELS: Record<UserRole, string> = {
   gerente: 'Gerente',
   administracion: 'Administración',
   obra: 'Obra',
+  subcontrata: 'Subcontrata (portal)',
+  cliente: 'Cliente (portal)',
 };
+
+/** Roles de solo-portal (Fase 14): no ven la app principal, solo `apps/web/src/app/portals`. */
+export const PORTAL_ROLES = ['subcontrata', 'cliente'] as const;
+export type PortalRole = (typeof PORTAL_ROLES)[number];
+
+export function isPortalRole(role: UserRole): role is PortalRole {
+  return (PORTAL_ROLES as readonly UserRole[]).includes(role);
+}
 
 const email = z.string().trim().toLowerCase().email('Email no válido').max(200);
 
@@ -54,6 +66,8 @@ export interface UserDto {
   email: string;
   fullName: string;
   role: UserRole;
+  /** Solo relevante para role = 'subcontrata': el contacto que representa en el portal. */
+  contactId: string | null;
   isActive: boolean;
   createdAt: string;
 }
@@ -76,6 +90,8 @@ export const userUpdateSchema = z.object({
     .max(200)
     .optional(),
   role: z.enum(USER_ROLES).optional(),
+  /** Solo tiene efecto con role = 'subcontrata'; se ignora para el resto. */
+  contactId: z.string().uuid('Contacto no válido').nullish(),
   isActive: z.boolean().optional(),
 });
 export type UserUpdateInput = z.infer<typeof userUpdateSchema>;
@@ -90,6 +106,8 @@ export const userCreateSchema = z.object({
     .min(1, 'El nombre es obligatorio')
     .max(200, 'Máximo 200 caracteres'),
   role: z.enum(USER_ROLES).default('administracion'),
+  /** Solo tiene efecto con role = 'subcontrata'; se ignora para el resto. */
+  contactId: z.string().uuid('Contacto no válido').nullish(),
 });
 export type UserCreateInput = z.input<typeof userCreateSchema>;
 

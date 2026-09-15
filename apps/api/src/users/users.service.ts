@@ -25,6 +25,7 @@ function toDto(row: User): UserDto {
     email: row.email,
     fullName: row.fullName,
     role: row.role as UserRole,
+    contactId: row.contactId,
     isActive: row.isActive,
     createdAt: row.createdAt.toISOString(),
   };
@@ -56,6 +57,7 @@ export class UsersService {
           passwordHash: await hashPassword(data.password),
           fullName: data.fullName,
           role: data.role,
+          contactId: data.contactId ?? null,
         })
         .returning();
       return toDto(row);

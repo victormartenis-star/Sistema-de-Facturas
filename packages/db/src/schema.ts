@@ -638,12 +638,19 @@ export const extractions = pgTable('extractions', {
  * Autenticación propia: contraseña con scrypt, JWT de acceso de corta vida y
  * refresh tokens persistidos (solo su hash) para poder revocarlos. El rol
  * `obra` solo ve los proyectos asignados en `user_project_access`.
+ *
+ * Fase 14 añade `subcontrata` y `cliente`: roles de solo-portal (ver
+ * `apps/api/src/modules/portals`). Un usuario `subcontrata` solo ve lo suyo
+ * vía `users.contact_id`; uno `cliente` solo las obras de
+ * `user_project_access`, igual que `obra` pero de solo lectura.
  */
 export const userRoleEnum = pgEnum('user_role', [
   'admin',
   'gerente',
   'administracion',
   'obra',
+  'subcontrata',
+  'cliente',
 ]);
 
 export const users = pgTable(
@@ -657,6 +664,10 @@ export const users = pgTable(
     passwordHash: text('password_hash').notNull(),
     fullName: text('full_name').notNull(),
     role: userRoleEnum('role').notNull().default('administracion'),
+    /** Solo para role = 'subcontrata': el contacto que representa este usuario en el portal. */
+    contactId: uuid('contact_id').references(() => contacts.id, {
+      onDelete: 'set null',
+    }),
     isActive: boolean('is_active').notNull().default(true),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -1112,8 +1123,16 @@ export const partesMaquinaria = pgTable('partes_maquinaria', {
   phaseId: uuid('phase_id').references(() => projectPhases.id, {
     onDelete: 'set null',
   }),
-  /** No hay maestro de maquinaria todavía: se anota el nombre/matrícula. */
+  /**
+   * Texto libre histórico (Fase 10): se mantiene por compatibilidad con
+   * partes ya creados. Desde Fase 13 el alta nueva debería enlazar
+   * `equipoId` al maestro; `machineName` sigue mostrándose si no hay ficha.
+   */
   machineName: text('machine_name').notNull(),
+  /** Ficha del maestro de equipos (Fase 13); nulo en partes históricos o sin ficha dada de alta. */
+  equipoId: uuid('equipo_id').references(() => equipos.id, {
+    onDelete: 'set null',
+  }),
   ownership: parteMaquinariaOwnershipEnum('ownership')
     .notNull()
     .default('propia'),
@@ -1144,6 +1163,100 @@ export type PartePersonal = typeof partesPersonal.$inferSelect;
 export type NewPartePersonal = typeof partesPersonal.$inferInsert;
 export type ParteMaquinaria = typeof partesMaquinaria.$inferSelect;
 export type NewParteMaquinaria = typeof partesMaquinaria.$inferInsert;
+
+// ─── Maquinaria y equipos: maestro y mantenimientos (Fase 13) ─────────────
+/**
+ * Maestro de equipos que faltaba desde Fase 10: `partes_maquinaria` solo
+ * anotaba el nombre/matrícula en texto libre porque no había ficha de la
+ * máquina. Este maestro permite dar de alta cada equipo una vez (propio o
+ * alquilado, con su proveedor de alquiler si aplica) y enlazar tanto los
+ * partes de uso diario (`partes_maquinaria.equipo_id`) como el histórico de
+ * mantenimientos a esa ficha. Las referencias a `proveedores` (Fase 11) se
+ * resuelven por closure: el orden de declaración en este archivo no importa.
+ */
+
+export const equipoTipoEnum = pgEnum('equipo_tipo', [
+  'vehiculo',
+  'maquina_pesada',
+  'herramienta',
+  'otro',
+]);
+
+export const equipoEstadoEnum = pgEnum('equipo_estado', [
+  'operativo',
+  'en_mantenimiento',
+  'averiado',
+  'baja',
+]);
+
+export const equipos = pgTable('equipos', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  nombre: text('nombre').notNull(),
+  /** Matrícula o nº de serie; libre porque no toda herramienta la tiene. */
+  matricula: text('matricula'),
+  tipo: equipoTipoEnum('tipo').notNull().default('maquina_pesada'),
+  ownership: parteMaquinariaOwnershipEnum('ownership')
+    .notNull()
+    .default('propia'),
+  /** Proveedor de alquiler; solo tiene sentido si ownership = 'alquilada'. */
+  proveedorAlquilerId: uuid('proveedor_alquiler_id').references(
+    () => proveedores.id,
+    { onDelete: 'set null' },
+  ),
+  estado: equipoEstadoEnum('estado').notNull().default('operativo'),
+  fechaAlta: date('fecha_alta'),
+  /** Fecha de baja definitiva; distinto de `deletedAt`, que es borrado lógico del registro. */
+  fechaBaja: date('fecha_baja'),
+  notas: text('notas'),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const mantenimientoTipoEnum = pgEnum('mantenimiento_tipo', [
+  'preventivo',
+  'correctivo',
+  'itv',
+]);
+
+/** Un evento de mantenimiento (o ITV) de un equipo del maestro. */
+export const mantenimientosEquipo = pgTable('mantenimientos_equipo', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  equipoId: uuid('equipo_id')
+    .notNull()
+    .references(() => equipos.id),
+  tipo: mantenimientoTipoEnum('tipo').notNull().default('preventivo'),
+  fecha: date('fecha').notNull(),
+  proveedorId: uuid('proveedor_id').references(() => proveedores.id, {
+    onDelete: 'set null',
+  }),
+  coste: numeric('coste', { precision: 12, scale: 2 }),
+  /** Próxima revisión prevista (preventivo/ITV); nulo en correctivos puntuales. */
+  proximaRevisionFecha: date('proxima_revision_fecha'),
+  descripcion: text('descripcion'),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type Equipo = typeof equipos.$inferSelect;
+export type NewEquipo = typeof equipos.$inferInsert;
+export type MantenimientoEquipo = typeof mantenimientosEquipo.$inferSelect;
+export type NewMantenimientoEquipo = typeof mantenimientosEquipo.$inferInsert;
 
 // ─── Proveedores y subcontratas: ficha extendida (Fase 11) ────────────────
 /**
@@ -1580,3 +1693,703 @@ export const incidenciasPRL = pgTable('incidencias_prl', {
 
 export type IncidenciaPRL = typeof incidenciasPRL.$inferSelect;
 export type NewIncidenciaPRL = typeof incidenciasPRL.$inferInsert;
+
+// ─── ESG, huella de carbono y sostenibilidad (Fase 14) ─────────────────────
+/**
+ * Cálculo de emisiones para informes de sostenibilidad (BREEAM/LEED):
+ * catálogo de factores de emisión (kg CO2e por unidad de consumo) y los
+ * registros de consumo real por obra que se multiplican por ese factor.
+ * `emisionesKgCo2e` se guarda calculado (no vista) para no recalcular todo
+ * el histórico si un factor cambia de valor más adelante.
+ */
+export const esgCategoriaEnum = pgEnum('esg_categoria', [
+  'combustible',
+  'energia',
+  'agua',
+  'material',
+  'residuo',
+]);
+
+export const esgFactoresEmision = pgTable('esg_factores_emision', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  categoria: esgCategoriaEnum('categoria').notNull(),
+  nombre: text('nombre').notNull(),
+  /** Unidad de consumo del factor: 'litro', 'kWh', 'm3', 'kg', 'tonelada'… */
+  unidad: text('unidad').notNull(),
+  factorKgCo2e: numeric('factor_kg_co2e', {
+    precision: 14,
+    scale: 6,
+  }).notNull(),
+  /** Referencia de la tabla de factores usada, p.ej. "MITECO 2025". */
+  fuente: text('fuente'),
+  activo: boolean('activo').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type EsgFactorEmision = typeof esgFactoresEmision.$inferSelect;
+export type NewEsgFactorEmision = typeof esgFactoresEmision.$inferInsert;
+
+export const esgRegistrosEmision = pgTable('esg_registros_emision', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id),
+  phaseId: uuid('phase_id').references(() => projectPhases.id),
+  factorId: uuid('factor_id')
+    .notNull()
+    .references(() => esgFactoresEmision.id),
+  fecha: date('fecha').notNull(),
+  /** Cantidad consumida en la unidad del factor (litros, kWh, m³, kg…). */
+  cantidad: numeric('cantidad', { precision: 14, scale: 4 }).notNull(),
+  /** = cantidad × factor.factorKgCo2e en el momento del alta. */
+  emisionesKgCo2e: numeric('emisiones_kg_co2e', {
+    precision: 14,
+    scale: 3,
+  }).notNull(),
+  /** Justificante opcional: factura de combustible, recibo de luz… */
+  documentId: uuid('document_id').references(() => documents.id),
+  notas: text('notas'),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type EsgRegistroEmision = typeof esgRegistrosEmision.$inferSelect;
+export type NewEsgRegistroEmision = typeof esgRegistrosEmision.$inferInsert;
+
+// ─── Mantenimiento preventivo e IoT de flota (Fase 14) ─────────────────────
+/**
+ * Telemetría de maquinaria y alertas de avería, encima del maestro de
+ * equipos de Fase 13 (`equipos` / `mantenimientos_equipo`): esto NO
+ * duplica ficha ni histórico de mantenimiento, solo añade la ingesta de
+ * lecturas del dispositivo IoT y las alertas que dispara (avería detectada
+ * por código de error, anomalía de telemetría o mantenimiento vencido según
+ * `equipos.proxima_revision_fecha` calculado por `EquiposService`).
+ */
+export const iotAlertaTipoEnum = pgEnum('iot_alerta_tipo', [
+  'averia',
+  'anomalia_telemetria',
+  'mantenimiento_vencido',
+]);
+
+export const iotAlertaGravedadEnum = pgEnum('iot_alerta_gravedad', [
+  'leve',
+  'grave',
+  'critica',
+]);
+
+export const iotAlertaEstadoEnum = pgEnum('iot_alerta_estado', [
+  'abierta',
+  'reconocida',
+  'cerrada',
+]);
+
+export const iotLecturasTelemetria = pgTable('iot_lecturas_telemetria', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  equipoId: uuid('equipo_id')
+    .notNull()
+    .references(() => equipos.id),
+  projectId: uuid('project_id').references(() => projects.id),
+  capturadoEn: timestamp('capturado_en', { withTimezone: true }).notNull(),
+  horasUso: numeric('horas_uso', { precision: 10, scale: 2 }),
+  kmRecorridos: numeric('km_recorridos', { precision: 10, scale: 2 }),
+  combustibleNivelPct: numeric('combustible_nivel_pct', {
+    precision: 5,
+    scale: 2,
+  }),
+  temperaturaMotor: numeric('temperatura_motor', {
+    precision: 6,
+    scale: 2,
+  }),
+  ubicacionLat: numeric('ubicacion_lat', { precision: 9, scale: 6 }),
+  ubicacionLng: numeric('ubicacion_lng', { precision: 9, scale: 6 }),
+  /** Código de avería reportado por el equipo (OBD/CAN u homólogo), si lo hay. */
+  codigoError: text('codigo_error'),
+  /** Payload crudo del dispositivo, para depurar sin perder datos del fabricante. */
+  payload: jsonb('payload').notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type IotLecturaTelemetria = typeof iotLecturasTelemetria.$inferSelect;
+export type NewIotLecturaTelemetria = typeof iotLecturasTelemetria.$inferInsert;
+
+export const iotAlertas = pgTable('iot_alertas', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  equipoId: uuid('equipo_id')
+    .notNull()
+    .references(() => equipos.id),
+  lecturaId: uuid('lectura_id').references(() => iotLecturasTelemetria.id),
+  tipo: iotAlertaTipoEnum('tipo').notNull(),
+  gravedad: iotAlertaGravedadEnum('gravedad').notNull().default('leve'),
+  estado: iotAlertaEstadoEnum('estado').notNull().default('abierta'),
+  mensaje: text('mensaje').notNull(),
+  reconocidaPorUserId: uuid('reconocida_por_user_id').references(
+    () => users.id,
+  ),
+  cerradaAt: timestamp('cerrada_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type IotAlerta = typeof iotAlertas.$inferSelect;
+export type NewIotAlerta = typeof iotAlertas.$inferInsert;
+
+// ─── Contradictorios y modificados (Fase 14) ────────────────────────────────
+/**
+ * Workflow de aprobación de precios contradictorios y modificados de obra
+ * con la Dirección Facultativa: `borrador` (editable) → `enviado_df`
+ * (esperando resolución) → `aprobado`/`rechazado` (cerrado). El importe
+ * aprobado puede diferir del estimado; no toca `budget_items` directamente
+ * — la certificación del modificado sigue el circuito normal de
+ * certificaciones una vez aprobado, igual que cualquier partida.
+ */
+export const changeOrderTipoEnum = pgEnum('change_order_tipo', [
+  'contradictorio',
+  'modificado',
+]);
+
+export const changeOrderEstadoEnum = pgEnum('change_order_estado', [
+  'borrador',
+  'enviado_df',
+  'aprobado',
+  'rechazado',
+]);
+
+export const changeOrders = pgTable(
+  'change_orders',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    phaseId: uuid('phase_id').references(() => projectPhases.id),
+    /** Correlativo por obra, igual criterio que `purchase_orders.seq`. */
+    seq: integer('seq').notNull(),
+    numero: text('numero').notNull(),
+    tipo: changeOrderTipoEnum('tipo').notNull().default('contradictorio'),
+    estado: changeOrderEstadoEnum('estado').notNull().default('borrador'),
+    titulo: text('titulo').notNull(),
+    descripcion: text('descripcion').notNull(),
+    motivo: text('motivo'),
+    direccionFacultativaContactId: uuid(
+      'direccion_facultativa_contact_id',
+    ).references(() => contacts.id),
+    importeEstimado: numeric('importe_estimado', {
+      precision: 14,
+      scale: 2,
+    })
+      .notNull()
+      .default('0.00'),
+    importeAprobado: numeric('importe_aprobado', {
+      precision: 14,
+      scale: 2,
+    }),
+    documentId: uuid('document_id').references(() => documents.id),
+    fechaEnvio: timestamp('fecha_envio', { withTimezone: true }),
+    fechaResolucion: timestamp('fecha_resolucion', { withTimezone: true }),
+    comentarioResolucion: text('comentario_resolucion'),
+    notas: text('notas'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [unique().on(t.projectId, t.seq)],
+);
+
+export type ChangeOrder = typeof changeOrders.$inferSelect;
+export type NewChangeOrder = typeof changeOrders.$inferInsert;
+
+/** Línea de precio contradictorio/modificado: partida nueva o repreciada. */
+export const changeOrderLineas = pgTable('change_order_lineas', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  changeOrderId: uuid('change_order_id')
+    .notNull()
+    .references(() => changeOrders.id, { onDelete: 'cascade' }),
+  /** Partida existente que se reprecia; nulo si es una partida nueva. */
+  budgetItemId: uuid('budget_item_id').references(() => budgetItems.id),
+  descripcion: text('descripcion').notNull(),
+  unidad: text('unidad').notNull(),
+  cantidad: numeric('cantidad', { precision: 14, scale: 4 }).notNull(),
+  precioUnitario: numeric('precio_unitario', {
+    precision: 14,
+    scale: 4,
+  }).notNull(),
+  importe: numeric('importe', { precision: 14, scale: 2 }).notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type ChangeOrderLinea = typeof changeOrderLineas.$inferSelect;
+export type NewChangeOrderLinea = typeof changeOrderLineas.$inferInsert;
+
+// ─── Firma digital biométrica (Fase 14) ─────────────────────────────────────
+/**
+ * Firma electrónica remota para partes, actas, contratos y entregas de EPI.
+ * `entityTipo`/`entityId` es una referencia polimórfica ligera (sin FK de
+ * base de datos, como el resto del ERP no tiene una tabla única de
+ * "documentos firmables"): el módulo que la crea es responsable de que el
+ * `entityId` exista. Cada firmante guarda el hash de los datos de firma
+ * (trazo/biometría) recibidos del cliente, no la biometría en crudo.
+ */
+export const signatureEntityTipoEnum = pgEnum('signature_entity_tipo', [
+  'parte_diario',
+  'acta_recepcion',
+  'contrato_obra',
+  'entrega_epi',
+  'otro',
+]);
+
+export const signatureEstadoEnum = pgEnum('signature_estado', [
+  'pendiente',
+  'completada',
+  'cancelada',
+  'expirada',
+]);
+
+export const signerEstadoEnum = pgEnum('signer_estado', [
+  'pendiente',
+  'firmado',
+  'rechazado',
+]);
+
+export const signatureRequests = pgTable('signature_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  projectId: uuid('project_id').references(() => projects.id),
+  entityTipo: signatureEntityTipoEnum('entity_tipo').notNull(),
+  entityId: uuid('entity_id').notNull(),
+  titulo: text('titulo').notNull(),
+  documentId: uuid('document_id').references(() => documents.id),
+  estado: signatureEstadoEnum('estado').notNull().default('pendiente'),
+  createdByUserId: uuid('created_by_user_id')
+    .notNull()
+    .references(() => users.id),
+  fechaLimite: date('fecha_limite'),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type SignatureRequest = typeof signatureRequests.$inferSelect;
+export type NewSignatureRequest = typeof signatureRequests.$inferInsert;
+
+export const signatureSigners = pgTable('signature_signers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  signatureRequestId: uuid('signature_request_id')
+    .notNull()
+    .references(() => signatureRequests.id, { onDelete: 'cascade' }),
+  nombre: text('nombre').notNull(),
+  email: text('email'),
+  /** Rol textual del firmante en el documento: "Jefe de obra", "Dirección Facultativa"… */
+  rol: text('rol'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  estado: signerEstadoEnum('estado').notNull().default('pendiente'),
+  firmadoAt: timestamp('firmado_at', { withTimezone: true }),
+  ipFirma: text('ip_firma'),
+  /** sha256 de los datos de firma (trazo/biometría) recibidos del cliente. */
+  hashFirma: text('hash_firma'),
+  motivoRechazo: text('motivo_rechazo'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type SignatureSigner = typeof signatureSigners.$inferSelect;
+export type NewSignatureSigner = typeof signatureSigners.$inferInsert;
+
+// ─── Portales externos de autoservicio (Fase 14) ────────────────────────────
+/**
+ * Soporte de datos para los portales aislados de `apps/web/src/app/portals`.
+ * El portal de clientes es de solo lectura sobre datos ya existentes
+ * (`projects`, `certifications`, `project_phases`…) y no necesita tabla
+ * propia. El portal de subcontratas sí: CAE ya vive en
+ * `contact_compliance_docs` (se reutiliza, filtrando por `users.contact_id`),
+ * pero la carga de facturas necesita una bandeja de entrada propia — no se
+ * escribe directo en `invoices` porque esa tabla lleva encadenado el hash
+ * VeriFactu y la numeración fiscal, que son responsabilidad de
+ * administración, no de la subcontrata.
+ */
+export const portalSubmissionEstadoEnum = pgEnum('portal_submission_estado', [
+  'pendiente_revision',
+  'aceptada',
+  'rechazada',
+]);
+
+export const portalFacturaSubmissions = pgTable('portal_factura_submissions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  contactId: uuid('contact_id')
+    .notNull()
+    .references(() => contacts.id),
+  documentId: uuid('document_id')
+    .notNull()
+    .references(() => documents.id),
+  numeroFacturaDeclarado: text('numero_factura_declarado').notNull(),
+  fechaDeclarada: date('fecha_declarada').notNull(),
+  importeDeclarado: numeric('importe_declarado', {
+    precision: 14,
+    scale: 2,
+  }).notNull(),
+  estado: portalSubmissionEstadoEnum('estado')
+    .notNull()
+    .default('pendiente_revision'),
+  notas: text('notas'),
+  revisadoPorUserId: uuid('revisado_por_user_id').references(() => users.id),
+  revisadoAt: timestamp('revisado_at', { withTimezone: true }),
+  /** Si el staff la vincula a la factura real ya dada de alta en `invoices`. */
+  invoiceId: uuid('invoice_id').references(() => invoices.id),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type PortalFacturaSubmission =
+  typeof portalFacturaSubmissions.$inferSelect;
+export type NewPortalFacturaSubmission =
+  typeof portalFacturaSubmissions.$inferInsert;
+
+// ─── Inversores / Real Estate ──────────────────────────────────────────────
+// Cuentas en participación por obra/promoción: cada `investment_account`
+// agrupa a los inversores que financian una obra (o la empresa en general,
+// con `project_id` nulo) y el reparto de aportaciones/dividendos entre ellos.
+// La TIR/VAN se calculan en caliente en `packages/shared/src/calculo.ts` a
+// partir de los movimientos de `investment_cashflows`, nunca se persisten.
+
+export const investorKindEnum = pgEnum('investor_kind', [
+  'persona_fisica',
+  'persona_juridica',
+]);
+
+export const investors = pgTable(
+  'investors',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    kind: investorKindEnum('kind').notNull().default('persona_fisica'),
+    legalName: text('legal_name').notNull(),
+    taxId: text('tax_id'),
+    email: text('email'),
+    phone: text('phone'),
+    iban: text('iban'),
+    notes: text('notes'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('investors_company_taxid_unique')
+      .on(t.companyId, t.taxId)
+      .where(sql`deleted_at IS NULL AND tax_id IS NOT NULL`),
+  ],
+);
+
+export const investmentAccountStatusEnum = pgEnum('investment_account_status', [
+  'activa',
+  'cerrada',
+]);
+
+/** Cuenta en participación: el vehículo que agrupa la inversión de una obra/promoción. */
+export const investmentAccounts = pgTable('investment_accounts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  /** Nulo = fondo/cuenta a nivel de empresa, no atada a una única obra. */
+  projectId: uuid('project_id').references(() => projects.id),
+  name: text('name').notNull(),
+  status: investmentAccountStatusEnum('status').notNull().default('activa'),
+  /** Capital comprometido total (suma de referencia; no se recalcula sola). */
+  committedAmount: numeric('committed_amount', { precision: 14, scale: 2 })
+    .notNull()
+    .default('0'),
+  /** Valoración actual no realizada, para la TIR "a valor de hoy". Editable a mano. */
+  currentValuationAmount: numeric('current_valuation_amount', {
+    precision: 14,
+    scale: 2,
+  }),
+  startDate: date('start_date').notNull(),
+  notes: text('notes'),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/** Porcentaje de participación de cada inversor en una cuenta. */
+export const investmentParticipations = pgTable(
+  'investment_participations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => investmentAccounts.id, { onDelete: 'cascade' }),
+    investorId: uuid('investor_id')
+      .notNull()
+      .references(() => investors.id, { onDelete: 'restrict' }),
+    /** % de participación, con 4 decimales para cuadrar repartos al céntimo. */
+    participationPct: numeric('participation_pct', {
+      precision: 7,
+      scale: 4,
+    }).notNull(),
+    committedAmount: numeric('committed_amount', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    joinedAt: date('joined_at').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    unique('investment_participations_account_investor_unique').on(
+      t.accountId,
+      t.investorId,
+    ),
+  ],
+);
+
+export const investmentCashflowDirectionEnum = pgEnum(
+  'investment_cashflow_direction',
+  ['aportacion', 'reparto'],
+);
+
+/**
+ * Movimiento de caja frente a un inversor: aportación (entra dinero a la
+ * cuenta) o reparto de dividendo (sale dinero hacia el inversor). Es la
+ * serie temporal sobre la que se calcula la TIR/VAN de cada inversor —
+ * `computeIrr`/`computeNpv` en `@erp/shared` esperan justo esta forma
+ * (fecha + importe con signo desde el punto de vista del inversor).
+ */
+export const investmentCashflows = pgTable('investment_cashflows', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  accountId: uuid('account_id')
+    .notNull()
+    .references(() => investmentAccounts.id, { onDelete: 'cascade' }),
+  investorId: uuid('investor_id')
+    .notNull()
+    .references(() => investors.id, { onDelete: 'restrict' }),
+  direction: investmentCashflowDirectionEnum('direction').notNull(),
+  flowDate: date('flow_date').notNull(),
+  /** Siempre positivo; el signo para TIR/VAN lo pone `direction`. */
+  amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+  concept: text('concept'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type Investor = typeof investors.$inferSelect;
+export type NewInvestor = typeof investors.$inferInsert;
+export type InvestmentAccount = typeof investmentAccounts.$inferSelect;
+export type NewInvestmentAccount = typeof investmentAccounts.$inferInsert;
+export type InvestmentParticipation =
+  typeof investmentParticipations.$inferSelect;
+export type NewInvestmentParticipation =
+  typeof investmentParticipations.$inferInsert;
+export type InvestmentCashflow = typeof investmentCashflows.$inferSelect;
+export type NewInvestmentCashflow = typeof investmentCashflows.$inferInsert;
+
+// ─── Tesorería · cuentas bancarias y caja ──────────────────────────────────
+// Saldo real desde el que arranca la proyección de `TreasuryService.cashflow`
+// (antes arrancaba siempre en 0, es decir, solo mostraba el neto de
+// vencimientos sin el efectivo ya disponible). Sin ledger de movimientos
+// todavía: `current_balance` se edita a mano o se recalcula desde fuera;
+// la conciliación bancaria (extractos, Norma 43) queda para cuando se
+// aborde M3 completo (`03-modulos.md`).
+
+export const bankAccountKindEnum = pgEnum('bank_account_kind', [
+  'banco',
+  'caja',
+]);
+
+export const bankAccounts = pgTable('bank_accounts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  name: text('name').notNull(),
+  kind: bankAccountKindEnum('kind').notNull().default('banco'),
+  iban: text('iban'),
+  currentBalance: numeric('current_balance', { precision: 14, scale: 2 })
+    .notNull()
+    .default('0'),
+  isActive: boolean('is_active').notNull().default(true),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type BankAccount = typeof bankAccounts.$inferSelect;
+export type NewBankAccount = typeof bankAccounts.$inferInsert;
+
+// ─── Copiloto IA de contratación ────────────────────────────────────────────
+// Auditoría automática de contratos de subcontrata y pliegos: un agente LLM
+// (mismo patrón que `apps/api/src/ocr/extraction.service.ts`, modelo de
+// Anthropic con salida JSON estructurada) lee el documento y detecta
+// cláusulas de riesgo. No sustituye la revisión legal; deja constancia de
+// lo detectado para que un humano decida.
+
+export const contractAuditRiskEnum = pgEnum('contract_audit_risk', [
+  'bajo',
+  'medio',
+  'alto',
+  'critico',
+]);
+
+export const contractAudits = pgTable('contract_audits', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  projectId: uuid('project_id').references(() => projects.id),
+  contactId: uuid('contact_id').references(() => contacts.id),
+  /** Documento origen si venía de un PDF ya subido; null si se auditó texto pegado. */
+  documentId: uuid('document_id').references(() => documents.id),
+  model: text('model').notNull(),
+  overallRisk: contractAuditRiskEnum('overall_risk').notNull(),
+  summary: text('summary').notNull(),
+  /** Array de { clause, riskLevel, explanation, recommendation }; ver `@erp/shared`. */
+  findings: jsonb('findings').notNull().default([]),
+  requestedByUserId: uuid('requested_by_user_id').references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type ContractAudit = typeof contractAudits.$inferSelect;
+export type NewContractAudit = typeof contractAudits.$inferInsert;
+
+// ─── BIM · visor IFC ────────────────────────────────────────────────────────
+// El modelo .ifc se guarda como original inmutable (mismo `StorageService`
+// que `documents`) y se parsea en el navegador (`web-ifc` + `three`, Fase
+// nueva de `apps/web/src/components/bim`). El backend solo guarda metadatos
+// y el vínculo elemento IFC ↔ partida de presupuesto; la geometría nunca
+// pasa por el servidor salvo para servir el fichero original.
+
+export const bimModels = pgTable('bim_models', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  projectId: uuid('project_id')
+    .notNull()
+    .references(() => projects.id),
+  name: text('name').notNull(),
+  storageKey: text('storage_key').notNull(),
+  fileName: text('file_name').notNull(),
+  fileSize: integer('file_size').notNull(),
+  /** Ej. "IFC4", "IFC2X3", leído de la cabecera del fichero si se pudo. */
+  ifcSchema: text('ifc_schema'),
+  uploadedByUserId: uuid('uploaded_by_user_id').references(() => users.id),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/** Vínculo entre un elemento del IFC (por su GlobalId) y una partida de presupuesto. */
+export const bimElementLinks = pgTable(
+  'bim_element_links',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    bimModelId: uuid('bim_model_id')
+      .notNull()
+      .references(() => bimModels.id, { onDelete: 'cascade' }),
+    /** GlobalId IFC (GUID base64 de 22 caracteres), no el expressID numérico interno. */
+    ifcGlobalId: text('ifc_global_id').notNull(),
+    ifcElementName: text('ifc_element_name'),
+    /** Ej. "IfcWall", "IfcSlab"… tal como viene del fichero. */
+    ifcElementType: text('ifc_element_type'),
+    budgetItemId: uuid('budget_item_id').references(() => budgetItems.id, {
+      onDelete: 'set null',
+    }),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    unique('bim_element_links_model_global_id_unique').on(
+      t.bimModelId,
+      t.ifcGlobalId,
+    ),
+  ],
+);
+
+export type BimModel = typeof bimModels.$inferSelect;
+export type NewBimModel = typeof bimModels.$inferInsert;
+export type BimElementLink = typeof bimElementLinks.$inferSelect;
+export type NewBimElementLink = typeof bimElementLinks.$inferInsert;

@@ -137,6 +137,13 @@ export interface ValidationItemDto {
   /** Obra cuyo código coincide con la pista encontrada en el documento. */
   suggestedProjectId: string | null;
   suggestedProjectCode: string | null;
+  /**
+   * Solo para `docType = 'albaran'`: pedido abierto del mismo proveedor (y
+   * obra si se conoce) cuyo importe pendiente de servir más se acerca al
+   * importe leído. Cotejo automático albarán↔pedido; el humano confirma.
+   */
+  suggestedOrderId: string | null;
+  suggestedOrderNumber: string | null;
 }
 
 /**
@@ -156,6 +163,12 @@ export const extractionValidateSchema = z.object({
   categoryId: z.string().uuid('Categoría no válida').nullish(),
   /** Crear la factura de compra en borrador a partir de estos datos. */
   createInvoice: z.boolean().default(false),
+  /** Crear el albarán a partir de estos datos (solo docType = 'albaran'). */
+  createDeliveryNote: z.boolean().default(false),
+  /** Pedido al que imputar el albarán; sobrescribe la sugerencia automática. */
+  orderId: z.string().uuid('Pedido no válido').nullish(),
+  /** Número de albarán corregido; si no se indica se usa el leído por la IA. */
+  noteNumber: z.string().trim().max(60).nullish(),
 });
 
 export type ExtractionValidateInput = z.input<typeof extractionValidateSchema>;
@@ -164,5 +177,6 @@ export interface ValidationResultDto {
   documentId: string;
   status: string;
   invoiceId: string | null;
+  deliveryNoteId: string | null;
   message: string;
 }

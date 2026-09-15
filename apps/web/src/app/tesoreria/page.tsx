@@ -28,6 +28,8 @@ import {
   IconWallet,
 } from '@/components/icons';
 import { ErrorBanner, PageHeader, selectCls } from '@/components/ui';
+import { BankAccountsPanel } from './bank-accounts-panel';
+import { IlliquidityPanel } from './illiquidity-panel';
 
 // ─── Tooltip personalizado del gráfico ────────────────────────────────────────
 function CashflowTooltip({
@@ -202,6 +204,12 @@ export default function TesoreriaPage() {
                 </p>
               )}
             </div>
+          </div>
+
+          {/* Proyección de iliquidez 30/60/90 y cuentas bancarias */}
+          <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-2">
+            <IlliquidityPanel />
+            <BankAccountsPanel />
           </div>
 
           {/* Gráfico de flujo de caja */}

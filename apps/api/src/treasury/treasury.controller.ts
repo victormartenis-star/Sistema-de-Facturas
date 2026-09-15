@@ -1,20 +1,28 @@
 import {
+  Body,
   Controller,
   Get,
   HttpCode,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
 import {
+  BankAccountCreateInput,
+  BankAccountUpdateInput,
   CASHFLOW_GROUPINGS,
   CashflowGrouping,
   MILESTONE_DIRECTIONS,
   MILESTONE_STATUSES,
   MilestoneDirection,
   MilestoneStatus,
+  bankAccountCreateSchema,
+  bankAccountUpdateSchema,
 } from '@erp/shared';
+import { Roles } from '../auth/roles';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { TreasuryService } from './treasury.service';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -69,5 +77,39 @@ export class TreasuryController {
         ? (groupBy as CashflowGrouping)
         : 'semana',
     );
+  }
+
+  /** Proyección de iliquidez a 30/60/90 días a partir del saldo bancario actual. */
+  @Get('iliquidez')
+  illiquidity(@Query('from') from?: string) {
+    return this.service.illiquidityProjection(
+      ISO_DATE.test(from ?? '') ? from : undefined,
+    );
+  }
+
+  @Get('cuentas')
+  listBankAccounts(@Query('activa') activa?: string) {
+    return this.service.listBankAccounts(
+      activa === undefined ? undefined : activa === 'true',
+    );
+  }
+
+  @Post('cuentas')
+  @Roles('admin', 'gerente', 'administracion')
+  createBankAccount(
+    @Body(new ZodValidationPipe(bankAccountCreateSchema))
+    body: BankAccountCreateInput,
+  ) {
+    return this.service.createBankAccount(body);
+  }
+
+  @Patch('cuentas/:id')
+  @Roles('admin', 'gerente', 'administracion')
+  updateBankAccount(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(bankAccountUpdateSchema))
+    body: BankAccountUpdateInput,
+  ) {
+    return this.service.updateBankAccount(id, body);
   }
 }

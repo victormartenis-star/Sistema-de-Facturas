@@ -5,6 +5,8 @@ import {
   amountsMatch,
   computeCertification,
   computeInvoiceAmounts,
+  computeIrr,
+  computeNpv,
   daysBetween,
   payableAmount,
   planMilestones,
@@ -268,5 +270,85 @@ describe('fechas', () => {
 
   it('startOfMonth devuelve el día 1', () => {
     expect(startOfMonth('2026-03-31')).toBe('2026-03-01');
+  });
+});
+
+describe('computeNpv', () => {
+  it('sin flujos, VAN es 0', () => {
+    expect(computeNpv(0.1, [])).toBe(0);
+  });
+
+  it('a tasa 0, el VAN es la suma simple de los flujos', () => {
+    const flows = [
+      { date: '2026-01-01', amount: -1000 },
+      { date: '2026-06-01', amount: 300 },
+      { date: '2027-01-01', amount: 800 },
+    ];
+    expect(computeNpv(0, flows)).toBe(100);
+  });
+
+  it('una aportación y un único retorno un año después: VAN=0 a la tasa exacta de retorno', () => {
+    // -1000 hoy, +1100 dentro de un año → retorno exacto del 10%.
+    const flows = [
+      { date: '2026-01-01', amount: -1000 },
+      { date: '2027-01-01', amount: 1100 },
+    ];
+    expect(computeNpv(0.1, flows)).toBeCloseTo(0, 2);
+  });
+
+  it('a una tasa superior a la de retorno, el VAN es negativo', () => {
+    const flows = [
+      { date: '2026-01-01', amount: -1000 },
+      { date: '2027-01-01', amount: 1100 },
+    ];
+    expect(computeNpv(0.2, flows)).toBeLessThan(0);
+  });
+});
+
+describe('computeIrr', () => {
+  it('con menos de 2 flujos no se puede calcular', () => {
+    expect(computeIrr([])).toBeNull();
+    expect(computeIrr([{ date: '2026-01-01', amount: -1000 }])).toBeNull();
+  });
+
+  it('con todos los flujos del mismo signo no hay retorno que buscar', () => {
+    expect(
+      computeIrr([
+        { date: '2026-01-01', amount: -1000 },
+        { date: '2027-01-01', amount: -100 },
+      ]),
+    ).toBeNull();
+  });
+
+  it('una aportación y un retorno del 10% un año después → TIR ≈ 10%', () => {
+    const flows = [
+      { date: '2026-01-01', amount: -1000 },
+      { date: '2027-01-01', amount: 1100 },
+    ];
+    expect(computeIrr(flows)).toBeCloseTo(0.1, 3);
+  });
+
+  it('una aportación en dos tramos y un reparto final', () => {
+    // -600 al inicio, -400 a mitad de año, +1200 al año: retorno claramente positivo.
+    const flows = [
+      { date: '2026-01-01', amount: -600 },
+      { date: '2026-07-01', amount: -400 },
+      { date: '2027-01-01', amount: 1200 },
+    ];
+    const irr = computeIrr(flows);
+    expect(irr).not.toBeNull();
+    expect(irr as number).toBeGreaterThan(0.1);
+    // El VAN a la TIR encontrada debe rondar 0 (es su definición).
+    expect(Math.abs(computeNpv(irr as number, flows))).toBeLessThan(1);
+  });
+
+  it('una pérdida (retorno menor que lo aportado) da TIR negativa', () => {
+    const flows = [
+      { date: '2026-01-01', amount: -1000 },
+      { date: '2027-01-01', amount: 800 },
+    ];
+    const irr = computeIrr(flows);
+    expect(irr).not.toBeNull();
+    expect(irr as number).toBeLessThan(0);
   });
 });

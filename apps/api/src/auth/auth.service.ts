@@ -32,6 +32,7 @@ export function toUserDto(row: User): UserDto {
     email: row.email,
     fullName: row.fullName,
     role: row.role as UserRole,
+    contactId: row.contactId,
     isActive: row.isActive,
     createdAt: row.createdAt.toISOString(),
   };

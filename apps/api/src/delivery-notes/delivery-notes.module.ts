@@ -8,5 +8,6 @@ import { DeliveryNotesService } from './delivery-notes.service';
   imports: [PurchaseOrdersModule],
   controllers: [DeliveryNotesController],
   providers: [DeliveryNotesService],
+  exports: [DeliveryNotesService],
 })
 export class DeliveryNotesModule {}

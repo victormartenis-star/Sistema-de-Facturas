@@ -38,6 +38,8 @@ const ROLE_COLORS: Record<UserRole, string> = {
   gerente: 'bg-violet-100 text-violet-700',
   administracion: 'bg-sky-100 text-sky-700',
   obra: 'bg-amber-100 text-amber-700',
+  subcontrata: 'bg-teal-100 text-teal-700',
+  cliente: 'bg-emerald-100 text-emerald-700',
 };
 
 function RoleBadge({ role }: { role: UserRole }) {

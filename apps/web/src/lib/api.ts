@@ -1,6 +1,34 @@
 import { DOCUMENT_MAX_SIZE_MB } from '@erp/shared';
 import type { AuditLogDto, AuditQuery, ComplianceAlertDto } from '@erp/shared';
 import type {
+  BimElementLinkDto,
+  BimElementLinkUpsertInput,
+  BimModelDto,
+} from '@erp/shared';
+import type { ContractAuditDto, ContractAuditRequestInput } from '@erp/shared';
+import type {
+  BankAccountCreateInput,
+  BankAccountDto,
+  BankAccountUpdateInput,
+  IlliquidityProjectionDto,
+} from '@erp/shared';
+import type {
+  DistributeDividendInput,
+  DistributeDividendResultDto,
+  InvestmentAccountCreateInput,
+  InvestmentAccountDto,
+  InvestmentAccountReportDto,
+  InvestmentAccountUpdateInput,
+  InvestmentCashflowCreateInput,
+  InvestmentCashflowDto,
+  InvestorCreateInput,
+  InvestorDto,
+  InvestorUpdateInput,
+  ParticipationCreateInput,
+  ParticipationDto,
+  ParticipationUpdateInput,
+} from '@erp/shared';
+import type {
   ActaRecepcionCreateInput,
   ActaRecepcionDto,
   ActaRecepcionRepasoDto,
@@ -67,11 +95,16 @@ import type {
   DeviationReportDto,
   DocumentDto,
   DocumentUpdateInput,
+  EquipoCreateInput,
+  EquipoDto,
+  EquipoUpdateInput,
   ExtractionValidateInput,
   InvoiceCreateInput,
   InvoiceDto,
   InvoiceUpdateInput,
   LoginInput,
+  MantenimientoCreateInput,
+  MantenimientoEquipoDto,
   MilestoneDto,
   ParteMaquinariaCreateInput,
   ParteMaquinariaDto,
@@ -447,6 +480,37 @@ export const partesDiariosApi = {
     }),
 };
 
+export const equiposApi = {
+  list: (filter: { estado?: string; ownership?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (filter.estado) params.set('estado', filter.estado);
+    if (filter.ownership) params.set('ownership', filter.ownership);
+    const qs = params.toString();
+    return request<EquipoDto[]>(`/equipos${qs ? `?${qs}` : ''}`);
+  },
+  get: (id: string) => request<EquipoDto>(`/equipos/${id}`),
+  create: (input: EquipoCreateInput) =>
+    request<EquipoDto>('/equipos', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  update: (id: string, input: EquipoUpdateInput) =>
+    request<EquipoDto>(`/equipos/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  remove: (id: string) => request<void>(`/equipos/${id}`, { method: 'DELETE' }),
+  listMantenimientos: (equipoId: string) =>
+    request<MantenimientoEquipoDto[]>(`/equipos/${equipoId}/mantenimientos`),
+  createMantenimiento: (input: MantenimientoCreateInput) =>
+    request<MantenimientoEquipoDto>('/equipos/mantenimientos', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  removeMantenimiento: (id: string) =>
+    request<void>(`/equipos/mantenimientos/${id}`, { method: 'DELETE' }),
+};
+
 export const costControlApi = {
   get: (projectId: string) =>
     request<CostControlDto>(`/projects/${projectId}/cost-control`),
@@ -801,6 +865,62 @@ export const incidenciasPRLApi = {
     request<void>(`/incidencias-prl/${id}`, { method: 'DELETE' }),
 };
 
+export const bimApi = {
+  list: (projectId: string) =>
+    request<BimModelDto[]>(`/bim/models?projectId=${projectId}`),
+  get: (id: string) => request<BimModelDto>(`/bim/models/${id}`),
+  upload: (file: File, projectId: string, name: string) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('projectId', projectId);
+    form.append('name', name);
+    return request<BimModelDto>('/bim/models', { method: 'POST', body: form });
+  },
+  remove: (id: string) =>
+    request<void>(`/bim/models/${id}`, { method: 'DELETE' }),
+  listLinks: (modelId: string) =>
+    request<BimElementLinkDto[]>(`/bim/models/${modelId}/links`),
+  upsertLink: (
+    modelId: string,
+    globalId: string,
+    input: BimElementLinkUpsertInput,
+  ) =>
+    request<BimElementLinkDto>(
+      `/bim/models/${modelId}/links/${encodeURIComponent(globalId)}`,
+      { method: 'PUT', body: JSON.stringify(input) },
+    ),
+  /**
+   * Descarga el `.ifc` original ya autenticado, como buffer — el visor 3D
+   * lo necesita en memoria (`IfcAPI.OpenModel`), y `/bim/models/:id/file`
+   * exige `Authorization: Bearer`, que un `<img>`/`src` de navegador nunca
+   * manda por su cuenta.
+   */
+  fetchModelBuffer: async (id: string): Promise<ArrayBuffer> => {
+    const session = readStoredSession();
+    const res = await fetch(`${API_URL}/bim/models/${id}/file`, {
+      headers: session?.accessToken
+        ? { Authorization: `Bearer ${session.accessToken}` }
+        : {},
+    });
+    if (!res.ok) throw new ApiError(`Error ${res.status}`, res.status);
+    return res.arrayBuffer();
+  },
+};
+
+export const contractAiApi = {
+  auditar: (input: ContractAuditRequestInput) =>
+    request<ContractAuditDto>('/contract-ai/auditar', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  list: (projectId?: string) =>
+    request<ContractAuditDto[]>(
+      `/contract-ai/auditorias${projectId ? `?projectId=${projectId}` : ''}`,
+    ),
+  get: (id: string) =>
+    request<ContractAuditDto>(`/contract-ai/auditorias/${id}`),
+};
+
 export const treasuryApi = {
   milestones: (options: {
     direction?: string;
@@ -826,6 +946,106 @@ export const treasuryApi = {
     if (to) params.set('to', to);
     return request<CashflowReportDto>(`/treasury/cashflow?${params}`);
   },
+  illiquidity: (from?: string) =>
+    request<IlliquidityProjectionDto>(
+      `/treasury/iliquidez${from ? `?from=${from}` : ''}`,
+    ),
+  listBankAccounts: (activa?: boolean) =>
+    request<BankAccountDto[]>(
+      `/treasury/cuentas${activa !== undefined ? `?activa=${activa}` : ''}`,
+    ),
+  createBankAccount: (input: BankAccountCreateInput) =>
+    request<BankAccountDto>('/treasury/cuentas', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateBankAccount: (id: string, input: BankAccountUpdateInput) =>
+    request<BankAccountDto>(`/treasury/cuentas/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+};
+
+export const investorsApi = {
+  listInvestors: () => request<InvestorDto[]>('/investors'),
+  createInvestor: (input: InvestorCreateInput) =>
+    request<InvestorDto>('/investors', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateInvestor: (id: string, input: InvestorUpdateInput) =>
+    request<InvestorDto>(`/investors/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  listAccounts: (projectId?: string) =>
+    request<InvestmentAccountDto[]>(
+      `/investment-accounts${projectId ? `?projectId=${projectId}` : ''}`,
+    ),
+  getAccount: (id: string) =>
+    request<InvestmentAccountDto>(`/investment-accounts/${id}`),
+  createAccount: (input: InvestmentAccountCreateInput) =>
+    request<InvestmentAccountDto>('/investment-accounts', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateAccount: (id: string, input: InvestmentAccountUpdateInput) =>
+    request<InvestmentAccountDto>(`/investment-accounts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  removeAccount: (id: string) =>
+    request<void>(`/investment-accounts/${id}`, { method: 'DELETE' }),
+  report: (id: string, discountRate: number, asOfDate?: string) => {
+    const params = new URLSearchParams({ discountRate: String(discountRate) });
+    if (asOfDate) params.set('asOfDate', asOfDate);
+    return request<InvestmentAccountReportDto>(
+      `/investment-accounts/${id}/informe?${params}`,
+    );
+  },
+  listParticipations: (accountId: string) =>
+    request<ParticipationDto[]>(
+      `/investment-accounts/${accountId}/participations`,
+    ),
+  createParticipation: (accountId: string, input: ParticipationCreateInput) =>
+    request<ParticipationDto>(
+      `/investment-accounts/${accountId}/participations`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    ),
+  updateParticipation: (
+    accountId: string,
+    participationId: string,
+    input: ParticipationUpdateInput,
+  ) =>
+    request<ParticipationDto>(
+      `/investment-accounts/${accountId}/participations/${participationId}`,
+      { method: 'PATCH', body: JSON.stringify(input) },
+    ),
+  removeParticipation: (accountId: string, participationId: string) =>
+    request<void>(
+      `/investment-accounts/${accountId}/participations/${participationId}`,
+      { method: 'DELETE' },
+    ),
+  listCashflows: (accountId: string) =>
+    request<InvestmentCashflowDto[]>(
+      `/investment-accounts/${accountId}/cashflows`,
+    ),
+  createCashflow: (accountId: string, input: InvestmentCashflowCreateInput) =>
+    request<InvestmentCashflowDto>(
+      `/investment-accounts/${accountId}/cashflows`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    ),
+  distribute: (accountId: string, input: DistributeDividendInput) =>
+    request<DistributeDividendResultDto>(
+      `/investment-accounts/${accountId}/distribuir`,
+      { method: 'POST', body: JSON.stringify(input) },
+    ),
 };
 
 export const budgetsApi = {

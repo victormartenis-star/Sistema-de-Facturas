@@ -4,7 +4,14 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
-import { closeDb, companies, Db, getDb, userProjectAccess } from '@erp/db';
+import {
+  closeDb,
+  companies,
+  Db,
+  getDb,
+  userProjectAccess,
+  users,
+} from '@erp/db';
 import { getRequestContext } from '../common/request-context';
 
 @Injectable()
@@ -45,8 +52,9 @@ export class DbService implements OnModuleDestroy {
   }
 
   /**
-   * Para el rol `obra`, devuelve los projectIds a los que el usuario tiene
-   * acceso explícito. Para los demás roles devuelve `null` (sin restricción).
+   * Para los roles `obra` y `cliente` (Fase 14, portal de clientes de solo
+   * lectura), devuelve los projectIds a los que el usuario tiene acceso
+   * explícito. Para los demás roles devuelve `null` (sin restricción).
    *
    * Uso en servicios:
    * ```ts
@@ -58,12 +66,33 @@ export class DbService implements OnModuleDestroy {
    */
   async getObrasAccesibles(): Promise<string[] | null> {
     const ctx = this.getContext();
-    if (ctx.role !== 'obra') return null;
+    if (ctx.role !== 'obra' && ctx.role !== 'cliente') return null;
     const rows = await this.db
       .select({ projectId: userProjectAccess.projectId })
       .from(userProjectAccess)
       .where(eq(userProjectAccess.userId, ctx.userId));
     return rows.map((r) => r.projectId);
+  }
+
+  /**
+   * Para el rol `subcontrata` (Fase 14, portal de subcontratas), el
+   * contacto que representa el usuario autenticado. Lanza si el usuario no
+   * tiene un contacto asignado (alta a medias) — sin contacto el portal no
+   * tiene nada que mostrar.
+   */
+  async getContactId(): Promise<string> {
+    const ctx = this.getContext();
+    const [row] = await this.db
+      .select({ contactId: users.contactId })
+      .from(users)
+      .where(eq(users.id, ctx.userId))
+      .limit(1);
+    if (!row?.contactId) {
+      throw new UnauthorizedException(
+        'Este usuario de portal no tiene una subcontrata asignada',
+      );
+    }
+    return row.contactId;
   }
 
   /**

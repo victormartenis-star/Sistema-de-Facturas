@@ -7,7 +7,7 @@ import {
   SetMetadata,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { AccessTokenPayload, UserRole } from '@erp/shared';
+import { AccessTokenPayload, isPortalRole, UserRole } from '@erp/shared';
 import type { AuthenticatedRequest } from './jwt-auth.guard';
 
 export const ROLES_KEY = 'roles';
@@ -30,8 +30,22 @@ export class RolesGuard implements CanActivate {
       ROLES_KEY,
       [context.getHandler(), context.getClass()],
     );
-    if (!required || required.length === 0) return true;
     const { user } = context.switchToHttp().getRequest<AuthenticatedRequest>();
+
+    // Los roles de portal (Fase 14: `subcontrata`, `cliente`) son opt-in:
+    // a diferencia del resto de roles, sin un `@Roles(...)` que los
+    // mencione explícitamente quedan fuera. Así un endpoint interno nuevo
+    // que se olvide de anotar `@Roles` no queda abierto sin querer a un
+    // usuario de portal — lo contrario del resto de roles, donde no poner
+    // `@Roles` significa "cualquier usuario autenticado".
+    if (user && isPortalRole(user.role)) {
+      if (!required || !required.includes(user.role)) {
+        throw new ForbiddenException('No tienes permiso para esta operación');
+      }
+      return true;
+    }
+
+    if (!required || required.length === 0) return true;
     if (!user || !required.includes(user.role)) {
       throw new ForbiddenException('No tienes permiso para esta operación');
     }

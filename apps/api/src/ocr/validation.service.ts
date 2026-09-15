@@ -21,9 +21,12 @@ import {
   ValidationItemDto,
   ValidationResultDto,
   extractionValidateSchema,
+  todayIso,
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
 import { InvoicesService } from '../invoices/invoices.service';
+import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
+import { DeliveryNotesService } from '../delivery-notes/delivery-notes.service';
 import { ExtractionService } from './extraction.service';
 
 function toExtractionDto(row: Extraction): ExtractionDto {
@@ -44,6 +47,8 @@ export class ValidationService {
     private readonly dbs: DbService,
     private readonly extraction: ExtractionService,
     private readonly invoices: InvoicesService,
+    private readonly orders: PurchaseOrdersService,
+    private readonly deliveryNotesSvc: DeliveryNotesService,
   ) {}
 
   /**
@@ -82,6 +87,14 @@ export class ValidationService {
       const project = payload?.projectHint
         ? await this.findProjectByHint(companyId, payload.projectHint)
         : null;
+      const order =
+        payload?.docType === 'albaran' && contact
+          ? await this.findMatchingOrder(
+              contact.id,
+              project?.id,
+              payload.totalAmount ?? payload.baseAmount,
+            )
+          : null;
 
       items.push({
         documentId: doc.id,
@@ -96,6 +109,8 @@ export class ValidationService {
         suggestedContactName: contact?.legalName ?? null,
         suggestedProjectId: project?.id ?? null,
         suggestedProjectCode: project?.code ?? null,
+        suggestedOrderId: order?.id ?? null,
+        suggestedOrderNumber: order?.orderNumber ?? null,
       });
     }
     return items;
@@ -139,6 +154,10 @@ export class ValidationService {
     if (data.createInvoice) {
       invoiceId = await this.createInvoiceFrom(doc, payload, data);
     }
+    let deliveryNoteId: string | null = null;
+    if (data.createDeliveryNote) {
+      deliveryNoteId = await this.createDeliveryNoteFrom(doc, payload, data);
+    }
 
     await this.dbs.db
       .update(documents)
@@ -149,13 +168,16 @@ export class ValidationService {
       })
       .where(eq(documents.id, documentId));
 
+    const messages: string[] = ['Documento validado'];
+    if (invoiceId) messages.push('factura creada en borrador');
+    if (deliveryNoteId) messages.push('albarán creado');
+
     return {
       documentId,
       status: 'validado',
       invoiceId,
-      message: invoiceId
-        ? 'Documento validado y factura creada en borrador'
-        : 'Documento validado',
+      deliveryNoteId,
+      message: messages.join(' y '),
     };
   }
 
@@ -217,6 +239,61 @@ export class ValidationService {
       deliveryNoteIds: [],
     });
     return invoice.id;
+  }
+
+  private async createDeliveryNoteFrom(
+    doc: Document,
+    payload: ExtractionPayload,
+    data: ReturnType<typeof extractionValidateSchema.parse>,
+  ): Promise<string> {
+    const contactId = data.contactId ?? null;
+    if (!contactId) {
+      throw new BadRequestException(
+        'Para crear el albarán hay que indicar el proveedor. Si no existe, créalo antes en Contactos.',
+      );
+    }
+    const noteNumber = data.noteNumber ?? payload.invoiceNumber;
+    const amount = data.baseAmount ?? payload.totalAmount ?? payload.baseAmount;
+    if (!noteNumber || amount === null) {
+      throw new BadRequestException(
+        'Faltan datos para crear el albarán: número e importe son obligatorios',
+      );
+    }
+    const note = await this.deliveryNotesSvc.create({
+      contactId,
+      projectId: data.projectId ?? doc.projectId ?? null,
+      orderId: data.orderId ?? null,
+      noteNumber,
+      noteDate: data.issueDate ?? payload.issueDate ?? todayIso(),
+      description: payload.summary || doc.fileName,
+      amount,
+    });
+    return note.id;
+  }
+
+  /**
+   * Pedido abierto del mismo proveedor (y obra si se conoce) cuyo importe
+   * pendiente de servir más se acerca al importe leído en el albarán.
+   * Cotejo automático albarán↔pedido; el humano confirma o corrige.
+   */
+  private async findMatchingOrder(
+    contactId: string,
+    projectId: string | undefined,
+    amount: number | null,
+  ) {
+    const candidates = await this.orders.list({
+      contactId,
+      projectId,
+      receiving: true,
+    });
+    if (candidates.length === 0) return null;
+    if (amount === null) return candidates[0];
+    return candidates.reduce((best, current) =>
+      Math.abs(current.pendingToDeliver - amount) <
+      Math.abs(best.pendingToDeliver - amount)
+        ? current
+        : best,
+    );
   }
 
   private async latestByDocument(
