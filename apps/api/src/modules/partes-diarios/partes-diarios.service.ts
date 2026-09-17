@@ -8,6 +8,7 @@ import {
   partesPersonal,
   projectPhases,
   projects,
+  trabajadores,
 } from '@erp/db';
 import {
   ParteMaquinariaCreateInput,
@@ -29,6 +30,7 @@ import { DbService } from '../../db/db.service';
 function personalToDto(
   row: PartePersonal,
   phaseCode: string | null,
+  trabajadorNombre: string | null,
 ): PartePersonalDto {
   return {
     id: row.id,
@@ -36,6 +38,8 @@ function personalToDto(
     phaseId: row.phaseId,
     phaseCode,
     workerName: row.workerName,
+    trabajadorId: row.trabajadorId,
+    trabajadorNombre,
     categoryId: row.categoryId,
     workDate: row.workDate,
     ordinaryHours: Number(row.ordinaryHours),
@@ -111,13 +115,20 @@ export class PartesDiariosService {
     if (filter.to) conditions.push(lte(partesPersonal.workDate, filter.to));
 
     const rows = await this.dbs.db
-      .select({ parte: partesPersonal, phaseCode: projectPhases.code })
+      .select({
+        parte: partesPersonal,
+        phaseCode: projectPhases.code,
+        trabajadorNombre: trabajadores.nombre,
+      })
       .from(partesPersonal)
       .leftJoin(projectPhases, eq(partesPersonal.phaseId, projectPhases.id))
+      .leftJoin(trabajadores, eq(partesPersonal.trabajadorId, trabajadores.id))
       .where(and(...conditions))
       .orderBy(desc(partesPersonal.workDate), asc(partesPersonal.workerName));
 
-    return rows.map((r) => personalToDto(r.parte, r.phaseCode));
+    return rows.map((r) =>
+      personalToDto(r.parte, r.phaseCode, r.trabajadorNombre),
+    );
   }
 
   async createPersonal(
@@ -129,6 +140,9 @@ export class PartesDiariosService {
     const phase = data.phaseId
       ? await this.findPhase(data.phaseId, data.projectId)
       : null;
+    const trabajador = data.trabajadorId
+      ? await this.findTrabajador(data.trabajadorId, companyId)
+      : null;
     const totalCost = computePartePersonalCost(data);
 
     const [row] = await this.dbs.db
@@ -138,6 +152,7 @@ export class PartesDiariosService {
         projectId: data.projectId,
         phaseId: data.phaseId ?? null,
         workerName: data.workerName,
+        trabajadorId: data.trabajadorId ?? null,
         categoryId: data.categoryId ?? null,
         workDate: data.workDate,
         ordinaryHours: data.ordinaryHours.toFixed(2),
@@ -155,7 +170,7 @@ export class PartesDiariosService {
       action: 'create',
       newData: row,
     });
-    return personalToDto(row, phase?.code ?? null);
+    return personalToDto(row, phase?.code ?? null, trabajador?.nombre ?? null);
   }
 
   async updatePersonal(
@@ -163,10 +178,13 @@ export class PartesDiariosService {
     input: PartePersonalUpdateInput,
   ): Promise<PartePersonalDto> {
     const existing = await this.findPersonal(id);
+    const companyId = await this.dbs.getCompanyId();
     const data = partePersonalUpdateSchema.parse(input);
     const phaseId =
       data.phaseId !== undefined ? data.phaseId : existing.phaseId;
     if (data.phaseId) await this.findPhase(data.phaseId, existing.projectId);
+    if (data.trabajadorId)
+      await this.findTrabajador(data.trabajadorId, companyId);
 
     const merged = {
       ordinaryHours: data.ordinaryHours ?? Number(existing.ordinaryHours),
@@ -181,6 +199,9 @@ export class PartesDiariosService {
       .set({
         ...(data.phaseId !== undefined && { phaseId: data.phaseId ?? null }),
         ...(data.workerName !== undefined && { workerName: data.workerName }),
+        ...(data.trabajadorId !== undefined && {
+          trabajadorId: data.trabajadorId ?? null,
+        }),
         ...(data.categoryId !== undefined && {
           categoryId: data.categoryId ?? null,
         }),
@@ -197,7 +218,10 @@ export class PartesDiariosService {
       .returning();
 
     const phase = phaseId ? await this.findPhase(phaseId, row.projectId) : null;
-    return personalToDto(row, phase?.code ?? null);
+    const trabajador = row.trabajadorId
+      ? await this.findTrabajador(row.trabajadorId, companyId)
+      : null;
+    return personalToDto(row, phase?.code ?? null, trabajador?.nombre ?? null);
   }
 
   async removePersonal(id: string): Promise<void> {
@@ -222,7 +246,13 @@ export class PartesDiariosService {
     const phase = existing.phaseId
       ? await this.findPhase(existing.phaseId, existing.projectId)
       : null;
-    return personalToDto(row, phase?.code ?? null);
+    const trabajador = existing.trabajadorId
+      ? await this.findTrabajador(
+          existing.trabajadorId,
+          await this.dbs.getCompanyId(),
+        )
+      : null;
+    return personalToDto(row, phase?.code ?? null, trabajador?.nombre ?? null);
   }
 
   /* ────────────────────── maquinaria ────────────────────── */
@@ -393,11 +423,18 @@ export class PartesDiariosService {
   /* ────────────────────── privados ────────────────────── */
 
   private async findPersonal(id: string): Promise<PartePersonal> {
+    const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     const [row] = await this.dbs.db
       .select()
       .from(partesPersonal)
-      .where(and(eq(partesPersonal.id, id), isNull(partesPersonal.deletedAt)))
+      .where(
+        and(
+          eq(partesPersonal.id, id),
+          eq(partesPersonal.companyId, companyId),
+          isNull(partesPersonal.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row || (allowed !== null && !allowed.includes(row.projectId))) {
       throw new NotFoundException('Parte de personal no encontrado');
@@ -406,12 +443,17 @@ export class PartesDiariosService {
   }
 
   private async findMaquinaria(id: string): Promise<ParteMaquinaria> {
+    const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     const [row] = await this.dbs.db
       .select()
       .from(partesMaquinaria)
       .where(
-        and(eq(partesMaquinaria.id, id), isNull(partesMaquinaria.deletedAt)),
+        and(
+          eq(partesMaquinaria.id, id),
+          eq(partesMaquinaria.companyId, companyId),
+          isNull(partesMaquinaria.deletedAt),
+        ),
       )
       .limit(1);
     if (!row || (allowed !== null && !allowed.includes(row.projectId))) {
@@ -436,6 +478,22 @@ export class PartesDiariosService {
     return row;
   }
 
+  private async findTrabajador(trabajadorId: string, companyId: string) {
+    const [row] = await this.dbs.db
+      .select()
+      .from(trabajadores)
+      .where(
+        and(
+          eq(trabajadores.id, trabajadorId),
+          eq(trabajadores.companyId, companyId),
+          isNull(trabajadores.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!row) throw new NotFoundException('Trabajador no encontrado');
+    return row;
+  }
+
   private async findPhase(phaseId: string, projectId: string) {
     const [row] = await this.dbs.db
       .select()
@@ -453,6 +511,7 @@ export class PartesDiariosService {
   }
 
   private async findProject(projectId: string) {
+    const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
       throw new NotFoundException('Obra no encontrada');
@@ -460,7 +519,13 @@ export class PartesDiariosService {
     const [row] = await this.dbs.db
       .select()
       .from(projects)
-      .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
+      .where(
+        and(
+          eq(projects.id, projectId),
+          eq(projects.companyId, companyId),
+          isNull(projects.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) throw new NotFoundException('Obra no encontrada');
     return row;

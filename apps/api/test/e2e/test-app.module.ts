@@ -21,6 +21,7 @@ import { RealEstateModule } from '../../src/modules/real-estate/real-estate.modu
 import { OfflineFieldModule } from '../../src/modules/offline-field/offline-field.module';
 import { ComparativosModule } from '../../src/modules/comparativos/comparativos.module';
 import { EquiposModule } from '../../src/modules/equipos/equipos.module';
+import { TrabajadoresModule } from '../../src/modules/trabajadores/trabajadores.module';
 import { EsgModule } from '../../src/modules/esg/esg.module';
 import { PartesDiariosModule } from '../../src/modules/partes-diarios/partes-diarios.module';
 import { OcrModule } from '../../src/ocr/ocr.module';
@@ -77,6 +78,7 @@ import { UsersModule } from '../../src/users/users.module';
     ComparativosModule,
     PartesDiariosModule,
     EquiposModule,
+    TrabajadoresModule,
     EsgModule,
     BimModule,
     ContractAiModule,

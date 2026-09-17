@@ -7,7 +7,7 @@ import {
   todayIso,
   type MaquinariaOwnership,
 } from '@erp/shared';
-import { partesDiariosApi, projectsApi } from '@/lib/api';
+import { partesDiariosApi, projectsApi, trabajadoresApi } from '@/lib/api';
 import { useToast } from '@/components/toast';
 import { IconCalendar, IconCheck } from '@/components/icons';
 import {
@@ -27,6 +27,7 @@ const errText = (e: unknown) =>
 function PersonalQuickForm({ projectId }: { projectId: string }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const [trabajadorId, setTrabajadorId] = useState('');
   const [workerName, setWorkerName] = useState('');
   const [workDate, setWorkDate] = useState(todayIso());
   const [ordinaryHours, setOrdinaryHours] = useState('8');
@@ -34,11 +35,30 @@ function PersonalQuickForm({ projectId }: { projectId: string }) {
   const [ordinaryRate, setOrdinaryRate] = useState('');
   const [overtimeRate, setOvertimeRate] = useState('');
 
+  const trabajadoresQuery = useQuery({
+    queryKey: ['trabajadores', undefined, true],
+    queryFn: () => trabajadoresApi.list({ activo: true }),
+  });
+  const trabajadores = trabajadoresQuery.data ?? [];
+
+  function elegirTrabajador(id: string) {
+    setTrabajadorId(id);
+    const t = trabajadores.find((tr) => tr.id === id);
+    if (t) {
+      setWorkerName(t.nombre);
+      if (t.ordinaryRateDefault !== null)
+        setOrdinaryRate(String(t.ordinaryRateDefault));
+      if (t.overtimeRateDefault !== null)
+        setOvertimeRate(String(t.overtimeRateDefault));
+    }
+  }
+
   const mutation = useMutation({
     mutationFn: () =>
       partesDiariosApi.createPersonal({
         projectId,
         workerName,
+        trabajadorId: trabajadorId || null,
         workDate,
         ordinaryHours: Number(ordinaryHours.replace(',', '.')) || 0,
         overtimeHours: Number(overtimeHours.replace(',', '.')) || 0,
@@ -47,6 +67,7 @@ function PersonalQuickForm({ projectId }: { projectId: string }) {
       }),
     onSuccess: () => {
       toast('Parte de personal guardado');
+      setTrabajadorId('');
       setWorkerName('');
       qc.invalidateQueries({ queryKey: ['partes-personal'] });
     },
@@ -62,11 +83,26 @@ function PersonalQuickForm({ projectId }: { projectId: string }) {
       }}
       className="grid grid-cols-2 gap-3 sm:grid-cols-6"
     >
+      <select
+        className={fieldCls}
+        value={trabajadorId}
+        onChange={(e) => elegirTrabajador(e.target.value)}
+      >
+        <option value="">Operario libre (sin ficha)…</option>
+        {trabajadores.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.nombre}
+          </option>
+        ))}
+      </select>
       <input
-        className={`${fieldCls} col-span-2 sm:col-span-2`}
+        className={fieldCls}
         placeholder="Nombre del operario"
         value={workerName}
-        onChange={(e) => setWorkerName(e.target.value)}
+        onChange={(e) => {
+          setWorkerName(e.target.value);
+          setTrabajadorId('');
+        }}
         required
       />
       <input

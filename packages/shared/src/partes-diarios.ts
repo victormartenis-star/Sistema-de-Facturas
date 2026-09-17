@@ -24,6 +24,8 @@ export const partePersonalCreateSchema = z.object({
     .trim()
     .min(1, 'El nombre del operario es obligatorio')
     .max(200, 'Máximo 200 caracteres'),
+  /** Ficha del maestro de trabajadores; opcional para no romper partes ya existentes. */
+  trabajadorId: z.string().uuid('Trabajador no válido').nullish(),
   categoryId: z.string().uuid('Categoría no válida').nullish(),
   workDate: isoDate,
   ordinaryHours: z
@@ -64,6 +66,8 @@ export interface PartePersonalDto {
   phaseId: string | null;
   phaseCode: string | null;
   workerName: string;
+  trabajadorId: string | null;
+  trabajadorNombre: string | null;
   categoryId: string | null;
   workDate: string;
   ordinaryHours: number;

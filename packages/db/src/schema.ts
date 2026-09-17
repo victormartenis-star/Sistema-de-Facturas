@@ -1124,8 +1124,12 @@ export const partesPersonal = pgTable('partes_personal', {
   phaseId: uuid('phase_id').references(() => projectPhases.id, {
     onDelete: 'set null',
   }),
-  /** Personal propio: no hay maestro de trabajadores todavía, se anota el nombre. */
+  /** Texto libre histórico; desde el maestro de trabajadores el alta nueva debería enlazar `trabajadorId`. */
   workerName: text('worker_name').notNull(),
+  /** Ficha del maestro de trabajadores; nulo en partes históricos o sin ficha dada de alta. */
+  trabajadorId: uuid('trabajador_id').references(() => trabajadores.id, {
+    onDelete: 'set null',
+  }),
   categoryId: uuid('category_id').references(() => categories.id),
   workDate: date('work_date').notNull(),
   ordinaryHours: numeric('ordinary_hours', { precision: 5, scale: 2 })
@@ -1305,6 +1309,56 @@ export type Equipo = typeof equipos.$inferSelect;
 export type NewEquipo = typeof equipos.$inferInsert;
 export type MantenimientoEquipo = typeof mantenimientosEquipo.$inferSelect;
 export type NewMantenimientoEquipo = typeof mantenimientosEquipo.$inferInsert;
+
+/**
+ * Maestro de trabajadores: mismo hueco que `equipos` cerró para maquinaria,
+ * ahora para personas — `partes_personal.worker_name` era texto libre
+ * porque no había ficha del operario. Referencia a `proveedores` resuelta
+ * por closure, igual que en `equipos` (el orden de declaración no importa).
+ */
+export const trabajadorTipoEnum = pgEnum('trabajador_tipo', [
+  'propio',
+  'subcontratado',
+]);
+
+export const trabajadores = pgTable('trabajadores', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id')
+    .notNull()
+    .references(() => companies.id),
+  nombre: text('nombre').notNull(),
+  /** DNI/NIE; libre porque a veces se da de alta sin él (alta urgente en obra). */
+  documentoIdentidad: text('documento_identidad'),
+  categoryId: uuid('category_id').references(() => categories.id),
+  tipo: trabajadorTipoEnum('tipo').notNull().default('propio'),
+  /** Subcontrata a la que pertenece; solo tiene sentido con tipo = 'subcontratado'. */
+  proveedorId: uuid('proveedor_id').references(() => proveedores.id, {
+    onDelete: 'set null',
+  }),
+  /** Tarifas habituales para prellenar el alta de un parte; el parte puede pisarlas. */
+  ordinaryRateDefault: numeric('ordinary_rate_default', {
+    precision: 10,
+    scale: 2,
+  }),
+  overtimeRateDefault: numeric('overtime_rate_default', {
+    precision: 10,
+    scale: 2,
+  }),
+  activo: boolean('activo').notNull().default(true),
+  fechaAlta: date('fecha_alta'),
+  fechaBaja: date('fecha_baja'),
+  notas: text('notas'),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type Trabajador = typeof trabajadores.$inferSelect;
+export type NewTrabajador = typeof trabajadores.$inferInsert;
 
 // ─── Proveedores y subcontratas: ficha extendida (Fase 11) ────────────────
 /**

@@ -181,6 +181,9 @@ import type {
   PurchaseOrderUpdateInput,
   RegisterInput,
   TraceabilityReportDto,
+  TrabajadorCreateInput,
+  TrabajadorDto,
+  TrabajadorUpdateInput,
   UserCreateInput,
   UserDto,
   ValidationItemDto,
@@ -572,6 +575,30 @@ export const equiposApi = {
     }),
   removeMantenimiento: (id: string) =>
     request<void>(`/equipos/mantenimientos/${id}`, { method: 'DELETE' }),
+};
+
+export const trabajadoresApi = {
+  list: (filter: { activo?: boolean; tipo?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (filter.activo !== undefined)
+      params.set('activo', String(filter.activo));
+    if (filter.tipo) params.set('tipo', filter.tipo);
+    const qs = params.toString();
+    return request<TrabajadorDto[]>(`/trabajadores${qs ? `?${qs}` : ''}`);
+  },
+  get: (id: string) => request<TrabajadorDto>(`/trabajadores/${id}`),
+  create: (input: TrabajadorCreateInput) =>
+    request<TrabajadorDto>('/trabajadores', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  update: (id: string, input: TrabajadorUpdateInput) =>
+    request<TrabajadorDto>(`/trabajadores/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  remove: (id: string) =>
+    request<void>(`/trabajadores/${id}`, { method: 'DELETE' }),
 };
 
 export const costControlApi = {
