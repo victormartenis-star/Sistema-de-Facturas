@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { VerifactuStatus } from './verifactu';
 
 /**
  * Facturas de compra y de venta con:
@@ -129,6 +130,8 @@ export interface InvoiceDto {
   notes: string | null;
   lines: InvoiceLineDto[];
   deliveryNotes: InvoiceDeliveryNoteRef[];
+  /** Estado del registro VeriFactu real (Fase 14) — distinto de la huella interna, ver `verifactu.ts`. */
+  verifactuStatus: VerifactuStatus;
   createdAt: string;
   updatedAt: string;
 }

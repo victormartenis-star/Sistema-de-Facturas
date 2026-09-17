@@ -15,11 +15,14 @@ import {
   type FacturaeVerifactuInfo,
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
+import { FacturaeSigningService } from './facturae-signing.service';
 import { InvoicesService } from './invoices.service';
 
 export interface FacturaeFileDto {
   xml: string;
   fileName: string;
+  /** true si el XML devuelto lleva firma XAdES-BES real (Fase 14) — false = sigue siendo el XML preliminar sin firmar. */
+  signed: boolean;
 }
 
 /** Solo caracteres seguros para un `Content-Disposition`; el número de factura es texto libre. */
@@ -29,17 +32,20 @@ function sanitizeFileName(value: string): string {
 
 /**
  * Genera el XML Facturae 3.2.2 de una factura de venta, con la huella de
- * encadenamiento VeriFactu incrustada como extensión propia.
+ * encadenamiento VeriFactu incrustada como extensión propia, y lo firma con
+ * XAdES-BES si hay certificado configurado (`FacturaeSigningService`, Fase
+ * 14) — si no, lo devuelve sin firmar, igual que siempre.
  *
- * Ver la cabecera de `packages/shared/src/facturae.ts` para el alcance
- * deliberadamente preliminar (sin firma XAdES, sin validar contra el XSD
- * oficial, direcciones fiscales con datos de relleno).
+ * Ver la cabecera de `packages/shared/src/facturae.ts` para el resto del
+ * alcance deliberadamente preliminar (sin validar contra el XSD oficial,
+ * direcciones fiscales con datos de relleno).
  */
 @Injectable()
 export class FacturaeService {
   constructor(
     private readonly dbs: DbService,
     private readonly invoicesService: InvoicesService,
+    private readonly signingService: FacturaeSigningService,
   ) {}
 
   async generate(invoiceId: string): Promise<FacturaeFileDto> {
@@ -112,7 +118,7 @@ export class FacturaeService {
       invoiceId,
     );
 
-    const xml = buildFacturaeXml({
+    const unsignedXml = buildFacturaeXml({
       invoiceNumber: invoice.invoiceNumber,
       issueDate: invoice.issueDate,
       seller,
@@ -131,9 +137,13 @@ export class FacturaeService {
       verifactu,
     });
 
+    const signed = this.signingService.enabled;
+    const xml = signed ? this.signingService.sign(unsignedXml) : unsignedXml;
+
     return {
       xml,
       fileName: `facturae-${sanitizeFileName(invoice.invoiceNumber)}.xml`,
+      signed,
     };
   }
 
@@ -154,7 +164,12 @@ export class FacturaeService {
    * caso raro, pero el chequeo de integridad lo detecta y se autocorrige
    * en vez de servir una huella obsoleta).
    */
-  private async computeVerifactuChain(
+  /**
+   * Pública porque `VerifactuSubmissionService` (Fase 14) también necesita
+   * la huella de una factura concreta para construir el `RegistroAlta` real
+   * — reutiliza este cálculo en vez de duplicarlo.
+   */
+  async computeVerifactuChain(
     companyId: string,
     issuerTaxId: string,
     targetInvoiceId: string,

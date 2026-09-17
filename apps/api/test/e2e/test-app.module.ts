@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AlertsModule } from '../../src/alerts/alerts.module';
+import { BankReconciliationModule } from '../../src/modules/bank-reconciliation/bank-reconciliation.module';
 import { SearchModule } from '../../src/search/search.module';
 import { InformesModule } from '../../src/modules/informes/informes.module';
 import { AuditModule } from '../../src/audit/audit.module';
@@ -94,6 +95,7 @@ import { UsersModule } from '../../src/users/users.module';
     PermisosModule,
     IncidenciasPRLModule,
     AlertsModule,
+    BankReconciliationModule,
     SearchModule,
     InformesModule,
   ],

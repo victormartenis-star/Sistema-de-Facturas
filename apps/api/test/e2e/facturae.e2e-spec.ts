@@ -1,7 +1,20 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { INestApplication } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { getDb, invoices } from '@erp/db';
-import { authed, createContact, createTestApp, registerUser } from './helpers';
+import { DOMParser } from '@xmldom/xmldom';
+import { SignedXml } from 'xml-crypto';
+import * as xpath from 'xpath';
+import {
+  authed,
+  createContact,
+  createObraUser,
+  createTestApp,
+  registerUser,
+} from './helpers';
 import { resetTestDb, seedCompany } from './reset-db';
 
 /**
@@ -184,5 +197,174 @@ describe('Facturae / VeriFactu (integración) — huella persistida', () => {
     await authed(app, admin.accessToken)
       .get(`/invoices/${(res.body as { id: string }).id}/facturae`)
       .expect(400);
+  });
+
+  describe('POST /invoices/:id/verifactu/enviar (Fase 14)', () => {
+    it('sin AEAT_CERT_PATH configurado, genera el registro y lo deja en generado_local', async () => {
+      delete process.env.AEAT_CERT_PATH;
+      delete process.env.AEAT_CERT_PASSWORD;
+      delete process.env.AEAT_ENDPOINT_URL;
+
+      const admin = await registerUser(app, { email: 'admin@test.dintel.es' });
+      const contact = await createContact(app, admin.accessToken, {
+        kind: 'cliente',
+        taxId: 'B66666666',
+      });
+      const invoiceId = await createVentaInvoice(admin.accessToken, contact.id);
+
+      const res = await authed(app, admin.accessToken)
+        .post(`/invoices/${invoiceId}/verifactu/enviar`)
+        .expect(201);
+      expect(res.body.status).toBe('generado_local');
+      expect(res.body.sentAt).toBeNull();
+      expect(res.body.xml).toContain('<sum:RegistroAlta');
+      // El emisor del registro es la propia empresa (seedCompany), no el cliente.
+      expect(res.body.xml).toContain('B00000000');
+
+      const db = getDb();
+      const [row] = await db
+        .select()
+        .from(invoices)
+        .where(eq(invoices.id, invoiceId));
+      expect(row.verifactuStatus).toBe('generado_local');
+      expect(row.verifactuSentAt).toBeNull();
+    });
+
+    it('rechaza una factura de compra o en borrador con 400', async () => {
+      const admin = await registerUser(app, { email: 'admin@test.dintel.es' });
+      const contact = await createContact(app, admin.accessToken, {
+        kind: 'cliente',
+        taxId: 'B77777777',
+      });
+      const draftRes = await authed(app, admin.accessToken)
+        .post('/invoices')
+        .send({
+          kind: 'venta',
+          contactId: contact.id,
+          invoiceNumber: `F-${Date.now()}`,
+          issueDate: '2026-09-14',
+          lines: [
+            { description: 'Certificación', baseAmount: 500, vatPct: 21 },
+          ],
+        })
+        .expect(201);
+      await authed(app, admin.accessToken)
+        .post(
+          `/invoices/${(draftRes.body as { id: string }).id}/verifactu/enviar`,
+        )
+        .expect(400);
+    });
+
+    it('un usuario `obra` no puede enviar VeriFactu (403)', async () => {
+      const admin = await registerUser(app, { email: 'admin@test.dintel.es' });
+      const contact = await createContact(app, admin.accessToken, {
+        kind: 'cliente',
+        taxId: 'B88888888',
+      });
+      const invoiceId = await createVentaInvoice(admin.accessToken, contact.id);
+      const { tokens: obraTokens } = await createObraUser(
+        app,
+        admin.accessToken,
+        [],
+      );
+      await authed(app, obraTokens.accessToken)
+        .post(`/invoices/${invoiceId}/verifactu/enviar`)
+        .expect(403);
+    });
+  });
+
+  describe('GET /invoices/:id/facturae con firma XAdES-BES (Fase 14)', () => {
+    let certDir: string;
+    let certPath: string;
+    let keyPath: string;
+
+    beforeAll(() => {
+      // Certificado autofirmado de test, generado para esta pasada de tests
+      // y nunca commiteado — ver `FacturaeSigningService` para por qué no es
+      // (ni pretende ser) un certificado cualificado real.
+      certDir = mkdtempSync(join(tmpdir(), 'facturae-xades-'));
+      certPath = join(certDir, 'cert.pem');
+      keyPath = join(certDir, 'key.pem');
+      execFileSync('openssl', [
+        'req',
+        '-x509',
+        '-newkey',
+        'rsa:2048',
+        '-keyout',
+        keyPath,
+        '-out',
+        certPath,
+        '-days',
+        '1',
+        '-nodes',
+        '-subj',
+        '/CN=Test ERP Dintel/O=Empresa de Pruebas de Integracion/C=ES',
+      ]);
+    });
+
+    afterAll(() => {
+      rmSync(certDir, { recursive: true, force: true });
+    });
+
+    it('sin certificado configurado, el XML sigue sin firmar (X-Facturae-Signed: false)', async () => {
+      delete process.env.FACTURAE_CERT_PATH;
+      delete process.env.FACTURAE_KEY_PATH;
+
+      const admin = await registerUser(app, { email: 'admin@test.dintel.es' });
+      const contact = await createContact(app, admin.accessToken, {
+        kind: 'cliente',
+        taxId: 'B99999991',
+      });
+      const invoiceId = await createVentaInvoice(admin.accessToken, contact.id);
+
+      const res = await authed(app, admin.accessToken)
+        .get(`/invoices/${invoiceId}/facturae`)
+        .expect(200);
+      expect(res.headers['x-facturae-signed']).toBe('false');
+      expect(res.text).not.toContain('<ds:Signature');
+    });
+
+    it('con certificado configurado, firma con XAdES-BES y la firma valida criptográficamente', async () => {
+      process.env.FACTURAE_CERT_PATH = certPath;
+      process.env.FACTURAE_KEY_PATH = keyPath;
+
+      const admin = await registerUser(app, { email: 'admin@test.dintel.es' });
+      const contact = await createContact(app, admin.accessToken, {
+        kind: 'cliente',
+        taxId: 'B99999992',
+      });
+      const invoiceId = await createVentaInvoice(admin.accessToken, contact.id);
+
+      const res = await authed(app, admin.accessToken)
+        .get(`/invoices/${invoiceId}/facturae`)
+        .expect(200);
+      expect(res.headers['x-facturae-signed']).toBe('true');
+      const xml = res.text;
+      expect(xml).toContain('<ds:Signature');
+      expect(xml).toContain('<xades:QualifyingProperties');
+      expect(xml).toContain('<xades:SigningTime>');
+      expect(xml).toContain('<xades:SigningCertificate>');
+      // `<ds:Object>` queda como hermano de `<ds:Signature>`, no anidado
+      // dentro — desviación estructural deliberada, ver la cabecera de
+      // `FacturaeSigningService` para el porqué (anidarlo invalida la firma).
+      expect(xml).toMatch(/<ds:Object[\s\S]*<ds:Signature/);
+
+      // La prueba real: la firma valida contra el propio certificado, con
+      // la misma librería que la firmó — no solo "parece" una firma. La API
+      // de `xml-crypto` exige seleccionar el nodo `<Signature>` a mano
+      // (`loadSignature`) antes de `checkSignature`, ver su README.
+      const certPem = readFileSync(certPath, 'utf-8');
+      const doc = new DOMParser().parseFromString(xml);
+      const signatureNode = xpath.select1(
+        "//*[local-name(.)='Signature' and namespace-uri(.)='http://www.w3.org/2000/09/xmldsig#']",
+        doc,
+      );
+      const verifier = new SignedXml({ publicCert: certPem });
+      verifier.loadSignature(signatureNode as unknown as Node);
+      expect(verifier.checkSignature(xml)).toBe(true);
+
+      delete process.env.FACTURAE_CERT_PATH;
+      delete process.env.FACTURAE_KEY_PATH;
+    });
   });
 });

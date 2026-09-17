@@ -265,6 +265,20 @@ export const invoiceStatusEnum = pgEnum('invoice_status', [
 ]);
 
 /**
+ * Estado del *Registro de Facturación* VeriFactu real (Fase 14), no
+ * confundir con la huella interna `verifactu_hash` (Fase 11, siempre se
+ * calcula). `generado_local` = XML construido pero no enviado (sin
+ * `AEAT_CERT_PATH` configurado, el caso de hoy); `enviado` exige un
+ * certificado real, nunca ejercitado en esta sesión.
+ */
+export const verifactuStatusEnum = pgEnum('verifactu_status', [
+  'no_generado',
+  'generado_local',
+  'enviado',
+  'error',
+]);
+
+/**
  * Facturas de compra y venta. Los importes se guardan calculados
  * (base, IVA, total, retención) para que el histórico no cambie si
  * mañana cambian los tipos. ISP ⇒ IVA 0 + leyenda legal en el PDF.
@@ -312,6 +326,11 @@ export const invoices = pgTable(
     verifactuGeneratedAt: timestamp('verifactu_generated_at', {
       withTimezone: true,
     }),
+    /** Envío real a la AEAT (Fase 14) — ver `verifactuStatusEnum`. */
+    verifactuStatus: verifactuStatusEnum('verifactu_status')
+      .notNull()
+      .default('no_generado'),
+    verifactuSentAt: timestamp('verifactu_sent_at', { withTimezone: true }),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -2860,3 +2879,47 @@ export const notifications = pgTable(
 
 export type Notification = typeof notifications.$inferSelect;
 export type NewNotification = typeof notifications.$inferInsert;
+
+/* ═══════════════ Conciliación bancaria (Fase 14) ═══════════════
+ * Movimientos importados de un extracto (CSV o Norma 43/AEB43) para
+ * cuadrarlos contra `payment_milestones` — asistida, no automática: un
+ * movimiento propone un vencimiento candidato, una persona confirma.
+ */
+export const bankTransactions = pgTable(
+  'bank_transactions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    bankAccountId: uuid('bank_account_id')
+      .notNull()
+      .references(() => bankAccounts.id),
+    transactionDate: date('transaction_date').notNull(),
+    /** Con signo: positivo cobro, negativo pago — igual que lo trae el extracto. */
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    concept: text('concept').notNull(),
+    balanceAfter: numeric('balance_after', { precision: 14, scale: 2 }),
+    /** Referencia propia del banco, si el formato la trae (Norma 43 sí, el CSV genérico no siempre). */
+    bankReference: text('bank_reference'),
+    reconciledMilestoneId: uuid('reconciled_milestone_id').references(
+      () => paymentMilestones.id,
+    ),
+    reconciledAt: timestamp('reconciled_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Deduplica una reimportación accidental del mismo extracto.
+    unique('bank_transactions_dedupe_unique').on(
+      t.bankAccountId,
+      t.transactionDate,
+      t.amount,
+      t.concept,
+    ),
+  ],
+);
+
+export type BankTransaction = typeof bankTransactions.$inferSelect;
+export type NewBankTransaction = typeof bankTransactions.$inferInsert;

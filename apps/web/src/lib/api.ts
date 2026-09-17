@@ -77,6 +77,12 @@ import type {
   NotificationDto,
   NotificationsRunSummaryDto,
 } from '@erp/shared';
+import type {
+  BankImportSummaryDto,
+  BankStatementFormat,
+  BankTransactionDto,
+  MatchCandidate,
+} from '@erp/shared';
 import type { SearchResultDto } from '@erp/shared';
 import type {
   ActaRecepcionCreateInput,
@@ -1035,6 +1041,50 @@ export const treasuryApi = {
       method: 'PATCH',
       body: JSON.stringify(input),
     }),
+};
+
+export interface BankTransactionSuggestionDto {
+  transactionId: string;
+  candidates: MatchCandidate[];
+}
+
+export const bankReconciliationApi = {
+  import: (bankAccountId: string, format: BankStatementFormat, file: File) => {
+    const form = new FormData();
+    form.append('bankAccountId', bankAccountId);
+    form.append('format', format);
+    form.append('file', file);
+    return request<BankImportSummaryDto>('/bank-reconciliation/importar', {
+      method: 'POST',
+      body: form,
+    });
+  },
+  list: (bankAccountId?: string, reconciled?: boolean) => {
+    const params = new URLSearchParams();
+    if (bankAccountId) params.set('bankAccountId', bankAccountId);
+    if (reconciled !== undefined) params.set('reconciled', String(reconciled));
+    const qs = params.toString();
+    return request<BankTransactionDto[]>(
+      `/bank-reconciliation/transacciones${qs ? `?${qs}` : ''}`,
+    );
+  },
+  suggestions: (bankAccountId: string) =>
+    request<BankTransactionSuggestionDto[]>(
+      `/bank-reconciliation/sugerencias?bankAccountId=${bankAccountId}`,
+    ),
+  reconcile: (transactionId: string, milestoneId: string) =>
+    request<void>(
+      `/bank-reconciliation/transacciones/${transactionId}/conciliar`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ milestoneId }),
+      },
+    ),
+  unreconcile: (transactionId: string) =>
+    request<void>(
+      `/bank-reconciliation/transacciones/${transactionId}/desconciliar`,
+      { method: 'POST' },
+    ),
 };
 
 export const changeOrdersApi = {

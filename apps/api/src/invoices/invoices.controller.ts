@@ -22,15 +22,18 @@ import {
   invoiceCreateSchema,
   invoiceUpdateSchema,
 } from '@erp/shared';
+import { Roles } from '../auth/roles';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { FacturaeService } from './facturae.service';
 import { InvoicesService } from './invoices.service';
+import { VerifactuSubmissionService } from './verifactu-submission.service';
 
 @Controller('invoices')
 export class InvoicesController {
   constructor(
     private readonly service: InvoicesService,
     private readonly facturaeService: FacturaeService,
+    private readonly verifactuService: VerifactuSubmissionService,
   ) {}
 
   @Get()
@@ -64,10 +67,22 @@ export class InvoicesController {
     @Param('id', ParseUUIDPipe) id: string,
     @Res({ passthrough: true }) res: Response,
   ): Promise<string> {
-    const { xml, fileName } = await this.facturaeService.generate(id);
+    const { xml, fileName, signed } = await this.facturaeService.generate(id);
     res.setHeader('Content-Type', 'application/xml; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('X-Facturae-Signed', String(signed));
     return xml;
+  }
+
+  /**
+   * Genera (y, si hay certificado AEAT configurado, envía) el registro
+   * VeriFactu real de esta factura. Ver `VerifactuSubmissionService` para
+   * el alcance no verificado de la rama de envío.
+   */
+  @Post(':id/verifactu/enviar')
+  @Roles('admin', 'gerente', 'administracion')
+  enviarVerifactu(@Param('id', ParseUUIDPipe) id: string) {
+    return this.verifactuService.send(id);
   }
 
   @Post()

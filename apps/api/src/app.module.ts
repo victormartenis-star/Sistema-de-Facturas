@@ -43,6 +43,7 @@ import { InvestorsModule } from './modules/investors/investors.module';
 import { RealEstateModule } from './modules/real-estate/real-estate.module';
 import { OfflineFieldModule } from './modules/offline-field/offline-field.module';
 import { AlertsModule } from './alerts/alerts.module';
+import { BankReconciliationModule } from './modules/bank-reconciliation/bank-reconciliation.module';
 import { SearchModule } from './search/search.module';
 import { InformesModule } from './modules/informes/informes.module';
 
@@ -95,6 +96,7 @@ import { InformesModule } from './modules/informes/informes.module';
     RealEstateModule,
     OfflineFieldModule,
     AlertsModule,
+    BankReconciliationModule,
     SearchModule,
     InformesModule,
   ],

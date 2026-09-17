@@ -598,6 +598,8 @@ export class InvoicesService {
             noteNumber: n.noteNumber,
             amount: Number(n.amount),
           })),
+        verifactuStatus:
+          invoice.verifactuStatus as InvoiceDto['verifactuStatus'],
         createdAt: invoice.createdAt.toISOString(),
         updatedAt: invoice.updatedAt.toISOString(),
       };

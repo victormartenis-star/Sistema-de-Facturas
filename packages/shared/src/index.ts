@@ -37,5 +37,8 @@ export * from './portals';
 export * from './real-estate';
 export * from './offline-field';
 export * from './alerts';
+export * from './bank-reconciliation';
+export * from './verifactu';
+export * from './xades';
 export * from './search';
 export * from './informes';
