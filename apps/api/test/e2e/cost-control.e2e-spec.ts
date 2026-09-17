@@ -188,4 +188,47 @@ describe('Cost control (integración) — GET /projects/:id/cost-control', () =>
     expect(res.body.eac).toBeCloseTo(50_000, 2);
     expect(res.body.curvaS).toEqual([]);
   });
+
+  it('calcula la curva planificada (PV) repartiendo el presupuesto de la partida entre sus fechas', async () => {
+    const admin = await registerUser(app, { email: 'admin@test.dintel.es' });
+    const project = await createProject(app, admin.accessToken);
+    await createPhase(app, admin.accessToken, project.id, {
+      budgetAmount: 3_000,
+      plannedStartDate: '2026-01-01',
+      plannedEndDate: '2026-03-31',
+    });
+
+    const res = await authed(app, admin.accessToken)
+      .get(`/projects/${project.id}/cost-control`)
+      .expect(200);
+
+    expect(res.body.curvaPlanificadaPartidasSinFechas).toBe(0);
+    expect(
+      res.body.curvaS.map(
+        (p: { period: string; plannedCumulative: number }) => [
+          p.period,
+          p.plannedCumulative,
+        ],
+      ),
+    ).toEqual([
+      ['2026-01', 1_000],
+      ['2026-02', 2_000],
+      ['2026-03', 3_000],
+    ]);
+  });
+
+  it('cuenta las partidas con presupuesto pero sin cronograma planificado', async () => {
+    const admin = await registerUser(app, { email: 'admin@test.dintel.es' });
+    const project = await createProject(app, admin.accessToken);
+    await createPhase(app, admin.accessToken, project.id, {
+      budgetAmount: 1_000,
+    });
+
+    const res = await authed(app, admin.accessToken)
+      .get(`/projects/${project.id}/cost-control`)
+      .expect(200);
+
+    expect(res.body.curvaPlanificadaPartidasSinFechas).toBe(1);
+    expect(res.body.curvaS).toEqual([]);
+  });
 });

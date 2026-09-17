@@ -155,13 +155,34 @@ export function CostControlDashboard({ projectId }: { projectId: string }) {
                   strokeWidth={2}
                   dot={false}
                 />
+                {cc.curvaS.some((p) => p.plannedCumulative !== null) && (
+                  <Line
+                    type="monotone"
+                    dataKey="plannedCumulative"
+                    name="Planificado (PV)"
+                    stroke="#94a3b8"
+                    strokeWidth={2}
+                    strokeDasharray="5 4"
+                    dot={false}
+                  />
+                )}
               </LineChart>
             </ResponsiveContainer>
           </div>
-          <p className="mt-2 text-[11px] text-gray-400">
-            Sin curva de planificación teórica: esta obra no tiene un cronograma
-            cargado todavía.
-          </p>
+          {cc.curvaS.every((p) => p.plannedCumulative === null) ? (
+            <p className="mt-2 text-[11px] text-gray-400">
+              Sin curva planificada: ninguna partida de esta obra tiene
+              cronograma (inicio/fin planificado) puesto todavía.
+            </p>
+          ) : (
+            cc.curvaPlanificadaPartidasSinFechas > 0 && (
+              <p className="mt-2 text-[11px] text-amber-600">
+                Curva planificada parcial:{' '}
+                {cc.curvaPlanificadaPartidasSinFechas} partida(s) con
+                presupuesto no tienen cronograma puesto.
+              </p>
+            )
+          )}
         </div>
       )}
 

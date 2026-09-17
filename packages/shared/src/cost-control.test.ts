@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildCurvaS,
+  buildPlannedByPeriod,
   computeCostControl,
   computeSobrecostePorPartida,
 } from './cost-control';
@@ -102,13 +103,111 @@ describe('buildCurvaS', () => {
     ]);
     const curve = buildCurvaS(actual, earned);
     expect(curve).toEqual([
-      { period: '2026-01', actualCumulative: 1_000, earnedCumulative: 500 },
-      { period: '2026-02', actualCumulative: 3_000, earnedCumulative: 500 },
-      { period: '2026-03', actualCumulative: 3_000, earnedCumulative: 2_000 },
+      {
+        period: '2026-01',
+        actualCumulative: 1_000,
+        earnedCumulative: 500,
+        plannedCumulative: null,
+      },
+      {
+        period: '2026-02',
+        actualCumulative: 3_000,
+        earnedCumulative: 500,
+        plannedCumulative: null,
+      },
+      {
+        period: '2026-03',
+        actualCumulative: 3_000,
+        earnedCumulative: 2_000,
+        plannedCumulative: null,
+      },
+    ]);
+  });
+
+  it('incluye la serie planificada acumulada cuando se le pasa', () => {
+    const actual = new Map([['2026-01', 1_000]]);
+    const earned = new Map([['2026-01', 500]]);
+    const planned = new Map([
+      ['2026-01', 800],
+      ['2026-02', 800],
+    ]);
+    const curve = buildCurvaS(actual, earned, planned);
+    expect(curve.map((p) => [p.period, p.plannedCumulative])).toEqual([
+      ['2026-01', 800],
+      ['2026-02', 1_600],
     ]);
   });
 
   it('devuelve un array vacío sin movimientos', () => {
     expect(buildCurvaS(new Map(), new Map())).toEqual([]);
+  });
+});
+
+describe('buildPlannedByPeriod', () => {
+  it('reparte el presupuesto de una partida linealmente entre sus meses', () => {
+    const result = buildPlannedByPeriod([
+      {
+        budgetAmount: 3_000,
+        plannedStartDate: '2026-01-15',
+        plannedEndDate: '2026-03-05',
+      },
+    ]);
+    expect(Object.fromEntries(result)).toEqual({
+      '2026-01': 1_000,
+      '2026-02': 1_000,
+      '2026-03': 1_000,
+    });
+  });
+
+  it('reparte una partida de un solo mes entera en ese mes', () => {
+    const result = buildPlannedByPeriod([
+      {
+        budgetAmount: 500,
+        plannedStartDate: '2026-06-01',
+        plannedEndDate: '2026-06-30',
+      },
+    ]);
+    expect(Object.fromEntries(result)).toEqual({ '2026-06': 500 });
+  });
+
+  it('suma varias partidas que solapan mes', () => {
+    const result = buildPlannedByPeriod([
+      {
+        budgetAmount: 1_000,
+        plannedStartDate: '2026-01-01',
+        plannedEndDate: '2026-01-31',
+      },
+      {
+        budgetAmount: 2_000,
+        plannedStartDate: '2026-01-10',
+        plannedEndDate: '2026-02-10',
+      },
+    ]);
+    expect(Object.fromEntries(result)).toEqual({
+      '2026-01': 2_000,
+      '2026-02': 1_000,
+    });
+  });
+
+  it('ignora una partida con fecha de fin anterior a la de inicio', () => {
+    const result = buildPlannedByPeriod([
+      {
+        budgetAmount: 1_000,
+        plannedStartDate: '2026-03-01',
+        plannedEndDate: '2026-01-01',
+      },
+    ]);
+    expect(result.size).toBe(0);
+  });
+
+  it('ignora una partida sin presupuesto', () => {
+    const result = buildPlannedByPeriod([
+      {
+        budgetAmount: 0,
+        plannedStartDate: '2026-01-01',
+        plannedEndDate: '2026-01-31',
+      },
+    ]);
+    expect(result.size).toBe(0);
   });
 });

@@ -240,6 +240,15 @@ export const projectPhases = pgTable(
     code: text('code').notNull(),
     name: text('name').notNull(),
     budgetAmount: numeric('budget_amount', { precision: 14, scale: 2 }),
+    /**
+     * Cronograma planificado (no inferido de fechas reales): la base para
+     * `buildCurvaPlanificada()` en `@erp/shared/cost-control.ts` — distribuye
+     * `budgetAmount` linealmente entre estas dos fechas para obtener el
+     * Valor Planificado (PV) mensual, en vez de fabricar una curva a partir
+     * del avance real ya ejecutado.
+     */
+    plannedStartDate: date('planned_start_date'),
+    plannedEndDate: date('planned_end_date'),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()

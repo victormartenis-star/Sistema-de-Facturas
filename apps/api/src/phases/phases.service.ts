@@ -31,6 +31,8 @@ function toDto(row: ProjectPhase): PhaseDto {
     code: row.code,
     name: row.name,
     budgetAmount: row.budgetAmount === null ? null : Number(row.budgetAmount),
+    plannedStartDate: row.plannedStartDate,
+    plannedEndDate: row.plannedEndDate,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -70,6 +72,8 @@ export class PhasesService {
           code: data.code,
           name: data.name,
           budgetAmount: data.budgetAmount?.toFixed(2) ?? null,
+          plannedStartDate: data.plannedStartDate ?? null,
+          plannedEndDate: data.plannedEndDate ?? null,
         })
         .returning();
       return toDto(row);
@@ -88,6 +92,12 @@ export class PhasesService {
           ...(input.name !== undefined && { name: input.name }),
           ...(input.budgetAmount !== undefined && {
             budgetAmount: input.budgetAmount?.toFixed(2) ?? null,
+          }),
+          ...(input.plannedStartDate !== undefined && {
+            plannedStartDate: input.plannedStartDate ?? null,
+          }),
+          ...(input.plannedEndDate !== undefined && {
+            plannedEndDate: input.plannedEndDate ?? null,
           }),
           updatedAt: new Date(),
         })
@@ -227,10 +237,17 @@ export class PhasesService {
   }
 
   private async find(id: string): Promise<ProjectPhase> {
+    const companyId = await this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select()
       .from(projectPhases)
-      .where(and(eq(projectPhases.id, id), isNull(projectPhases.deletedAt)))
+      .where(
+        and(
+          eq(projectPhases.id, id),
+          eq(projectPhases.companyId, companyId),
+          isNull(projectPhases.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) {
       throw new NotFoundException('Partida no encontrada');
@@ -239,6 +256,7 @@ export class PhasesService {
   }
 
   private async findProject(projectId: string) {
+    const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
       throw new NotFoundException('Obra no encontrada');
@@ -246,7 +264,13 @@ export class PhasesService {
     const [row] = await this.dbs.db
       .select()
       .from(projects)
-      .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
+      .where(
+        and(
+          eq(projects.id, projectId),
+          eq(projects.companyId, companyId),
+          isNull(projects.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) {
       throw new NotFoundException('Obra no encontrada');

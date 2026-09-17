@@ -13,8 +13,10 @@ import {
 } from '@erp/db';
 import {
   CostControlDto,
+  FasePlanificadaInput,
   SobrecostePartidaInput,
   buildCurvaS,
+  buildPlannedByPeriod,
   computeCostControl,
   computeSobrecostePorPartida,
 } from '@erp/shared';
@@ -166,7 +168,21 @@ export class CostControlService {
     }));
     const sobrecostePorPartida = computeSobrecostePorPartida(sobrecosteInput);
 
-    const curvaS = await this.buildCurvaSParaObra(projectId);
+    const plannedInput: FasePlanificadaInput[] = phases
+      .filter((p) => p.plannedStartDate && p.plannedEndDate)
+      .map((p) => ({
+        budgetAmount: budgetByPhase.get(p.id) ?? 0,
+        plannedStartDate: p.plannedStartDate!,
+        plannedEndDate: p.plannedEndDate!,
+      }));
+    const plannedByPeriod = buildPlannedByPeriod(plannedInput);
+    const curvaPlanificadaPartidasSinFechas = phases.filter(
+      (p) =>
+        (budgetByPhase.get(p.id) ?? 0) > 0 &&
+        (!p.plannedStartDate || !p.plannedEndDate),
+    ).length;
+
+    const curvaS = await this.buildCurvaSParaObra(projectId, plannedByPeriod);
 
     return {
       projectId,
@@ -178,17 +194,19 @@ export class CostControlService {
       },
       sobrecostePorPartida,
       curvaS,
+      curvaPlanificadaPartidasSinFechas,
     };
   }
 
   /**
-   * Serie mensual real: coste real acumulado (facturas de compra + partes)
+   * Serie mensual: coste real acumulado (facturas de compra + partes)
    * frente a valor ganado acumulado (importe de periodo de cada
-   * certificación). Sin curva "planificada" — ver el comentario de
-   * `buildCurvaS` en `@erp/shared` para el porqué.
+   * certificación) y, si hay partidas con cronograma planificado, el Valor
+   * Planificado (PV) acumulado — ver `buildPlannedByPeriod` en `@erp/shared`.
    */
   private async buildCurvaSParaObra(
     projectId: string,
+    plannedByPeriod: Map<string, number>,
   ): Promise<ReturnType<typeof buildCurvaS>> {
     const invoiceRows = await this.dbs.db
       .select({ date: invoices.issueDate, amount: invoiceLines.baseAmount })
@@ -255,10 +273,11 @@ export class CostControlService {
         (earnedByPeriod.get(period) ?? 0) + Number(row.amount),
       );
     }
-    return buildCurvaS(actualByPeriod, earnedByPeriod);
+    return buildCurvaS(actualByPeriod, earnedByPeriod, plannedByPeriod);
   }
 
   private async findProject(projectId: string) {
+    const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
       throw new NotFoundException('Obra no encontrada');
@@ -266,7 +285,13 @@ export class CostControlService {
     const [row] = await this.dbs.db
       .select()
       .from(projects)
-      .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
+      .where(
+        and(
+          eq(projects.id, projectId),
+          eq(projects.companyId, companyId),
+          isNull(projects.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) throw new NotFoundException('Obra no encontrada');
     return row;

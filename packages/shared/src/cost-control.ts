@@ -1,4 +1,4 @@
-import { round2 } from './calculo';
+import { addMonths, round2 } from './calculo';
 
 /**
  * Control de desviaciones y analítica de costes en tiempo real (Fase 10).
@@ -61,6 +61,15 @@ export interface CostControlDto extends CostControlResult {
   acBreakdown: CostControlAcBreakdownDto;
   sobrecostePorPartida: SobrecostePartidaDto[];
   curvaS: CurvaSPuntoDto[];
+  /**
+   * Partidas con presupuesto pero sin las dos fechas planificadas puestas:
+   * cuantas más haya, más incompleta es `curvaS[].plannedCumulative`. `0`
+   * (todas las partidas presupuestadas tienen fechas) no implica que la
+   * curva cubra toda la obra si alguna partida sin presupuesto también
+   * tiene fechas — esas no aportan nada al PV porque no hay importe que
+   * repartir.
+   */
+  curvaPlanificadaPartidasSinFechas: number;
 }
 
 export function computeCostControl(
@@ -144,35 +153,99 @@ export interface CurvaSPuntoDto {
   actualCumulative: number;
   /** Producción certificada acumulada hasta ese periodo. */
   earnedCumulative: number;
+  /**
+   * Valor Planificado (PV) acumulado hasta ese periodo, o `null` si ninguna
+   * partida de la obra tiene cronograma planificado puesto todavía — así el
+   * consumidor distingue "sin dato" de "planificado en cero".
+   */
+  plannedCumulative: number | null;
 }
 
 /**
  * Construye la curva S a partir de movimientos con fecha e importe, ya
- * agrupados por periodo (AAAA-MM) en dos series independientes — coste real
- * y valor ganado — y las acumula. Devuelve un punto por cada periodo que
- * aparece en cualquiera de las dos series, en orden cronológico, con la
- * acumulación arrastrada de un periodo a otro (si un mes no tuvo
- * movimiento de una serie, mantiene el acumulado del mes anterior).
+ * agrupados por periodo (AAAA-MM) en tres series independientes — coste
+ * real, valor ganado y valor planificado — y las acumula. Devuelve un punto
+ * por cada periodo que aparece en cualquiera de las series, en orden
+ * cronológico, con la acumulación arrastrada de un periodo a otro (si un
+ * mes no tuvo movimiento de una serie, mantiene el acumulado del mes
+ * anterior).
  *
- * No incluye una curva "planificada": este ERP no modela un cronograma o
- * curva de avance teórica todavía (no hay tabla de planificación), así que
- * fabricar una interpolación lineal como si fuera el plan real induciría a
- * error — mejor no mostrarla que mostrar un dato inventado. Ver
- * [[Control de Costes y Partes Diarios]] para el detalle de esta decisión.
+ * `plannedByPeriod` es opcional y viene de `buildPlannedByPeriod()`: hasta
+ * que `project_phases` tuvo `plannedStartDate`/`plannedEndDate` (cronograma
+ * introducido a mano, no inferido), este ERP no modelaba ningún plan y
+ * fabricar una interpolación de la curva real como si fuera el plan habría
+ * sido inventar un dato en vez de calcularlo. Ver [[Control de Costes y
+ * Partes Diarios]] para el porqué de esa decisión original.
  */
 export function buildCurvaS(
   actualByPeriod: Map<string, number>,
   earnedByPeriod: Map<string, number>,
+  plannedByPeriod: Map<string, number> = new Map(),
 ): CurvaSPuntoDto[] {
   const periods = Array.from(
-    new Set([...actualByPeriod.keys(), ...earnedByPeriod.keys()]),
+    new Set([
+      ...actualByPeriod.keys(),
+      ...earnedByPeriod.keys(),
+      ...plannedByPeriod.keys(),
+    ]),
   ).sort();
+  const hasPlanned = plannedByPeriod.size > 0;
 
   let actualAcc = 0;
   let earnedAcc = 0;
+  let plannedAcc = 0;
   return periods.map((period) => {
     actualAcc = round2(actualAcc + (actualByPeriod.get(period) ?? 0));
     earnedAcc = round2(earnedAcc + (earnedByPeriod.get(period) ?? 0));
-    return { period, actualCumulative: actualAcc, earnedCumulative: earnedAcc };
+    plannedAcc = round2(plannedAcc + (plannedByPeriod.get(period) ?? 0));
+    return {
+      period,
+      actualCumulative: actualAcc,
+      earnedCumulative: earnedAcc,
+      plannedCumulative: hasPlanned ? plannedAcc : null,
+    };
   });
+}
+
+/* ────────────────────── curva planificada (Valor Planificado / PV) ────────────────────── */
+
+export interface FasePlanificadaInput {
+  budgetAmount: number;
+  /** `AAAA-MM-DD`. */
+  plannedStartDate: string;
+  /** `AAAA-MM-DD`; si es anterior a `plannedStartDate` la partida se ignora. */
+  plannedEndDate: string;
+}
+
+/**
+ * Reparte linealmente el presupuesto de cada partida planificada entre los
+ * meses naturales de su cronograma (ambos inclusive) y agrega el resultado
+ * por periodo (AAAA-MM) — mismo formato de entrada que `actualByPeriod`/
+ * `earnedByPeriod` en `buildCurvaS`. Reparto lineal, no una curva S propia
+ * por partida: es la simplificación estándar de una línea base PV sin datos
+ * de ritmo de ejecución previsto mes a mes: más simple que la realidad, pero
+ * calculado a partir de un plan real (fechas puestas a mano), no inventado.
+ */
+export function buildPlannedByPeriod(
+  phases: FasePlanificadaInput[],
+): Map<string, number> {
+  const result = new Map<string, number>();
+  for (const phase of phases) {
+    if (phase.budgetAmount <= 0) continue;
+    if (phase.plannedEndDate < phase.plannedStartDate) continue;
+
+    const months: string[] = [];
+    let cursor = phase.plannedStartDate.slice(0, 7);
+    const endMonth = phase.plannedEndDate.slice(0, 7);
+    while (cursor <= endMonth) {
+      months.push(cursor);
+      cursor = addMonths(`${cursor}-01`, 1).slice(0, 7);
+    }
+
+    const perMonth = phase.budgetAmount / months.length;
+    for (const month of months) {
+      result.set(month, round2((result.get(month) ?? 0) + perMonth));
+    }
+  }
+  return result;
 }

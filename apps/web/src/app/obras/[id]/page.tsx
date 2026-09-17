@@ -64,18 +64,24 @@ function PhaseModal({
     code: string;
     name: string;
     budgetAmount: number | null;
+    plannedStartDate: string | null;
+    plannedEndDate: string | null;
   }) => void;
   onClose: () => void;
 }) {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [budget, setBudget] = useState('');
+  const [plannedStartDate, setPlannedStartDate] = useState('');
+  const [plannedEndDate, setPlannedEndDate] = useState('');
 
   useEffect(() => {
     if (!open) return;
     setCode(phase?.code ?? '');
     setName(phase?.name ?? '');
     setBudget(phase?.budgetAmount?.toString() ?? '');
+    setPlannedStartDate(phase?.plannedStartDate ?? '');
+    setPlannedEndDate(phase?.plannedEndDate ?? '');
   }, [open, phase]);
 
   return (
@@ -93,6 +99,8 @@ function PhaseModal({
             name,
             budgetAmount:
               budget === '' ? null : Number(budget.replace(',', '.')),
+            plannedStartDate: plannedStartDate || null,
+            plannedEndDate: plannedEndDate || null,
           });
         }}
       >
@@ -128,6 +136,30 @@ function PhaseModal({
             onChange={(e) => setBudget(e.target.value)}
           />
         </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label className={labelCls}>Inicio planificado</label>
+            <input
+              type="date"
+              className={fieldCls}
+              value={plannedStartDate}
+              onChange={(e) => setPlannedStartDate(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Fin planificado</label>
+            <input
+              type="date"
+              className={fieldCls}
+              value={plannedEndDate}
+              onChange={(e) => setPlannedEndDate(e.target.value)}
+            />
+          </div>
+        </div>
+        <p className="text-xs text-gray-400">
+          Con las dos fechas puestas, esta partida aporta a la curva de avance
+          planificada del control de costes.
+        </p>
         {error && (
           <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
             {error.message}
@@ -499,6 +531,8 @@ export default function ObraDetallePage() {
       code: string;
       name: string;
       budgetAmount: number | null;
+      plannedStartDate: string | null;
+      plannedEndDate: string | null;
     }) =>
       editingPhase
         ? phasesApi.update(editingPhase.id, v)
