@@ -287,7 +287,7 @@ export default function FacturasPage() {
                           <>
                             <button
                               onClick={() => approveMutation.mutate(inv.id)}
-                              className="rounded-md px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50"
+                              className="rounded-md px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
                             >
                               Aprobar
                             </button>
@@ -315,7 +315,7 @@ export default function FacturasPage() {
                           <>
                             <button
                               onClick={() => payMutation.mutate(inv.id)}
-                              className="rounded-md px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50"
+                              className="rounded-md px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
                             >
                               {kind === 'compra' ? 'Pagar' : 'Cobrar'}
                             </button>
@@ -386,7 +386,7 @@ export default function FacturasPage() {
                                         <span className="flex items-center gap-1.5">
                                           <IconCheck
                                             size={13}
-                                            className="text-emerald-600"
+                                            className="text-emerald-700"
                                           />
                                           {n.noteNumber}
                                         </span>
