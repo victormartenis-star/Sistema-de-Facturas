@@ -55,6 +55,22 @@ export const refreshSchema = z.object({
   refreshToken: z.string().min(1, 'El refresh token es obligatorio'),
 });
 
+/** Cambio de contraseña propia: exige la actual para confirmar identidad. */
+export const changePasswordSchema = z.object({
+  currentPassword: z
+    .string()
+    .min(1, 'La contraseña actual es obligatoria')
+    .max(128),
+  newPassword: password,
+});
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+
+/** Reset de contraseña de otro usuario por un admin: sin la actual, solo la nueva. */
+export const resetPasswordSchema = z.object({
+  newPassword: password,
+});
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+
 export type LoginInput = z.infer<typeof loginSchema>;
 /** Tipo de entrada para el registro: `role` es opcional (default `'administracion'` en el servidor). */
 export type RegisterInput = z.input<typeof registerSchema>;

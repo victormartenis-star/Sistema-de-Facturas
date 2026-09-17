@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AuthTokensDto } from '@erp/shared';
-import { createTestApp, loginUser, registerUser } from './helpers';
+import { authed, createTestApp, loginUser, registerUser } from './helpers';
 import { resetTestDb, seedCompany } from './reset-db';
 
 describe('Auth (integración)', () => {
@@ -152,6 +152,57 @@ describe('Auth (integración)', () => {
       await request(app.getHttpServer())
         .post('/auth/refresh')
         .send({ refreshToken: tokens.refreshToken })
+        .expect(401);
+    });
+  });
+
+  describe('PATCH /auth/password', () => {
+    it('cambia la contraseña propia, permite entrar con la nueva y revoca las sesiones abiertas', async () => {
+      const tokens = await registerUser(app, {
+        email: 'cambia@test.dintel.es',
+        password: 'Original123!',
+      });
+      const client = authed(app, tokens.accessToken);
+
+      await client
+        .patch('/auth/password')
+        .send({ currentPassword: 'Original123!', newPassword: 'Nueva123!' })
+        .expect(204);
+
+      // La sesión emitida antes del cambio queda revocada.
+      await request(app.getHttpServer())
+        .post('/auth/refresh')
+        .send({ refreshToken: tokens.refreshToken })
+        .expect(401);
+
+      // La contraseña vieja ya no vale; la nueva sí.
+      await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: 'cambia@test.dintel.es', password: 'Original123!' })
+        .expect(401);
+      const loggedIn = await loginUser(
+        app,
+        'cambia@test.dintel.es',
+        'Nueva123!',
+      );
+      expect(loggedIn.accessToken).toEqual(expect.any(String));
+    });
+
+    it('rechaza el cambio con la contraseña actual equivocada, con 401', async () => {
+      const tokens = await registerUser(app, {
+        email: 'rechaza@test.dintel.es',
+        password: 'Original123!',
+      });
+      await authed(app, tokens.accessToken)
+        .patch('/auth/password')
+        .send({ currentPassword: 'Otra123!', newPassword: 'Nueva123!' })
+        .expect(401);
+    });
+
+    it('exige token', async () => {
+      await request(app.getHttpServer())
+        .patch('/auth/password')
+        .send({ currentPassword: 'a', newPassword: 'Nueva123!' })
         .expect(401);
     });
   });

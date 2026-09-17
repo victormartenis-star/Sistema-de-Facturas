@@ -171,6 +171,44 @@ export class AuthService {
     return toUserDto(user);
   }
 
+  /**
+   * Cambio de contraseña propia: exige la actual y revoca el resto de
+   * sesiones abiertas (refresh tokens), igual que un cambio de contraseña
+   * normal en cualquier app — quien no tenga ya la nueva contraseña deja de
+   * poder renovar su access token.
+   */
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    const [user] = await this.dbs.db
+      .select()
+      .from(users)
+      .where(and(eq(users.id, userId), isNull(users.deletedAt)))
+      .limit(1);
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('Usuario no disponible');
+    }
+    const ok = await verifyPassword(currentPassword, user.passwordHash);
+    if (!ok) {
+      throw new UnauthorizedException('La contraseña actual no es correcta');
+    }
+    await this.dbs.db
+      .update(users)
+      .set({
+        passwordHash: await hashPassword(newPassword),
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+    await this.dbs.db
+      .update(refreshTokens)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)),
+      );
+  }
+
   private async findActiveByEmail(email: string): Promise<User | undefined> {
     const [user] = await this.dbs.db
       .select()

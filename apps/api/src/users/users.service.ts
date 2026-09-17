@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { and, asc, eq, isNull } from 'drizzle-orm';
-import { User, userProjectAccess, users } from '@erp/db';
+import { User, refreshTokens, userProjectAccess, users } from '@erp/db';
 import {
   UserCreateInput,
   UserDto,
@@ -109,6 +109,7 @@ export class UsersService {
 
   /** Lista los projectId a los que tiene acceso un usuario (rol obra). */
   async listAccess(userId: string): Promise<string[]> {
+    await this.findRow(userId);
     const rows = await this.dbs.db
       .select({ projectId: userProjectAccess.projectId })
       .from(userProjectAccess)
@@ -118,6 +119,7 @@ export class UsersService {
 
   /** Reemplaza el acceso a obras de un usuario. */
   async setAccess(userId: string, projectIds: string[]): Promise<void> {
+    await this.findRow(userId);
     await this.dbs.db
       .delete(userProjectAccess)
       .where(eq(userProjectAccess.userId, userId));
@@ -126,5 +128,45 @@ export class UsersService {
         .insert(userProjectAccess)
         .values(projectIds.map((projectId) => ({ userId, projectId })));
     }
+  }
+
+  /**
+   * Reset de contraseña por un admin: sin la actual, solo la nueva —
+   * revoca también las sesiones abiertas del usuario, igual que el cambio
+   * de contraseña propia (`AuthService.changePassword`).
+   */
+  async resetPassword(id: string, newPassword: string): Promise<void> {
+    await this.findRow(id);
+    await this.dbs.db
+      .update(users)
+      .set({
+        passwordHash: await hashPassword(newPassword),
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, id));
+    await this.dbs.db
+      .update(refreshTokens)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(eq(refreshTokens.userId, id), isNull(refreshTokens.revokedAt)),
+      );
+  }
+
+  /** Confirma que el usuario existe, no está borrado y es de la empresa del que llama. */
+  private async findRow(id: string): Promise<User> {
+    const companyId = this.dbs.getCompanyId();
+    const [row] = await this.dbs.db
+      .select()
+      .from(users)
+      .where(
+        and(
+          eq(users.id, id),
+          eq(users.companyId, companyId),
+          isNull(users.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!row) throw new NotFoundException('Usuario no encontrado');
+    return row;
   }
 }

@@ -1,11 +1,21 @@
-import { Body, Controller, Get, HttpCode, Post, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Patch,
+  Post,
+  Req,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
   AuthTokensDto,
+  ChangePasswordInput,
   LoginInput,
   RefreshInput,
   RegisterInput,
   UserDto,
+  changePasswordSchema,
   loginSchema,
   refreshSchema,
   registerSchema,
@@ -63,5 +73,20 @@ export class AuthController {
   @Get('me')
   me(@Req() req: AuthenticatedRequest): Promise<UserDto> {
     return this.auth.me(req.user.sub);
+  }
+
+  /** Cambio de contraseña propia (exige la actual). Ver `changePassword` en el servicio. */
+  @Patch('password')
+  @HttpCode(204)
+  async changePassword(
+    @Req() req: AuthenticatedRequest,
+    @Body(new ZodValidationPipe(changePasswordSchema))
+    body: ChangePasswordInput,
+  ): Promise<void> {
+    await this.auth.changePassword(
+      req.user.sub,
+      body.currentPassword,
+      body.newPassword,
+    );
   }
 }
