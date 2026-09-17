@@ -2768,3 +2768,83 @@ export const prlChecklists = pgTable(
 
 export type PrlChecklist = typeof prlChecklists.$inferSelect;
 export type NewPrlChecklist = typeof prlChecklists.$inferInsert;
+
+/* ═══════════════ Notificaciones proactivas (Fase 13) ═══════════════
+ * Hasta ahora todas las alertas del ERP (compliance PRL, permisos
+ * públicos, sobrecoste, garantía de postventa) eran cálculo bajo
+ * demanda — un `GET` que hay que entrar a mirar. `alert_rules` hace el
+ * umbral configurable por empresa (cada una decide su propio horizonte
+ * de aviso o su propio % de sobrecoste tolerable, en vez de un valor
+ * fijo en código) y `notifications` es la bandeja de entrada in-app que
+ * deja el cron (`AlertsSchedulerService`, `apps/api/src/alerts/`) al
+ * evaluar esas reglas — con salida a email opcional si hay SMTP
+ * configurado, igual de "opt-in silencioso" que `ANTHROPIC_API_KEY`.
+ */
+
+export const alertRuleTypeEnum = pgEnum('alert_rule_type', [
+  'compliance_doc',
+  'permiso',
+  'sobrecoste',
+  'garantia_postventa',
+]);
+
+export const alertRules = pgTable(
+  'alert_rules',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    type: alertRuleTypeEnum('type').notNull(),
+    /** Días antes de caducidad — solo aplica a `compliance_doc`/`permiso`/`garantia_postventa`. */
+    thresholdDays: integer('threshold_days'),
+    /** % de desviación sobre presupuesto — solo aplica a `sobrecoste`. */
+    thresholdPct: numeric('threshold_pct', { precision: 6, scale: 2 }),
+    /** `('in_app' | 'email')[]`, ver `packages/shared/src/alerts.ts`. */
+    channels: jsonb('channels').notNull().default(['in_app']),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [unique('alert_rules_company_type_unique').on(t.companyId, t.type)],
+);
+
+export type AlertRule = typeof alertRules.$inferSelect;
+export type NewAlertRule = typeof alertRules.$inferInsert;
+
+/**
+ * Bandeja in-app. `dedupeKey` identifica el hecho concreto que disparó la
+ * alerta (p.ej. `compliance_doc:<contactId>:<docId>`) con índice único por
+ * empresa: el cron no vuelve a crear la misma notificación en cada pasada
+ * mientras el hecho siga sin resolverse — se notifica una vez, no cada N
+ * minutos hasta que alguien actúe.
+ */
+export const notifications = pgTable(
+  'notifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    type: alertRuleTypeEnum('type').notNull(),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    /** Ruta relativa del frontend a la que lleva la notificación, p.ej. "/cumplimiento". */
+    link: text('link'),
+    dedupeKey: text('dedupe_key').notNull(),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    unique('notifications_company_dedupe_unique').on(t.companyId, t.dedupeKey),
+  ],
+);
+
+export type Notification = typeof notifications.$inferSelect;
+export type NewNotification = typeof notifications.$inferInsert;

@@ -36,3 +36,4 @@ export * from './e-signature';
 export * from './portals';
 export * from './real-estate';
 export * from './offline-field';
+export * from './alerts';

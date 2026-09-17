@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AlertsModule } from '../../src/alerts/alerts.module';
 import { AuditModule } from '../../src/audit/audit.module';
 import { AuthModule } from '../../src/auth/auth.module';
 import { BudgetsModule } from '../../src/budgets/budgets.module';
@@ -21,6 +22,7 @@ import { EsgModule } from '../../src/modules/esg/esg.module';
 import { PartesDiariosModule } from '../../src/modules/partes-diarios/partes-diarios.module';
 import { OcrModule } from '../../src/ocr/ocr.module';
 import { PhasesModule } from '../../src/phases/phases.module';
+import { PermisosModule } from '../../src/modules/permisos/permisos.module';
 import { ProjectsModule } from '../../src/projects/projects.module';
 import { PurchaseOrdersModule } from '../../src/purchase-orders/purchase-orders.module';
 import { TreasuryModule } from '../../src/treasury/treasury.module';
@@ -85,6 +87,8 @@ import { UsersModule } from '../../src/users/users.module';
     DashboardModule,
     CopilotoModule,
     UsersModule,
+    PermisosModule,
+    AlertsModule,
   ],
 })
 export class TestAppModule {}

@@ -42,6 +42,7 @@ import { ContractAiModule } from './modules/contract-ai/contract-ai.module';
 import { InvestorsModule } from './modules/investors/investors.module';
 import { RealEstateModule } from './modules/real-estate/real-estate.module';
 import { OfflineFieldModule } from './modules/offline-field/offline-field.module';
+import { AlertsModule } from './alerts/alerts.module';
 
 @Module({
   imports: [
@@ -91,6 +92,7 @@ import { OfflineFieldModule } from './modules/offline-field/offline-field.module
     InvestorsModule,
     RealEstateModule,
     OfflineFieldModule,
+    AlertsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

@@ -71,6 +71,13 @@ import type {
   ParticipationUpdateInput,
 } from '@erp/shared';
 import type {
+  AlertRuleDto,
+  AlertRuleType,
+  AlertRuleUpdateInput,
+  NotificationDto,
+  NotificationsRunSummaryDto,
+} from '@erp/shared';
+import type {
   ActaRecepcionCreateInput,
   ActaRecepcionDto,
   ActaRecepcionRepasoDto,
@@ -1438,6 +1445,29 @@ export interface ObrasKpiRow {
 export const dashboardApi = {
   resumen: () => request<DashboardResumenDto>('/dashboard/resumen'),
   obrasKpi: () => request<ObrasKpiRow[]>('/dashboard/obras'),
+};
+
+export const alertsApi = {
+  listRules: () => request<AlertRuleDto[]>('/alerts/rules'),
+  updateRule: (type: AlertRuleType, input: AlertRuleUpdateInput) =>
+    request<AlertRuleDto>(`/alerts/rules/${type}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  listNotifications: (onlyUnread = false) =>
+    request<NotificationDto[]>(
+      `/alerts/notifications${onlyUnread ? '?unread=true' : ''}`,
+    ),
+  unreadCount: () =>
+    request<{ count: number }>('/alerts/notifications/no-leidas'),
+  markRead: (id: string) =>
+    request<void>(`/alerts/notifications/${id}/leer`, { method: 'PATCH' }),
+  markAllRead: () =>
+    request<void>('/alerts/notifications/marcar-todas-leidas', {
+      method: 'POST',
+    }),
+  run: () =>
+    request<NotificationsRunSummaryDto>('/alerts/run', { method: 'POST' }),
 };
 
 export const auditApi = {

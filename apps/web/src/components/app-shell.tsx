@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { Sidebar } from '@/components/sidebar';
 import { Copiloto } from '@/components/copiloto';
 import { OfflineSyncIndicator } from '@/components/offline-sync-indicator';
+import { NotificationsBell } from '@/components/notifications-bell';
 import { useAuth } from '@/lib/auth';
 
 const AUTH_PATHS = ['/login', '/registro'];
@@ -37,6 +38,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
       <Copiloto />
       <OfflineSyncIndicator />
+      <NotificationsBell />
     </>
   );
 }
