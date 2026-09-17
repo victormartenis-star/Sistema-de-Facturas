@@ -59,6 +59,19 @@ export async function resetTestDb(
  */
 export async function seedCompany(): Promise<string> {
   const db = getDb();
+  // `companies` no se trunca en `resetTestDb()` (ver comentario arriba), pero
+  // tampoco se limpia entre ficheros: sin esto, cada fichero de test se
+  // suma a la tabla y `AuthService.register()` — `getDefaultCompanyId()`, un
+  // `SELECT ... LIMIT 1` sin `ORDER BY`, MVP monoempresa — coge la primera
+  // fila que Postgres le devuelva, casi siempre la del fichero que se
+  // ejecutó primero. Con más de un fichero de test corriendo en la misma
+  // base, todos los registros de todos los ficheros terminan en esa única
+  // empresa compartida: cualquier aserción de "sin datos" o "solo mis
+  // datos" se vuelve dependiente del orden de ejecución. TRUNCATE deja
+  // exactamente una empresa (la de este fichero) antes de que arranque su
+  // primer test, igual que si de verdad solo existiera una empresa en toda
+  // la base (la premisa que `getDefaultCompanyId()` da por hecha).
+  await db.execute(sql`TRUNCATE TABLE "companies" RESTART IDENTITY CASCADE`);
   const [company] = await db
     .insert(companies)
     .values({ name: 'Empresa de Pruebas de Integración', taxId: 'B00000000' })

@@ -3,7 +3,7 @@ import {
   OnModuleDestroy,
   UnauthorizedException,
 } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import {
   closeDb,
   companies,
@@ -103,7 +103,18 @@ export class DbService implements OnModuleDestroy {
    */
   async getDefaultCompanyId(): Promise<string> {
     if (this.defaultCompanyId) return this.defaultCompanyId;
-    const [company] = await this.db.select().from(companies).limit(1);
+    // `orderBy` importa aunque hoy solo exista una empresa "real": sin él,
+    // SQL no garantiza qué fila devuelve un `LIMIT 1` sin filtro — y en los
+    // tests de integración, donde `companies` se deja fuera del `TRUNCATE`
+    // entre ficheros (ver `resetTestDb()`), una tabla con varias filas
+    // acumuladas hacía que esta consulta devolviera de forma no
+    // determinista la empresa de OTRO fichero de test, no la que este
+    // proceso acababa de crear. `desc(createdAt)`: la última creada gana.
+    const [company] = await this.db
+      .select()
+      .from(companies)
+      .orderBy(desc(companies.createdAt))
+      .limit(1);
     if (!company) {
       throw new Error(
         'No hay ninguna empresa en la base de datos. Ejecuta: npm run db:seed',
