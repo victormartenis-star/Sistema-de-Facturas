@@ -5,5 +5,6 @@ import { CostControlService } from './cost-control.service';
 @Module({
   controllers: [CostControlController],
   providers: [CostControlService],
+  exports: [CostControlService],
 })
 export class CostControlModule {}

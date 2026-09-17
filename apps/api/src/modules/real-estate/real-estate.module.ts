@@ -5,5 +5,6 @@ import { RealEstateService } from './real-estate.service';
 @Module({
   controllers: [RealEstateController],
   providers: [RealEstateService],
+  exports: [RealEstateService],
 })
 export class RealEstateModule {}
