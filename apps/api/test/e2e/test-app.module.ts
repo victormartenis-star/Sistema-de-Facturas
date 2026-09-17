@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AlertsModule } from '../../src/alerts/alerts.module';
+import { SearchModule } from '../../src/search/search.module';
+import { InformesModule } from '../../src/modules/informes/informes.module';
 import { AuditModule } from '../../src/audit/audit.module';
 import { AuthModule } from '../../src/auth/auth.module';
 import { BudgetsModule } from '../../src/budgets/budgets.module';
@@ -23,6 +25,7 @@ import { PartesDiariosModule } from '../../src/modules/partes-diarios/partes-dia
 import { OcrModule } from '../../src/ocr/ocr.module';
 import { PhasesModule } from '../../src/phases/phases.module';
 import { PermisosModule } from '../../src/modules/permisos/permisos.module';
+import { IncidenciasPRLModule } from '../../src/modules/incidencias-prl/incidencias-prl.module';
 import { ProjectsModule } from '../../src/projects/projects.module';
 import { PurchaseOrdersModule } from '../../src/purchase-orders/purchase-orders.module';
 import { TreasuryModule } from '../../src/treasury/treasury.module';
@@ -45,14 +48,15 @@ import { UsersModule } from '../../src/users/users.module';
  * de compliance PRL, `assertAptoParaPago`), así que entra transitivamente
  * sin listarlo aquí aparte.
  *
- * `OcrModule`/`CopilotoModule`/`ContractAiModule` llaman a la API de
- * Anthropic, pero sus puntos de entrada que la tocarían de verdad
- * (`ValidationService.reprocess()`, `CopilotoService.query()`,
- * `ContractAiService.auditar()`) comprueban `ANTHROPIC_API_KEY` primero y
- * degradan o devuelven 400 si falta — sin llamada de red real en ningún
- * test siempre que el spec la quite explícitamente de `process.env`
- * (el `.env` de desarrollo local sí trae una clave real; `copiloto.e2e-spec.ts`
- * y `contract-ai.e2e-spec.ts` la borran en su `beforeAll`).
+ * `OcrModule`/`CopilotoModule`/`ContractAiModule`/`InformesModule` llaman a
+ * la API de Anthropic, pero sus puntos de entrada que la tocarían de verdad
+ * (`ValidationService.reprocess()`, `CopilotoService.query()`/`queryStream()`,
+ * `ContractAiService.auditar()`, `InformesService.generarMensual()`)
+ * comprueban `ANTHROPIC_API_KEY` primero y degradan o devuelven 400 si
+ * falta — sin llamada de red real en ningún test siempre que el spec la
+ * quite explícitamente de `process.env` (el `.env` de desarrollo local sí
+ * trae una clave real; `copiloto.e2e-spec.ts`, `contract-ai.e2e-spec.ts` e
+ * `informes.e2e-spec.ts` la borran en su `beforeAll`).
  * `OcrWorker.onApplicationBootstrap()` hace el mismo chequeo antes de
  * arrancar su `setInterval`, así que tampoco deja un timer vivo en los tests.
  *
@@ -88,7 +92,10 @@ import { UsersModule } from '../../src/users/users.module';
     CopilotoModule,
     UsersModule,
     PermisosModule,
+    IncidenciasPRLModule,
     AlertsModule,
+    SearchModule,
+    InformesModule,
   ],
 })
 export class TestAppModule {}

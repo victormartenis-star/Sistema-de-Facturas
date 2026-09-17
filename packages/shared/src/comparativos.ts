@@ -216,3 +216,136 @@ export function findCheapestOfertaId(
   return ofertas.reduce((min, o) => (o.totalAmount < min.totalAmount ? o : min))
     .ofertaId;
 }
+
+/* ────────────────────── recomendaciones de ahorro (Fase 15) ────────────────────── */
+
+/**
+ * Una línea de oferta ya vista, aplanada para el análisis: qué partida
+ * (por `budget_items.code`, no por id — el mismo código BC3/manual puede
+ * repetirse en presupuestos distintos de obras distintas, y es lo que
+ * permite comparar "este mismo material/trabajo" entre obras), a qué precio,
+ * en qué obra, de qué proveedor, y si esa oferta es la que se adjudicó (el
+ * precio que de verdad se paga) o solo una oferta recibida.
+ */
+export interface SavingsObservation {
+  budgetItemCode: string;
+  budgetItemName: string;
+  unitPrice: number;
+  quantity: number;
+  projectId: string;
+  projectName: string;
+  contactId: string;
+  contactName: string;
+  isAwarded: boolean;
+}
+
+export interface SavingsOpportunityDto {
+  budgetItemCode: string;
+  budgetItemName: string;
+  paidProjectId: string;
+  paidProjectName: string;
+  paidContactId: string;
+  paidContactName: string;
+  paidUnitPrice: number;
+  minUnitPrice: number;
+  minProjectId: string;
+  minProjectName: string;
+  minContactId: string;
+  minContactName: string;
+  /** % de sobreprecio del pagado sobre el mínimo visto para el mismo código. */
+  overpayPct: number;
+  /** Ahorro potencial en € si se hubiera pagado el mínimo, a la medición realmente adjudicada. */
+  potentialSavingsAmount: number;
+}
+
+export const SAVINGS_THRESHOLD_PCT_DEFAULT = 10;
+
+/** Cuerpo de `POST /comparativos/ahorro/resumen`: la lista ya calculada, no recalculada. */
+export const savingsResumenSchema = z.object({
+  opportunities: z
+    .array(
+      z.object({
+        budgetItemCode: z.string(),
+        budgetItemName: z.string(),
+        paidProjectId: z.string(),
+        paidProjectName: z.string(),
+        paidContactId: z.string(),
+        paidContactName: z.string(),
+        paidUnitPrice: z.number(),
+        minUnitPrice: z.number(),
+        minProjectId: z.string(),
+        minProjectName: z.string(),
+        minContactId: z.string(),
+        minContactName: z.string(),
+        overpayPct: z.number(),
+        potentialSavingsAmount: z.number(),
+      }),
+    )
+    .max(200),
+});
+export type SavingsResumenInput = z.input<typeof savingsResumenSchema>;
+
+/**
+ * Detecta partidas donde el precio unitario **pagado** (de una oferta
+ * adjudicada) supera claramente el mínimo unitario visto para el mismo
+ * código de partida en cualquier otra oferta de la empresa — de la misma
+ * obra o de otra. Puramente aritmético, sin IA: agrupa por código, calcula
+ * el mínimo del grupo, y para cada línea adjudicada que se pase del umbral
+ * (`thresholdPct`, por defecto `SAVINGS_THRESHOLD_PCT_DEFAULT`) frente a ese
+ * mínimo, genera una oportunidad con la referencia de dónde se vio el
+ * precio más bajo. Ordenado de mayor a menor sobreprecio.
+ */
+export function computeSavingsOpportunities(
+  observations: SavingsObservation[],
+  thresholdPct: number = SAVINGS_THRESHOLD_PCT_DEFAULT,
+): SavingsOpportunityDto[] {
+  const byCode = new Map<string, SavingsObservation[]>();
+  for (const obs of observations) {
+    const list = byCode.get(obs.budgetItemCode) ?? [];
+    list.push(obs);
+    byCode.set(obs.budgetItemCode, list);
+  }
+
+  const opportunities: SavingsOpportunityDto[] = [];
+  for (const group of byCode.values()) {
+    const cheapest = group.reduce((min, o) =>
+      o.unitPrice < min.unitPrice ? o : min,
+    );
+    if (cheapest.unitPrice <= 0) continue;
+
+    for (const paid of group) {
+      if (!paid.isAwarded) continue;
+      if (
+        paid.contactId === cheapest.contactId &&
+        paid.projectId === cheapest.projectId
+      ) {
+        continue; // es el propio mínimo, no hay hueco que señalar
+      }
+      const overpayPct = round2(
+        ((paid.unitPrice - cheapest.unitPrice) / cheapest.unitPrice) * 100,
+      );
+      if (overpayPct <= thresholdPct) continue;
+
+      opportunities.push({
+        budgetItemCode: paid.budgetItemCode,
+        budgetItemName: paid.budgetItemName,
+        paidProjectId: paid.projectId,
+        paidProjectName: paid.projectName,
+        paidContactId: paid.contactId,
+        paidContactName: paid.contactName,
+        paidUnitPrice: paid.unitPrice,
+        minUnitPrice: cheapest.unitPrice,
+        minProjectId: cheapest.projectId,
+        minProjectName: cheapest.projectName,
+        minContactId: cheapest.contactId,
+        minContactName: cheapest.contactName,
+        overpayPct,
+        potentialSavingsAmount: round2(
+          (paid.unitPrice - cheapest.unitPrice) * paid.quantity,
+        ),
+      });
+    }
+  }
+
+  return opportunities.sort((a, b) => b.overpayPct - a.overpayPct);
+}

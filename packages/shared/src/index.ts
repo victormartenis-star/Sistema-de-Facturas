@@ -37,3 +37,5 @@ export * from './portals';
 export * from './real-estate';
 export * from './offline-field';
 export * from './alerts';
+export * from './search';
+export * from './informes';

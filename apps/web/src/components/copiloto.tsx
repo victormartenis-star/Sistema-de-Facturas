@@ -9,6 +9,8 @@ interface ChatMsg {
   content: string;
   toolsUsed?: string[];
   error?: boolean;
+  /** Sigue recibiendo texto por streaming — deja de mostrar el spinner. */
+  streaming?: boolean;
 }
 
 const SUGGESTED = [
@@ -40,21 +42,58 @@ export function Copiloto() {
       .slice(-10)
       .map((m) => ({ role: m.role, content: m.content }));
 
+    // Mensaje del asistente vacío, relleno según llegan los deltas de texto.
+    setMessages((prev) => [
+      ...prev,
+      { role: 'assistant', content: '', streaming: true },
+    ]);
+
     try {
-      const res = await copilotoApi.query(question, history);
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: res.answer, toolsUsed: res.toolsUsed },
-      ]);
+      await copilotoApi.queryStream(question, history, (event) => {
+        if (event.type === 'text') {
+          setMessages((prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            next[next.length - 1] = {
+              ...last,
+              content: last.content + event.delta,
+            };
+            return next;
+          });
+        } else if (event.type === 'done') {
+          setMessages((prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            next[next.length - 1] = {
+              ...last,
+              toolsUsed: event.toolsUsed,
+              streaming: false,
+            };
+            return next;
+          });
+        } else if (event.type === 'error') {
+          setMessages((prev) => {
+            const next = [...prev];
+            next[next.length - 1] = {
+              role: 'assistant',
+              content: event.message,
+              error: true,
+            };
+            return next;
+          });
+        }
+        // 'tool': solo transparencia (via toolsUsed en 'done'), sin acción propia.
+      });
     } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
+      setMessages((prev) => {
+        const next = [...prev];
+        next[next.length - 1] = {
           role: 'assistant',
           content: (err as Error).message ?? 'Error al consultar el copiloto.',
           error: true,
-        },
-      ]);
+        };
+        return next;
+      });
     } finally {
       setLoading(false);
     }
@@ -136,9 +175,21 @@ export function Copiloto() {
                         : 'bg-gray-100 text-gray-800'
                   }`}
                 >
-                  <p className="whitespace-pre-wrap leading-relaxed">
-                    {msg.content}
-                  </p>
+                  {msg.streaming && !msg.content ? (
+                    <span className="flex items-center gap-2 text-gray-500">
+                      <IconLoader size={14} className="animate-spin" />
+                      Consultando datos…
+                    </span>
+                  ) : (
+                    <p className="whitespace-pre-wrap leading-relaxed">
+                      {msg.content}
+                      {msg.streaming && (
+                        <span className="ml-0.5 inline-block animate-pulse">
+                          ▋
+                        </span>
+                      )}
+                    </p>
+                  )}
                   {msg.toolsUsed && msg.toolsUsed.length > 0 && (
                     <p className="mt-1 text-[10px] text-gray-400">
                       via: {msg.toolsUsed.join(', ')}
@@ -147,15 +198,6 @@ export function Copiloto() {
                 </div>
               </div>
             ))}
-
-            {loading && (
-              <div className="flex justify-start">
-                <div className="flex items-center gap-2 rounded-xl bg-gray-100 px-3 py-2 text-sm text-gray-500">
-                  <IconLoader size={14} className="animate-spin" />
-                  Consultando datos…
-                </div>
-              </div>
-            )}
 
             <div ref={bottomRef} />
           </div>

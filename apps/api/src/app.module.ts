@@ -43,6 +43,8 @@ import { InvestorsModule } from './modules/investors/investors.module';
 import { RealEstateModule } from './modules/real-estate/real-estate.module';
 import { OfflineFieldModule } from './modules/offline-field/offline-field.module';
 import { AlertsModule } from './alerts/alerts.module';
+import { SearchModule } from './search/search.module';
+import { InformesModule } from './modules/informes/informes.module';
 
 @Module({
   imports: [
@@ -93,6 +95,8 @@ import { AlertsModule } from './alerts/alerts.module';
     RealEstateModule,
     OfflineFieldModule,
     AlertsModule,
+    SearchModule,
+    InformesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

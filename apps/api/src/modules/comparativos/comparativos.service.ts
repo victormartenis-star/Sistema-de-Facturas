@@ -1,8 +1,10 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import Anthropic from '@anthropic-ai/sdk';
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   Comparativo,
@@ -24,6 +26,8 @@ import {
   ComparativoOfertaDto,
   ComparativoOfertaUpdateInput,
   ComparativoUpdateInput,
+  SavingsObservation,
+  SavingsOpportunityDto,
   buildOrderNumber,
   comparativoAdjudicarSchema,
   comparativoCreateSchema,
@@ -33,6 +37,7 @@ import {
   computeDeviationVsTarget,
   computeLineTotal,
   computeOfertaTotal,
+  computeSavingsOpportunities,
   findCheapestOfertaId,
   todayIso,
 } from '@erp/shared';
@@ -61,12 +66,22 @@ function toDto(
   };
 }
 
+const AHORRO_SYSTEM_PROMPT = `Eres el redactor de un resumen ejecutivo de ahorro para gerencia de una empresa de construcción española.
+
+Recibes una lista de oportunidades de ahorro ya detectadas (código de partida, precio pagado vs. mínimo visto en otra obra/proveedor, % de sobreprecio, ahorro potencial en €) y escribes 2-4 frases en español destacando lo más relevante: el ahorro potencial total, la partida con mayor sobreprecio, y si hay un patrón (un proveedor o una obra que se repite). No inventes datos que no estén en la lista. Sin Markdown, texto plano.`;
+
 @Injectable()
 export class ComparativosService {
+  private client: Anthropic | null = null;
+
   constructor(
     private readonly dbs: DbService,
     private readonly audit: AuditService,
   ) {}
+
+  get aiEnabled(): boolean {
+    return Boolean(process.env.ANTHROPIC_API_KEY);
+  }
 
   async list(projectId?: string): Promise<ComparativoDto[]> {
     const companyId = await this.dbs.getCompanyId();
@@ -502,7 +517,124 @@ export class ComparativosService {
     return toDto(updated.row, phase, count);
   }
 
+  /**
+   * Oportunidades de ahorro: partidas donde el precio unitario de una oferta
+   * **adjudicada** (lo que de verdad se paga) supera claramente el mínimo
+   * unitario visto para el mismo código de partida en cualquier otra oferta
+   * de la empresa — de la misma obra o de otra. Puramente aritmético
+   * (`computeSavingsOpportunities`, `@erp/shared`), sin IA: la redacción de
+   * un resumen narrativo sobre esta lista es un paso aparte y opcional
+   * (`POST /comparativos/ahorro/resumen`), no depende de este cálculo.
+   */
+  async ahorro(): Promise<SavingsOpportunityDto[]> {
+    const companyId = await this.dbs.getCompanyId();
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (allowed !== null && allowed.length === 0) return [];
+
+    const filters = [
+      eq(comparativos.companyId, companyId),
+      isNull(comparativos.deletedAt),
+    ];
+    if (allowed !== null)
+      filters.push(inArray(comparativos.projectId, allowed));
+
+    const rows = await this.dbs.db
+      .select({
+        code: budgetItems.code,
+        name: budgetItems.name,
+        unitPrice: comparativoOfertaLineas.unitPrice,
+        quantity: comparativoOfertaLineas.quantity,
+        isAwarded: comparativoOfertas.isAwarded,
+        projectId: comparativos.projectId,
+        projectName: projects.name,
+        contactId: comparativoOfertas.contactId,
+        contactName: contacts.legalName,
+      })
+      .from(comparativoOfertaLineas)
+      .innerJoin(
+        comparativoOfertas,
+        eq(comparativoOfertaLineas.ofertaId, comparativoOfertas.id),
+      )
+      .innerJoin(
+        comparativos,
+        eq(comparativoOfertas.comparativoId, comparativos.id),
+      )
+      .innerJoin(
+        budgetItems,
+        eq(comparativoOfertaLineas.budgetItemId, budgetItems.id),
+      )
+      .innerJoin(projects, eq(comparativos.projectId, projects.id))
+      .innerJoin(contacts, eq(comparativoOfertas.contactId, contacts.id))
+      .where(and(...filters));
+
+    const observations: SavingsObservation[] = rows.map((r) => ({
+      budgetItemCode: r.code,
+      budgetItemName: r.name,
+      unitPrice: Number(r.unitPrice),
+      quantity: Number(r.quantity),
+      projectId: r.projectId,
+      projectName: r.projectName,
+      contactId: r.contactId,
+      contactName: r.contactName,
+      isAwarded: r.isAwarded,
+    }));
+
+    return computeSavingsOpportunities(observations);
+  }
+
+  /**
+   * Resumen narrativo opcional sobre una lista de oportunidades ya
+   * calculadas (recibida, no recalculada — misma idea que
+   * `InformesService`/`POST /informes/mensual/email`: la redacción es un
+   * paso aparte del cálculo). Opt-in silencioso, pero aquí con `400` en vez
+   * de degradar: a diferencia del informe mensual, esto es un botón
+   * explícito "resumir con IA", no una respuesta que el usuario ya espera
+   * ver siempre.
+   */
+  async resumenAhorro(
+    opportunities: SavingsOpportunityDto[],
+  ): Promise<{ resumen: string }> {
+    if (!this.aiEnabled) {
+      throw new BadRequestException(
+        'El resumen de ahorro no está disponible: configura `ANTHROPIC_API_KEY` en el .env de la API.',
+      );
+    }
+    if (opportunities.length === 0) {
+      return { resumen: 'No hay oportunidades de ahorro detectadas.' };
+    }
+
+    const response = await this.anthropic().messages.create({
+      model: process.env.ANTHROPIC_MODEL ?? 'claude-haiku-4-5-20251001',
+      max_tokens: 500,
+      system: AHORRO_SYSTEM_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: `Resume estas oportunidades de ahorro:\n\n${JSON.stringify(opportunities, null, 2)}`,
+        },
+      ],
+    });
+
+    const text = response.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map((b) => b.text)
+      .join('');
+    if (!text.trim()) {
+      throw new BadRequestException(
+        `El modelo no devolvió resultado (stop_reason: ${response.stop_reason})`,
+      );
+    }
+    return { resumen: text.trim() };
+  }
+
   /* ────────────────────── privados ────────────────────── */
+
+  private anthropic(): Anthropic {
+    if (!this.client) {
+      this.client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    }
+    return this.client;
+  }
 
   private async ofertaCounts(
     comparativoIds: string[],
@@ -588,16 +720,24 @@ export class ComparativosService {
   }
 
   private async findContact(contactId: string) {
+    const companyId = await this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select()
       .from(contacts)
-      .where(and(eq(contacts.id, contactId), isNull(contacts.deletedAt)))
+      .where(
+        and(
+          eq(contacts.id, contactId),
+          eq(contacts.companyId, companyId),
+          isNull(contacts.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) throw new NotFoundException('Contacto no encontrado');
     return row;
   }
 
   private async find(id: string) {
+    const companyId = await this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select({
         comparativo: comparativos,
@@ -606,7 +746,13 @@ export class ComparativosService {
       })
       .from(comparativos)
       .innerJoin(projectPhases, eq(comparativos.phaseId, projectPhases.id))
-      .where(and(eq(comparativos.id, id), isNull(comparativos.deletedAt)))
+      .where(
+        and(
+          eq(comparativos.id, id),
+          eq(comparativos.companyId, companyId),
+          isNull(comparativos.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) throw new NotFoundException('Comparativo no encontrado');
     const allowed = await this.dbs.getObrasAccesibles();
@@ -637,6 +783,7 @@ export class ComparativosService {
   }
 
   private async findProject(projectId: string) {
+    const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
       throw new NotFoundException('Obra no encontrada');
@@ -644,7 +791,13 @@ export class ComparativosService {
     const [row] = await this.dbs.db
       .select()
       .from(projects)
-      .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
+      .where(
+        and(
+          eq(projects.id, projectId),
+          eq(projects.companyId, companyId),
+          isNull(projects.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) throw new NotFoundException('Obra no encontrada');
     return row;

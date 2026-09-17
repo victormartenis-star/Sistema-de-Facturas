@@ -280,4 +280,189 @@ describe('Comparativos (integración) — matriz de ofertas y adjudicación', ()
   it('rechaza cualquier petición sin token con 401', async () => {
     await request(app.getHttpServer()).get('/comparativos').expect(401);
   });
+
+  describe('GET /comparativos/ahorro — recomendaciones de ahorro (Fase 15)', () => {
+    it('detecta una oportunidad cuando el precio adjudicado supera el mínimo visto en otra obra', async () => {
+      const admin = await registerUser(app, { email: 'admin@test.dintel.es' });
+
+      // Obra 1: la más barata vista para el código "P01" (nunca se adjudica,
+      // solo sirve de referencia de precio mínimo).
+      const project1 = await createProject(app, admin.accessToken);
+      const phase1 = await createPhase(app, admin.accessToken, project1.id);
+      const budget1 = await createBudget(app, admin.accessToken, project1.id);
+      const item1 = await addBudgetItem(app, admin.accessToken, budget1.id, {
+        code: 'P01',
+        name: 'Hormigón HA-25',
+        phaseId: phase1.id,
+      });
+      const comparativo1 = await authed(app, admin.accessToken)
+        .post('/comparativos')
+        .send({
+          projectId: project1.id,
+          phaseId: phase1.id,
+          title: 'Comparativo obra 1',
+        })
+        .expect(201);
+      const proveedorBarato = await createContact(app, admin.accessToken, {
+        kind: 'proveedor',
+        legalName: 'Proveedor Barato SL',
+      });
+      await authed(app, admin.accessToken)
+        .post(`/comparativos/${comparativo1.body.id}/ofertas`)
+        .send({
+          contactId: proveedorBarato.id,
+          lineas: [{ budgetItemId: item1.id, unitPrice: 80, quantity: 10 }],
+        })
+        .expect(201);
+
+      // Obra 2: mismo código "P01", adjudicado a un precio mucho más alto.
+      const project2 = await createProject(app, admin.accessToken);
+      const phase2 = await createPhase(app, admin.accessToken, project2.id);
+      const budget2 = await createBudget(app, admin.accessToken, project2.id);
+      const item2 = await addBudgetItem(app, admin.accessToken, budget2.id, {
+        code: 'P01',
+        name: 'Hormigón HA-25',
+        phaseId: phase2.id,
+      });
+      const comparativo2 = await authed(app, admin.accessToken)
+        .post('/comparativos')
+        .send({
+          projectId: project2.id,
+          phaseId: phase2.id,
+          title: 'Comparativo obra 2',
+        })
+        .expect(201);
+      const proveedorCaro = await createContact(app, admin.accessToken, {
+        kind: 'proveedor',
+        legalName: 'Proveedor Caro SL',
+      });
+      const oferta2 = await authed(app, admin.accessToken)
+        .post(`/comparativos/${comparativo2.body.id}/ofertas`)
+        .send({
+          contactId: proveedorCaro.id,
+          lineas: [{ budgetItemId: item2.id, unitPrice: 100, quantity: 10 }],
+        })
+        .expect(201);
+      await authed(app, admin.accessToken)
+        .post(`/comparativos/${comparativo2.body.id}/adjudicar`)
+        .send({ ofertaId: oferta2.body.id })
+        .expect(201);
+
+      const res = await authed(app, admin.accessToken)
+        .get('/comparativos/ahorro')
+        .expect(200);
+      expect(res.body).toHaveLength(1);
+      expect(res.body[0]).toMatchObject({
+        budgetItemCode: 'P01',
+        paidProjectId: project2.id,
+        paidContactName: 'Proveedor Caro SL',
+        paidUnitPrice: 100,
+        minUnitPrice: 80,
+        minProjectId: project1.id,
+        minContactName: 'Proveedor Barato SL',
+        overpayPct: 25,
+        potentialSavingsAmount: 200,
+      });
+    });
+
+    it('un usuario `obra` sin acceso a la obra adjudicada no ve la oportunidad', async () => {
+      const admin = await registerUser(app, { email: 'admin@test.dintel.es' });
+      const project1 = await createProject(app, admin.accessToken);
+      const phase1 = await createPhase(app, admin.accessToken, project1.id);
+      const budget1 = await createBudget(app, admin.accessToken, project1.id);
+      const item1 = await addBudgetItem(app, admin.accessToken, budget1.id, {
+        code: 'P01',
+        phaseId: phase1.id,
+      });
+      const comparativo1 = await authed(app, admin.accessToken)
+        .post('/comparativos')
+        .send({ projectId: project1.id, phaseId: phase1.id, title: 'C1' })
+        .expect(201);
+      const proveedor = await createContact(app, admin.accessToken);
+      await authed(app, admin.accessToken)
+        .post(`/comparativos/${comparativo1.body.id}/ofertas`)
+        .send({
+          contactId: proveedor.id,
+          lineas: [{ budgetItemId: item1.id, unitPrice: 80, quantity: 10 }],
+        })
+        .expect(201);
+
+      const project2 = await createProject(app, admin.accessToken);
+      const phase2 = await createPhase(app, admin.accessToken, project2.id);
+      const budget2 = await createBudget(app, admin.accessToken, project2.id);
+      const item2 = await addBudgetItem(app, admin.accessToken, budget2.id, {
+        code: 'P01',
+        phaseId: phase2.id,
+      });
+      const comparativo2 = await authed(app, admin.accessToken)
+        .post('/comparativos')
+        .send({ projectId: project2.id, phaseId: phase2.id, title: 'C2' })
+        .expect(201);
+      const oferta2 = await authed(app, admin.accessToken)
+        .post(`/comparativos/${comparativo2.body.id}/ofertas`)
+        .send({
+          contactId: proveedor.id,
+          lineas: [{ budgetItemId: item2.id, unitPrice: 100, quantity: 10 }],
+        })
+        .expect(201);
+      await authed(app, admin.accessToken)
+        .post(`/comparativos/${comparativo2.body.id}/adjudicar`)
+        .send({ ofertaId: oferta2.body.id })
+        .expect(201);
+
+      const { tokens: obraTokens } = await createObraUser(
+        app,
+        admin.accessToken,
+        [project1.id],
+      );
+      const res = await authed(app, obraTokens.accessToken)
+        .get('/comparativos/ahorro')
+        .expect(200);
+      expect(res.body).toEqual([]);
+    });
+
+    it('sin oportunidades, devuelve vacío', async () => {
+      const admin = await registerUser(app, { email: 'admin@test.dintel.es' });
+      const res = await authed(app, admin.accessToken)
+        .get('/comparativos/ahorro')
+        .expect(200);
+      expect(res.body).toEqual([]);
+    });
+
+    it('exige token', async () => {
+      await request(app.getHttpServer())
+        .get('/comparativos/ahorro')
+        .expect(401);
+    });
+  });
+
+  describe('POST /comparativos/ahorro/resumen — resumen narrativo opcional (Fase 15)', () => {
+    const originalKey = process.env.ANTHROPIC_API_KEY;
+
+    beforeAll(() => {
+      delete process.env.ANTHROPIC_API_KEY;
+    });
+
+    afterAll(() => {
+      if (originalKey !== undefined)
+        process.env.ANTHROPIC_API_KEY = originalKey;
+    });
+
+    it('responde 400 sin ANTHROPIC_API_KEY', async () => {
+      const admin = await registerUser(app, { email: 'admin@test.dintel.es' });
+      const res = await authed(app, admin.accessToken)
+        .post('/comparativos/ahorro/resumen')
+        .send({ opportunities: [] })
+        .expect(400);
+      expect(res.body.message).toContain('ANTHROPIC_API_KEY');
+    });
+
+    it('valida el cuerpo (400 del ZodValidationPipe, antes de llegar al servicio)', async () => {
+      const admin = await registerUser(app, { email: 'admin@test.dintel.es' });
+      await authed(app, admin.accessToken)
+        .post('/comparativos/ahorro/resumen')
+        .send({})
+        .expect(400);
+    });
+  });
 });

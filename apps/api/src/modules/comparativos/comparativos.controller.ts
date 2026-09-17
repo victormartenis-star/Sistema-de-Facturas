@@ -16,11 +16,13 @@ import {
   ComparativoOfertaCreateInput,
   ComparativoOfertaUpdateInput,
   ComparativoUpdateInput,
+  SavingsResumenInput,
   comparativoAdjudicarSchema,
   comparativoCreateSchema,
   comparativoOfertaCreateSchema,
   comparativoOfertaUpdateSchema,
   comparativoUpdateSchema,
+  savingsResumenSchema,
 } from '@erp/shared';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { ComparativosService } from './comparativos.service';
@@ -37,6 +39,21 @@ export class ComparativosController {
   @Get(':id/matriz')
   matriz(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.matriz(id);
+  }
+
+  /** Oportunidades de ahorro detectadas entre obras/proveedores — cálculo puro, sin IA. */
+  @Get('ahorro')
+  ahorro() {
+    return this.service.ahorro();
+  }
+
+  /** Resumen narrativo opcional sobre una lista de oportunidades ya calculada. */
+  @Post('ahorro/resumen')
+  resumenAhorro(
+    @Body(new ZodValidationPipe(savingsResumenSchema))
+    body: SavingsResumenInput,
+  ) {
+    return this.service.resumenAhorro(body.opportunities);
   }
 
   @Post()

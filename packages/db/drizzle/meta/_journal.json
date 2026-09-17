@@ -155,6 +155,13 @@
       "when": 1789493838062,
       "tag": "0021_daily_cable",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789634400000,
+      "tag": "0026_search_trgm",
+      "breakpoints": true
     }
   ]
 }

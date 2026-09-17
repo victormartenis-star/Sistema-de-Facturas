@@ -176,6 +176,18 @@ export const docTypeEnum = pgEnum('doc_type', [
  * dedupe por hash. Las columnas de extracción (full_text, fts, embedding)
  * y uploaded_by llegarán con el pipeline OCR y la autenticación.
  * file_sha256 se guarda en hexadecimal (64 caracteres) en lugar de bytea.
+ *
+ * **Buscador full-text v1 (Fase 15, trigramas — no `fts`/`embedding`
+ * todavía)**: `file_name` (aquí) y, en `invoices`, `invoice_number`/`notes`,
+ * y en `contacts`, `legal_name`, tienen un índice GIN de trigramas
+ * (`pg_trgm`) para tolerar errores tipográficos en `GET /search`
+ * (`apps/api/src/search/`). Deliberadamente **no modelado en este
+ * fichero**: la extensión + los índices viven solo en la migración
+ * `0026_search_trgm.sql`, a mano — `drizzle-kit generate` diff-a
+ * `schema.ts` contra el snapshot anterior, así que declararlos aquí sin
+ * que el snapshot los conozca haría que el siguiente `generate` intentara
+ * "recrearlos" innecesariamente. Si se cambia alguna de estas 4 columnas,
+ * revisar antes si el índice de esa migración sigue teniendo sentido.
  */
 export const documents = pgTable(
   'documents',

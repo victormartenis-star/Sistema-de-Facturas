@@ -77,6 +77,7 @@ import type {
   NotificationDto,
   NotificationsRunSummaryDto,
 } from '@erp/shared';
+import type { SearchResultDto } from '@erp/shared';
 import type {
   ActaRecepcionCreateInput,
   ActaRecepcionDto,
@@ -133,6 +134,7 @@ import type {
   ComparativoOfertaDto,
   ComparativoOfertaUpdateInput,
   ComparativoUpdateInput,
+  SavingsOpportunityDto,
   ContactCreateInput,
   ContactDto,
   ContactUpdateInput,
@@ -463,6 +465,12 @@ export const comparativosApi = {
     request<ComparativoDto>(`/comparativos/${id}/adjudicar`, {
       method: 'POST',
       body: JSON.stringify(input),
+    }),
+  ahorro: () => request<SavingsOpportunityDto[]>('/comparativos/ahorro'),
+  resumenAhorro: (opportunities: SavingsOpportunityDto[]) =>
+    request<{ resumen: string }>('/comparativos/ahorro/resumen', {
+      method: 'POST',
+      body: JSON.stringify({ opportunities }),
     }),
 };
 
@@ -1421,11 +1429,86 @@ export interface CopilotoResponseDto {
   toolsUsed: string[];
 }
 
+export type CopilotoStreamEvent =
+  | { type: 'text'; delta: string }
+  | { type: 'tool'; name: string }
+  | { type: 'done'; toolsUsed: string[] }
+  | { type: 'error'; message: string };
+
+/**
+ * `POST /copiloto/query/stream` — Server-Sent Events, no JSON: `EventSource`
+ * no admite `POST` con cuerpo ni cabeceras propias, así que se consume con
+ * `fetch` + el `ReadableStream` de `res.body`, troceando por `\n\n` (cada
+ * evento SSE) y parseando la línea `data: {...}` de cada uno.
+ *
+ * Simplificación deliberada frente a `request()`: sin el reintento
+ * automático de `POST /auth/refresh` en un 401 a mitad de sesión — añadirlo
+ * a un flujo de streaming complica bastante el manejo (habría que reabrir
+ * la conexión y no perder lo ya emitido) para un caso borde poco frecuente
+ * en un panel de chat que el usuario ya tiene abierto con sesión iniciada.
+ */
+async function streamCopiloto(
+  question: string,
+  history: CopilotoMessage[],
+  onEvent: (event: CopilotoStreamEvent) => void,
+): Promise<void> {
+  const session = readStoredSession();
+  const res = await fetch(`${API_URL}/copiloto/query/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(session?.accessToken
+        ? { Authorization: `Bearer ${session.accessToken}` }
+        : {}),
+    },
+    body: JSON.stringify({ question, history }),
+  });
+  if (!res.ok || !res.body) {
+    throw new ApiError(`Error ${res.status}`, res.status, []);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split('\n\n');
+    buffer = chunks.pop() ?? '';
+    for (const chunk of chunks) {
+      const line = chunk.split('\n').find((l) => l.startsWith('data: '));
+      if (line) onEvent(JSON.parse(line.slice(6)) as CopilotoStreamEvent);
+    }
+  }
+}
+
 export const copilotoApi = {
   query: (question: string, history: CopilotoMessage[]) =>
     request<CopilotoResponseDto>('/copiloto/query', {
       method: 'POST',
       body: JSON.stringify({ question, history }),
+    }),
+  queryStream: streamCopiloto,
+};
+
+export interface InformeMensualDto {
+  markdown: string;
+  mes: string;
+  projectId: string | null;
+  generatedAt: string;
+}
+
+export const informesApi = {
+  generarMensual: (mes: string, projectId?: string) =>
+    request<InformeMensualDto>(
+      `/informes/mensual?mes=${mes}${projectId ? `&projectId=${projectId}` : ''}`,
+      { method: 'POST' },
+    ),
+  enviarEmail: (markdown: string, mes: string, to: string[]) =>
+    request<{ sent: boolean }>('/informes/mensual/email', {
+      method: 'POST',
+      body: JSON.stringify({ markdown, mes, to }),
     }),
 };
 
@@ -1468,6 +1551,11 @@ export const alertsApi = {
     }),
   run: () =>
     request<NotificationsRunSummaryDto>('/alerts/run', { method: 'POST' }),
+};
+
+export const searchApi = {
+  search: (q: string) =>
+    request<SearchResultDto[]>(`/search?q=${encodeURIComponent(q)}`),
 };
 
 export const auditApi = {

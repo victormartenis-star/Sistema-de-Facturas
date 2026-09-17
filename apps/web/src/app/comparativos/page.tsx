@@ -231,6 +231,12 @@ export default function ComparativosPage() {
             </option>
           ))}
         </select>
+        <Link
+          href="/comparativos/ahorro"
+          className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Recomendaciones de ahorro
+        </Link>
         <button className={btnPrimaryCls} onClick={() => setFormOpen(true)}>
           Nuevo comparativo
         </button>

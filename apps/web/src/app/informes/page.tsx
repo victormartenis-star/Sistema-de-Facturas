@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import {
@@ -13,9 +14,15 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { dashboardApi, formatEur, type ObrasKpiRow } from '@/lib/api';
+import {
+  ApiError,
+  dashboardApi,
+  informesApi,
+  formatEur,
+  type ObrasKpiRow,
+} from '@/lib/api';
 import { ErrorBanner, PageHeader, TableSkeleton } from '@/components/ui';
-import { IconBuilding, IconTrendingUp } from '@/components/icons';
+import { IconBuilding, IconTrendingUp, IconSparkles } from '@/components/icons';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -351,6 +358,144 @@ function ObrasTable({ rows }: { rows: ObrasKpiRow[] }) {
   );
 }
 
+// ── Informe mensual redactado por IA ─────────────────────────────────────────
+
+function currentMonth(): string {
+  return new Date().toISOString().slice(0, 7);
+}
+
+function InformeMensualPanel({ rows }: { rows: ObrasKpiRow[] }) {
+  const [mes, setMes] = useState(currentMonth());
+  const [projectId, setProjectId] = useState('');
+  const [markdown, setMarkdown] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [emailTo, setEmailTo] = useState('');
+  const [emailStatus, setEmailStatus] = useState<
+    'idle' | 'sending' | 'sent' | 'no-smtp' | 'error'
+  >('idle');
+
+  async function generar() {
+    setLoading(true);
+    setError(null);
+    setMarkdown(null);
+    setEmailStatus('idle');
+    try {
+      const res = await informesApi.generarMensual(mes, projectId || undefined);
+      setMarkdown(res.markdown);
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : 'No se ha podido generar el informe.',
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function enviar() {
+    if (!markdown || !emailTo.trim()) return;
+    setEmailStatus('sending');
+    try {
+      const to = emailTo
+        .split(',')
+        .map((e) => e.trim())
+        .filter(Boolean);
+      const res = await informesApi.enviarEmail(markdown, mes, to);
+      setEmailStatus(res.sent ? 'sent' : 'no-smtp');
+    } catch {
+      setEmailStatus('error');
+    }
+  }
+
+  return (
+    <section className="mt-6 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center gap-2">
+        <IconSparkles size={16} className="text-amber-500" />
+        <h2 className="text-sm font-semibold">Informe mensual (IA)</h2>
+      </div>
+      <p className="mt-1 text-xs text-gray-500">
+        Narrativa redactada por IA a partir de los KPIs de la empresa (o de una
+        obra concreta), para compartir con gerencia.
+      </p>
+
+      <div className="mt-4 flex flex-wrap items-end gap-3">
+        <label className="flex flex-col gap-1 text-xs text-gray-600">
+          Mes
+          <input
+            type="month"
+            value={mes}
+            onChange={(e) => setMes(e.target.value)}
+            className="rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-gray-600">
+          Obra (opcional — vacío = toda la empresa)
+          <select
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            className="rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
+          >
+            <option value="">Toda la empresa</option>
+            {rows.map((r) => (
+              <option key={r.projectId} value={r.projectId}>
+                {r.code} — {r.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          onClick={generar}
+          disabled={loading || !mes}
+          className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-40"
+        >
+          {loading ? 'Generando…' : 'Generar informe'}
+        </button>
+      </div>
+
+      {error && <ErrorBanner message={error} />}
+
+      {markdown && (
+        <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-4">
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">
+            {markdown}
+          </p>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-gray-200 pt-3">
+            <input
+              value={emailTo}
+              onChange={(e) => setEmailTo(e.target.value)}
+              placeholder="Enviar por email a… (separa varios con coma)"
+              className="min-w-[220px] flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
+            />
+            <button
+              onClick={enviar}
+              disabled={emailStatus === 'sending' || !emailTo.trim()}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-40"
+            >
+              {emailStatus === 'sending' ? 'Enviando…' : 'Enviar por email'}
+            </button>
+            {emailStatus === 'sent' && (
+              <span className="text-xs text-emerald-600">Enviado.</span>
+            )}
+            {emailStatus === 'no-smtp' && (
+              <span className="text-xs text-amber-600">
+                No hay email configurado en el servidor (SMTP).
+              </span>
+            )}
+            {emailStatus === 'error' && (
+              <span className="text-xs text-red-600">
+                No se ha podido enviar.
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ── Página ────────────────────────────────────────────────────────────────────
 
 export default function InformesPage() {
@@ -450,6 +595,7 @@ export default function InformesPage() {
       <ObrasTable rows={rows} />
       <ObrasChart rows={rows} />
       <MargenesChart rows={rows} />
+      <InformeMensualPanel rows={rows} />
     </div>
   );
 }

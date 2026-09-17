@@ -21,5 +21,6 @@ import { EmailService } from './email.service';
   ],
   controllers: [AlertsController],
   providers: [AlertsService, AlertsSchedulerService, EmailService],
+  exports: [EmailService],
 })
 export class AlertsModule {}
