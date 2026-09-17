@@ -27,6 +27,7 @@ import {
   IconSparkles,
   IconTrendingUp,
   IconTruck,
+  IconUpload,
   IconUsers,
   IconWallet,
   type IconProps,
@@ -63,6 +64,11 @@ const GESTION: NavItem[] = [
   { href: '/facturas', label: 'Facturas', icon: IconReceipt },
   { href: '/albaranes', label: 'Albaranes', icon: IconInbox },
   { href: '/tesoreria', label: 'Tesorería', icon: IconWallet },
+  {
+    href: '/tesoreria/conciliacion',
+    label: 'Conciliación bancaria',
+    icon: IconUpload,
+  },
   { href: '/inversores', label: 'Inversores', icon: IconPercent },
   { href: '/promocion', label: 'Promoción y postventa', icon: IconHome },
   { href: '/esg', label: 'Sostenibilidad y RCD', icon: IconLeaf },
@@ -89,6 +95,7 @@ const GESTION: NavItem[] = [
 const CONFIGURACION: NavItem[] = [
   { href: '/configuracion/usuarios', label: 'Usuarios', icon: IconUsers },
   { href: '/configuracion/auditoria', label: 'Auditoría', icon: IconShield },
+  { href: '/configuracion/alertas', label: 'Reglas de alerta', icon: IconBell },
 ];
 
 /** Módulos previstos en la hoja de ruta que aún no están construidos. */

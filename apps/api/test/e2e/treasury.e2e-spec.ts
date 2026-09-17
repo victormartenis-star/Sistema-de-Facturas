@@ -214,7 +214,9 @@ describe('Treasury (integración) — vencimientos y cashflow', () => {
 
     expect(res.body.totalCobros).toBeGreaterThan(0);
     expect(res.body.alertas).toBe(0);
-    const bucketWithCobro = res.body.buckets.find((b: any) => b.cobros > 0);
+    const bucketWithCobro = res.body.buckets.find(
+      (b: { cobros: number }) => b.cobros > 0,
+    );
     expect(bucketWithCobro).toBeDefined();
     expect(bucketWithCobro.tension).toBe(false);
   });

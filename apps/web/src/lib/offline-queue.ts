@@ -1,5 +1,5 @@
 import { type DBSchema, type IDBPDatabase, openDB } from 'idb';
-import { documentsApi, offlineFieldApi } from './api';
+import { ApiError, documentsApi, offlineFieldApi } from './api';
 
 /**
  * Cola de escritura offline de la app de obra: partes diarios, fichajes,
@@ -114,7 +114,7 @@ async function submit(item: QueueItem): Promise<void> {
   }
 }
 
-/** Envía cada item pendiente; se detiene en el primer fallo de red (probablemente seguimos sin cobertura) pero sigue con los demás si el fallo es de otro tipo (p.ej. validación). */
+/** Envía cada item pendiente; si uno falla (red o validación) lo marca `error` y sigue con el resto de la cola. */
 export async function flushQueue(): Promise<{ ok: number; failed: number }> {
   const items = await listQueue();
   let ok = 0;
@@ -135,7 +135,13 @@ export async function flushQueue(): Promise<{ ok: number; failed: number }> {
   return { ok, failed };
 }
 
-/** Encola si no hay red; si hay, intenta enviar directo y solo encola como red de seguridad si el envío falla. */
+/**
+ * Encola si no hay red; si hay, intenta enviar directo y solo encola como
+ * red de seguridad si el fallo es de red. Un `ApiError` significa que el
+ * backend respondió (p.ej. 400/409 de validación): es un fallo permanente,
+ * así que se relanza en vez de encolarlo — encolarlo lo dejaría reintentando
+ * para siempre en cada `flushQueue()` sin que el usuario se entere.
+ */
 export async function submitOrQueue(
   kind: QueueKind,
   payload: Record<string, unknown>,
@@ -153,7 +159,8 @@ export async function submitOrQueue(
       status: 'pending',
     });
     return { queued: false };
-  } catch {
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
     await enqueue(kind, payload);
     return { queued: true };
   }
