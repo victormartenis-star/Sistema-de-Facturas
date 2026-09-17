@@ -402,10 +402,17 @@ export class ComplianceService {
   }
 
   private async findContact(id: string): Promise<Contact> {
+    const companyId = await this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select()
       .from(contacts)
-      .where(and(eq(contacts.id, id), isNull(contacts.deletedAt)))
+      .where(
+        and(
+          eq(contacts.id, id),
+          eq(contacts.companyId, companyId),
+          isNull(contacts.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) {
       throw new NotFoundException('Contacto no encontrado');
@@ -486,12 +493,14 @@ export class ComplianceService {
   }
 
   private async findDoc(id: string): Promise<ContactComplianceDoc> {
+    const companyId = await this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select()
       .from(contactComplianceDocs)
       .where(
         and(
           eq(contactComplianceDocs.id, id),
+          eq(contactComplianceDocs.companyId, companyId),
           isNull(contactComplianceDocs.deletedAt),
         ),
       )

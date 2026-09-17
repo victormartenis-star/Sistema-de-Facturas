@@ -292,10 +292,17 @@ export class DeliveryNotesService {
   }
 
   private async find(id: string): Promise<DeliveryNote> {
+    const companyId = await this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select()
       .from(deliveryNotes)
-      .where(and(eq(deliveryNotes.id, id), isNull(deliveryNotes.deletedAt)))
+      .where(
+        and(
+          eq(deliveryNotes.id, id),
+          eq(deliveryNotes.companyId, companyId),
+          isNull(deliveryNotes.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) {
       throw new NotFoundException('Albarán no encontrado');

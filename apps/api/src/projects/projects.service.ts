@@ -159,8 +159,13 @@ export class ProjectsService {
   }
 
   private async find(id: string): Promise<Project> {
+    const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
-    const filters: SQL[] = [eq(projects.id, id), isNull(projects.deletedAt)];
+    const filters: SQL[] = [
+      eq(projects.id, id),
+      eq(projects.companyId, companyId),
+      isNull(projects.deletedAt),
+    ];
     if (allowed !== null) {
       if (!allowed.includes(id))
         throw new NotFoundException('Obra no encontrada');

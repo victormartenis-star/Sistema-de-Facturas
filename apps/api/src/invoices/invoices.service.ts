@@ -113,6 +113,20 @@ export class InvoicesService {
     const companyId = await this.dbs.getCompanyId();
     const data = invoiceCreateSchema.parse(input);
     await this.findContact(data.contactId);
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (
+      allowed !== null &&
+      !hasAllowedProject(
+        allowed,
+        data.lines.map((l) => l.projectId ?? null),
+      )
+    ) {
+      // Mismo criterio que `findWithContact`: sin esto, la factura se crea
+      // igual (companyId es válido) pero queda huérfana — invisible para el
+      // propio usuario `obra` que la creó, porque ninguna de sus líneas
+      // pertenece a una obra a la que tiene acceso.
+      throw new NotFoundException('Obra no encontrada');
+    }
     const amounts = computeInvoiceAmounts(
       data.lines,
       data.isp,
@@ -609,11 +623,18 @@ export class InvoicesService {
   private async findWithContact(
     id: string,
   ): Promise<{ invoice: Invoice; contactName: string }> {
+    const companyId = await this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select({ invoice: invoices, contactName: contacts.legalName })
       .from(invoices)
       .innerJoin(contacts, eq(invoices.contactId, contacts.id))
-      .where(and(eq(invoices.id, id), isNull(invoices.deletedAt)))
+      .where(
+        and(
+          eq(invoices.id, id),
+          eq(invoices.companyId, companyId),
+          isNull(invoices.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) {
       throw new NotFoundException('Factura no encontrada');
@@ -646,10 +667,17 @@ export class InvoicesService {
   }
 
   private async findContact(contactId: string): Promise<Contact> {
+    const companyId = await this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select()
       .from(contacts)
-      .where(and(eq(contacts.id, contactId), isNull(contacts.deletedAt)))
+      .where(
+        and(
+          eq(contacts.id, contactId),
+          eq(contacts.companyId, companyId),
+          isNull(contacts.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) {
       throw new NotFoundException('Contacto no encontrado');

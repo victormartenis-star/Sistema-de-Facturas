@@ -136,10 +136,17 @@ export class ContactsService {
   }
 
   private async find(id: string): Promise<Contact> {
+    const companyId = await this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select()
       .from(contacts)
-      .where(and(eq(contacts.id, id), isNull(contacts.deletedAt)))
+      .where(
+        and(
+          eq(contacts.id, id),
+          eq(contacts.companyId, companyId),
+          isNull(contacts.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) {
       throw new NotFoundException('Contacto no encontrado');

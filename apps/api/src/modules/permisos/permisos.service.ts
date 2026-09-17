@@ -66,7 +66,7 @@ export class PermisosService {
   }
 
   /** Permisos concedidos vencidos o próximos a caducar, para el aviso previo a renovación. */
-  async alertas(projectId?: string) {
+  async alertas(projectId?: string, horizonDays?: number) {
     const companyId = this.getCompanyId();
     const filters = [
       eq(permisosPublicos.companyId, companyId),
@@ -78,7 +78,11 @@ export class PermisosService {
       .select()
       .from(permisosPublicos)
       .where(and(...filters));
-    return computePermisoAlerts(permisos, todayIso());
+    return computePermisoAlerts(
+      permisos,
+      todayIso(),
+      ...(horizonDays !== undefined ? [horizonDays] : []),
+    );
   }
 
   private async getRow(id: string): Promise<PermisoPublico> {

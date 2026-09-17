@@ -225,6 +225,7 @@ export class ExtractionService {
     invoiceNumber: string,
     issuerTaxId: string,
   ): Promise<string | null> {
+    const companyId = await this.dbs.getCompanyId();
     const rows = await this.dbs.db
       .select({
         documentId: extractions.documentId,
@@ -233,7 +234,9 @@ export class ExtractionService {
       })
       .from(extractions)
       .innerJoin(documents, eq(extractions.documentId, documents.id))
-      .where(isNull(documents.deletedAt))
+      .where(
+        and(eq(documents.companyId, companyId), isNull(documents.deletedAt)),
+      )
       .orderBy(desc(extractions.createdAt))
       .limit(200);
 

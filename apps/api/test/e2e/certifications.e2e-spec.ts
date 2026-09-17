@@ -156,34 +156,28 @@ describe('Certifications (integración) — creación, facturación y RBAC por o
       expect(res.body[0].projectId).toBe(projectA.id);
     });
 
-    it(
-      'gap conocido (ver Roadmap y Fases, deuda técnica): `certifications.service.ts` solo filtra por obra en `list()`, ' +
-        'no en la creación — este test documenta el comportamiento actual, no lo aprueba',
-      async () => {
-        const admin = await registerUser(app, {
-          email: 'admin@test.dintel.es',
-        });
-        const projectB = await createProject(app, admin.accessToken, {
-          contractAmount: 100_000,
-        });
-        const { tokens: obraTokens } = await createObraUser(
-          app,
-          admin.accessToken,
-          [],
-        );
+    it('un usuario `obra` sin acceso a la obra no puede crear una certificación en ella (404)', async () => {
+      const admin = await registerUser(app, {
+        email: 'admin@test.dintel.es',
+      });
+      const projectB = await createProject(app, admin.accessToken, {
+        contractAmount: 100_000,
+      });
+      const { tokens: obraTokens } = await createObraUser(
+        app,
+        admin.accessToken,
+        [],
+      );
 
-        // Hoy responde 201 aunque el usuario `obra` no tiene ninguna obra
-        // asignada — comportamiento real, no deseado.
-        await authed(app, obraTokens.accessToken)
-          .post('/certifications')
-          .send({
-            projectId: projectB.id,
-            certDate: '2026-09-14',
-            cumulativePct: 10,
-          })
-          .expect(201);
-      },
-    );
+      await authed(app, obraTokens.accessToken)
+        .post('/certifications')
+        .send({
+          projectId: projectB.id,
+          certDate: '2026-09-14',
+          cumulativePct: 10,
+        })
+        .expect(404);
+    });
   });
 
   it('rechaza cualquier petición sin token con 401', async () => {

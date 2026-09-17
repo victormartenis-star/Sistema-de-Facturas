@@ -234,22 +234,44 @@ export class CertificationsService {
   }
 
   private async find(id: string): Promise<Certification> {
+    const companyId = await this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select()
       .from(certifications)
-      .where(and(eq(certifications.id, id), isNull(certifications.deletedAt)))
+      .where(
+        and(
+          eq(certifications.id, id),
+          eq(certifications.companyId, companyId),
+          isNull(certifications.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) {
+      throw new NotFoundException('Certificación no encontrada');
+    }
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (allowed !== null && !allowed.includes(row.projectId)) {
       throw new NotFoundException('Certificación no encontrada');
     }
     return row;
   }
 
   private async findProject(projectId: string) {
+    const companyId = await this.dbs.getCompanyId();
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (allowed !== null && !allowed.includes(projectId)) {
+      throw new NotFoundException('Obra no encontrada');
+    }
     const [row] = await this.dbs.db
       .select()
       .from(projects)
-      .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
+      .where(
+        and(
+          eq(projects.id, projectId),
+          eq(projects.companyId, companyId),
+          isNull(projects.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) {
       throw new NotFoundException('Obra no encontrada');

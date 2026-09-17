@@ -439,6 +439,7 @@ export class PurchaseOrdersService {
   }
 
   private async findWithJoins(id: string) {
+    const companyId = this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select({
         order: purchaseOrders,
@@ -451,37 +452,68 @@ export class PurchaseOrdersService {
       .innerJoin(contacts, eq(purchaseOrders.contactId, contacts.id))
       .innerJoin(projects, eq(purchaseOrders.projectId, projects.id))
       .leftJoin(projectPhases, eq(purchaseOrders.phaseId, projectPhases.id))
-      .where(and(eq(purchaseOrders.id, id), isNull(purchaseOrders.deletedAt)))
+      .where(
+        and(
+          eq(purchaseOrders.id, id),
+          eq(purchaseOrders.companyId, companyId),
+          isNull(purchaseOrders.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) throw new NotFoundException('Pedido no encontrado');
     return row;
   }
 
   private async find(id: string): Promise<PurchaseOrder> {
+    const companyId = this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select()
       .from(purchaseOrders)
-      .where(and(eq(purchaseOrders.id, id), isNull(purchaseOrders.deletedAt)))
+      .where(
+        and(
+          eq(purchaseOrders.id, id),
+          eq(purchaseOrders.companyId, companyId),
+          isNull(purchaseOrders.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) throw new NotFoundException('Pedido no encontrado');
     return row;
   }
 
   private async findProject(projectId: string) {
+    const companyId = this.dbs.getCompanyId();
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (allowed !== null && !allowed.includes(projectId)) {
+      throw new NotFoundException('Obra no encontrada');
+    }
     const [row] = await this.dbs.db
       .select()
       .from(projects)
-      .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
+      .where(
+        and(
+          eq(projects.id, projectId),
+          eq(projects.companyId, companyId),
+          isNull(projects.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) throw new NotFoundException('Obra no encontrada');
     return row;
   }
 
   private async assertContactExists(contactId: string): Promise<void> {
+    const companyId = await this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select({ id: contacts.id })
       .from(contacts)
-      .where(and(eq(contacts.id, contactId), isNull(contacts.deletedAt)))
+      .where(
+        and(
+          eq(contacts.id, contactId),
+          eq(contacts.companyId, companyId),
+          isNull(contacts.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) throw new NotFoundException('Proveedor no encontrado');
   }

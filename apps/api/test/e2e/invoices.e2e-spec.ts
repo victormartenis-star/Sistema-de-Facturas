@@ -165,8 +165,8 @@ describe('Invoices (integración) — creación y RBAC por obra', () => {
     });
 
     it(
-      'gap conocido y más raro de lo documentado en el Roadmap: `POST /invoices` no valida la obra de la línea al ' +
-        'crear, pero la factura SÍ queda huérfana e invisible para quien la acaba de crear',
+      '`POST /invoices` rechaza con 404 una factura cuya obra no es accesible, sin dejarla huérfana ' +
+        '(antes se insertaba igual y solo el `get()` posterior de `create()` la delataba con 404, dejando la fila creada e invisible para quien la creó)',
       async () => {
         const admin = await registerUser(app, {
           email: 'admin@test.dintel.es',
@@ -184,30 +184,21 @@ describe('Invoices (integración) — creación y RBAC por obra', () => {
           [projectA.id],
         );
 
-        // `InvoicesService.create()` no comprueba `getObrasAccesibles()`
-        // antes de insertar — el INSERT de la factura y su línea a
-        // `projectB` se confirma en su propia transacción. Pero al acabar,
-        // `create()` llama a `this.get(invoiceId)` para construir la
-        // respuesta, y ESE `get()` sí aplica el filtro de obra — como la
-        // línea no está en una obra accesible para este usuario `obra`,
-        // lanza 404. Resultado real, verificado aquí: la petición responde
-        // 404 (no 201, la documentación previa en el Roadmap describía mal
-        // este caso — corregido tras encontrarlo con este test), pero la
-        // factura SÍ se ha creado: queda huérfana, invisible para quien la
-        // creó, visible para un admin. Peor que "sin restricción": una
-        // escritura que parece haber fallado pero no falló.
         await authed(app, obraTokens.accessToken)
           .post('/invoices')
           .send(invoiceBody(contact.id as string, projectB.id))
           .expect(404);
 
+        // Nada huérfano: `InvoicesService.create()` comprueba
+        // `getObrasAccesibles()` antes del INSERT, así que la factura
+        // rechazada no llega a existir ni para un admin.
         const res = await authed(app, admin.accessToken)
           .get('/invoices')
           .expect(200);
         const orphan = (
           res.body as Array<{ lines: Array<{ projectId: string }> }>
         ).find((inv) => inv.lines.some((l) => l.projectId === projectB.id));
-        expect(orphan).toBeDefined();
+        expect(orphan).toBeUndefined();
       },
     );
   });

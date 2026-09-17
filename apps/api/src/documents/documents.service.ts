@@ -223,10 +223,17 @@ export class DocumentsService {
   }
 
   private async find(id: string): Promise<Document> {
+    const companyId = await this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select()
       .from(documents)
-      .where(and(eq(documents.id, id), isNull(documents.deletedAt)))
+      .where(
+        and(
+          eq(documents.id, id),
+          eq(documents.companyId, companyId),
+          isNull(documents.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) {
       throw new NotFoundException('Documento no encontrado');

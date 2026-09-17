@@ -265,11 +265,17 @@ export class TreasuryService {
     id: string,
     input: { paymentInstrument: PaymentInstrument },
   ): Promise<void> {
+    const companyId = await this.dbs.getCompanyId();
     const data = setPaymentInstrumentSchema.parse(input);
     const [row] = await this.dbs.db
       .update(paymentMilestones)
       .set({ paymentInstrument: data.paymentInstrument, updatedAt: new Date() })
-      .where(eq(paymentMilestones.id, id))
+      .where(
+        and(
+          eq(paymentMilestones.id, id),
+          eq(paymentMilestones.companyId, companyId),
+        ),
+      )
       .returning({ id: paymentMilestones.id });
     if (!row) throw new NotFoundException('Vencimiento no encontrado');
   }
@@ -324,10 +330,16 @@ export class TreasuryService {
 
   /** Liquida o reabre un vencimiento y sincroniza el estado de la factura. */
   async setStatus(id: string, status: MilestoneStatus): Promise<void> {
+    const companyId = await this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select()
       .from(paymentMilestones)
-      .where(eq(paymentMilestones.id, id))
+      .where(
+        and(
+          eq(paymentMilestones.id, id),
+          eq(paymentMilestones.companyId, companyId),
+        ),
+      )
       .limit(1);
     if (!row) {
       throw new NotFoundException('Vencimiento no encontrado');

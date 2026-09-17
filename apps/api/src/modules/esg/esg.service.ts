@@ -458,10 +458,17 @@ export class EsgService {
   }
 
   private async findManager(id: string) {
+    const companyId = await this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select({ id: contacts.id, legalName: contacts.legalName })
       .from(contacts)
-      .where(and(eq(contacts.id, id), isNull(contacts.deletedAt)))
+      .where(
+        and(
+          eq(contacts.id, id),
+          eq(contacts.companyId, companyId),
+          isNull(contacts.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) throw new NotFoundException('Gestor no encontrado');
     return row;

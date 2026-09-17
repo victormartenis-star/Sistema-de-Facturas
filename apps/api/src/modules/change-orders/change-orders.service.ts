@@ -424,10 +424,17 @@ export class ChangeOrdersService {
   private async findPhaseById(
     phaseId: string,
   ): Promise<{ code: string; name: string } | null> {
+    const companyId = await this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select({ code: projectPhases.code, name: projectPhases.name })
       .from(projectPhases)
-      .where(eq(projectPhases.id, phaseId))
+      .where(
+        and(
+          eq(projectPhases.id, phaseId),
+          eq(projectPhases.companyId, companyId),
+          isNull(projectPhases.deletedAt),
+        ),
+      )
       .limit(1);
     return row ?? null;
   }
@@ -449,16 +456,24 @@ export class ChangeOrdersService {
   }
 
   private async findContact(contactId: string) {
+    const companyId = await this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select()
       .from(contacts)
-      .where(and(eq(contacts.id, contactId), isNull(contacts.deletedAt)))
+      .where(
+        and(
+          eq(contacts.id, contactId),
+          eq(contacts.companyId, companyId),
+          isNull(contacts.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) throw new NotFoundException('Contacto no encontrado');
     return row;
   }
 
   private async findProject(projectId: string) {
+    const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
       throw new NotFoundException('Obra no encontrada');
@@ -466,7 +481,13 @@ export class ChangeOrdersService {
     const [row] = await this.dbs.db
       .select()
       .from(projects)
-      .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
+      .where(
+        and(
+          eq(projects.id, projectId),
+          eq(projects.companyId, companyId),
+          isNull(projects.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) throw new NotFoundException('Obra no encontrada');
     return row;

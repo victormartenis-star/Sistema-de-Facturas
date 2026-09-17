@@ -343,6 +343,7 @@ export class BudgetsService {
   // ── Helpers privados ─────────────────────────────────────────────────────────
 
   private async findProject(projectId: string) {
+    const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
       throw new NotFoundException('Obra no encontrada');
@@ -350,30 +351,53 @@ export class BudgetsService {
     const [row] = await this.dbs.db
       .select()
       .from(projects)
-      .where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
+      .where(
+        and(
+          eq(projects.id, projectId),
+          eq(projects.companyId, companyId),
+          isNull(projects.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) throw new NotFoundException('Obra no encontrada');
     return row;
   }
 
   async findBudget(id: string): Promise<Budget> {
+    const companyId = await this.dbs.getCompanyId();
     const [row] = await this.dbs.db
       .select()
       .from(budgets)
-      .where(and(eq(budgets.id, id), isNull(budgets.deletedAt)))
+      .where(
+        and(
+          eq(budgets.id, id),
+          eq(budgets.companyId, companyId),
+          isNull(budgets.deletedAt),
+        ),
+      )
       .limit(1);
     if (!row) throw new NotFoundException('Presupuesto no encontrado');
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (allowed !== null && !allowed.includes(row.projectId)) {
+      throw new NotFoundException('Presupuesto no encontrado');
+    }
     return row;
   }
 
   private async findItem(id: string): Promise<BudgetItem> {
+    const companyId = await this.dbs.getCompanyId();
     const [row] = await this.dbs.db
-      .select()
+      .select({ item: budgetItems, projectId: budgets.projectId })
       .from(budgetItems)
-      .where(eq(budgetItems.id, id))
+      .innerJoin(budgets, eq(budgetItems.budgetId, budgets.id))
+      .where(and(eq(budgetItems.id, id), eq(budgets.companyId, companyId)))
       .limit(1);
     if (!row) throw new NotFoundException('Partida no encontrada');
-    return row;
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (allowed !== null && !allowed.includes(row.projectId)) {
+      throw new NotFoundException('Partida no encontrada');
+    }
+    return row.item;
   }
 
   private rethrowDuplicateCode(err: unknown, code: string): never {
