@@ -863,6 +863,7 @@ export class ExportsService {
         isp: invoices.isp,
         baseAmount: invoiceLines.baseAmount,
         vatPct: invoiceLines.vatPct,
+        projectId: invoiceLines.projectId,
       })
       .from(invoiceLines)
       .innerJoin(invoices, eq(invoiceLines.invoiceId, invoices.id))
@@ -873,7 +874,17 @@ export class ExportsService {
           inArray(invoices.status, [...ESTADOS_EMITIDA]),
           gte(invoices.issueDate, from),
           lte(invoices.issueDate, to),
-          q.projectId ? eq(invoiceLines.projectId, q.projectId) : undefined,
+          // Con obra: todas las líneas de las facturas que la tocan (pesos del
+          // prorrateo del IVA); computeIvaObra devuelve solo la parte de la obra.
+          q.projectId
+            ? inArray(
+                invoiceLines.invoiceId,
+                this.dbs.db
+                  .select({ id: invoiceLines.invoiceId })
+                  .from(invoiceLines)
+                  .where(eq(invoiceLines.projectId, q.projectId)),
+              )
+            : undefined,
         ),
       );
     const porFactura = new Map<string, FacturaIvaInput>();
@@ -886,10 +897,11 @@ export class ExportsService {
       f.lines.push({
         baseAmount: Number(l.baseAmount),
         vatPct: Number(l.vatPct),
+        projectId: l.projectId,
       });
       porFactura.set(l.invoiceId, f);
     }
-    const iva = computeIvaObra([...porFactura.values()]);
+    const iva = computeIvaObra([...porFactura.values()], q.projectId);
     interface Fila {
       lado: string;
       vatPct: number | null;

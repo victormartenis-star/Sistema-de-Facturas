@@ -225,6 +225,50 @@ describe('Exportaciones (integración) — GET /exports/:recurso', () => {
     expect(texto).toContain('"160,00"'); // 8 h x 20 €, coma decimal y separador coma
   });
 
+  it('economia-iva por obra reparte la cuota de una factura compartida y suma 42,03', async () => {
+    const admin = await registerUser(app);
+    const token = admin.accessToken;
+    const obraA = await createProject(app, token);
+    const obraB = await createProject(app, token);
+    const cliente = await createContact(app, token, { kind: 'cliente' });
+    const res = await authed(app, token)
+      .post('/invoices')
+      .send({
+        kind: 'venta',
+        contactId: cliente.id,
+        invoiceNumber: `FV-${Date.now()}`,
+        issueDate: '2026-09-14',
+        dueDate: '2026-10-14',
+        lines: [obraA.id, obraB.id].map((projectId) => ({
+          description: 'Certificación',
+          baseAmount: 100.07,
+          vatPct: 21,
+          projectId,
+        })),
+      })
+      .expect(201);
+    await authed(app, token)
+      .post(`/invoices/${res.body.id}/aprobar`)
+      .expect(201);
+
+    const cuota = async (projectId: string) => {
+      const r = await authed(app, token)
+        .get(
+          `/exports/economia-iva?format=json&from=2026-01-01&to=2026-12-31&projectId=${projectId}`,
+        )
+        .expect(200);
+      const fila = r.body.find(
+        (f: { lado: string }) => f.lado === 'repercutido',
+      );
+      expect(fila.baseAmount).toBe(100.07);
+      return Math.round(fila.vatAmount * 100);
+    };
+    const [menor, mayor] = [obraA.id, obraB.id].sort();
+    expect(await cuota(menor)).toBe(2102);
+    expect(await cuota(mayor)).toBe(2101);
+    expect((await cuota(menor)) + (await cuota(mayor))).toBe(4203);
+  });
+
   it('parámetros obligatorios y recurso desconocido', async () => {
     const admin = await registerUser(app);
     await authed(app, admin.accessToken)

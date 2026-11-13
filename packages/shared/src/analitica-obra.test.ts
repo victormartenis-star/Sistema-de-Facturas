@@ -5,6 +5,7 @@ import {
   computeIvaObra,
   computeMargenBrutoObra,
   computeRetencionesObra,
+  prorratearRetencionesDeObra,
   computeSobrecostePorPartida,
 } from './cost-control';
 
@@ -196,5 +197,121 @@ describe('computeIvaObra', () => {
     expect(iva.repercutido).toEqual([
       { vatPct: 21, baseAmount: 0, vatAmount: 0 },
     ]);
+  });
+});
+
+describe('computeIvaObra con obra', () => {
+  const lineas = [
+    { baseAmount: 100.07, vatPct: 21, projectId: 'A' },
+    { baseAmount: 100.07, vatPct: 21, projectId: 'B' },
+  ];
+  const factura = { kind: 'venta' as const, isp: false, lines: lineas };
+
+  it('reparte la cuota de la factura y cuadra al céntimo', () => {
+    const a = computeIvaObra([factura], 'A');
+    const b = computeIvaObra([factura], 'B');
+    expect(a.totalRepercutido).toBe(21.02);
+    expect(b.totalRepercutido).toBe(21.01);
+    expect(a.repercutido[0].baseAmount).toBe(100.07);
+    expect(b.repercutido[0].baseAmount).toBe(100.07);
+    expect(computeIvaObra([factura]).totalRepercutido).toBe(42.03);
+  });
+
+  it('3 obras: 0,07 al 21 % reparte la cuota 0,04 como 0,02/0,01/0,01', () => {
+    const f = {
+      kind: 'venta' as const,
+      isp: false,
+      lines: ['A', 'B', 'C'].map((projectId) => ({
+        baseAmount: 0.07,
+        vatPct: 21,
+        projectId,
+      })),
+    };
+    expect(
+      ['A', 'B', 'C'].map((p) => computeIvaObra([f], p).totalRepercutido),
+    ).toEqual([0.02, 0.01, 0.01]);
+  });
+
+  it('una sola obra: igual con y sin projectId', () => {
+    const f = {
+      kind: 'venta' as const,
+      isp: false,
+      lines: [{ baseAmount: 100.07, vatPct: 21, projectId: 'A' }],
+    };
+    expect(computeIvaObra([f], 'A')).toEqual(computeIvaObra([f]));
+  });
+
+  it('ISP: la cuota autoliquidada también se reparte', () => {
+    const f = { kind: 'compra' as const, isp: true, lines: lineas };
+    const a = computeIvaObra([f], 'A');
+    const b = computeIvaObra([f], 'B');
+    expect(a.ispRecibidas.selfAssessedVat).toBe(21.02);
+    expect(b.ispRecibidas.selfAssessedVat).toBe(21.01);
+    expect(a.totalSoportado).toBe(0);
+  });
+
+  it('original y rectificativa netean a cero obra a obra', () => {
+    const rect = {
+      kind: 'venta' as const,
+      isp: false,
+      lines: buildRectificationLines(lineas),
+    };
+    for (const p of ['A', 'B']) {
+      expect(computeIvaObra([factura, rect], p).totalRepercutido).toBe(0);
+    }
+  });
+
+  it('una factura sin líneas en la obra no cuenta', () => {
+    expect(computeIvaObra([factura], 'Z').totalRepercutido).toBe(0);
+  });
+});
+
+describe('prorratearRetencionesDeObra', () => {
+  const mov = (invoiceId: string, amount: number) => ({
+    invoiceId,
+    direction: 'cobro' as const,
+    amount,
+    dueDate: '2026-12-01',
+    status: 'previsto' as const,
+  });
+
+  it('10,01 con bases 100,07/100,07 da 5,01 y 5,00 (suma 10,01)', () => {
+    const bases = [
+      { invoiceId: 'F', projectId: 'A', baseAmount: 100.07 },
+      { invoiceId: 'F', projectId: 'B', baseAmount: 100.07 },
+    ];
+    const a = prorratearRetencionesDeObra([mov('F', 10.01)], bases, 'A');
+    const b = prorratearRetencionesDeObra([mov('F', 10.01)], bases, 'B');
+    expect(a.map((m) => m.amount)).toEqual([5.01]);
+    expect(b.map((m) => m.amount)).toEqual([5]);
+    expect(a[0]).toMatchObject({ direction: 'cobro', dueDate: '2026-12-01' });
+  });
+
+  it('3 obras iguales con 100,00: 33,34 / 33,33 / 33,33', () => {
+    const bases = ['A', 'B', 'C'].map((projectId) => ({
+      invoiceId: 'F',
+      projectId,
+      baseAmount: 50,
+    }));
+    expect(
+      ['A', 'B', 'C'].map(
+        (p) => prorratearRetencionesDeObra([mov('F', 100)], bases, p)[0].amount,
+      ),
+    ).toEqual([33.34, 33.33, 33.33]);
+  });
+
+  it('factura de una sola obra: importe intacto', () => {
+    const bases = [{ invoiceId: 'F', projectId: 'A', baseAmount: 200 }];
+    const r = prorratearRetencionesDeObra([mov('F', 10)], bases, 'A');
+    expect(r.map((m) => m.amount)).toEqual([10]);
+  });
+
+  it('línea sin obra: retiene su parte y la obra no se la queda', () => {
+    const bases = [
+      { invoiceId: 'F', projectId: 'A', baseAmount: 100 },
+      { invoiceId: 'F', projectId: null, baseAmount: 100 },
+    ];
+    const r = prorratearRetencionesDeObra([mov('F', 10)], bases, 'A');
+    expect(r.map((m) => m.amount)).toEqual([5]);
   });
 });

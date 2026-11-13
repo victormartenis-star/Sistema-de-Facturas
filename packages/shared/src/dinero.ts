@@ -101,6 +101,66 @@ export function sumCents(values: readonly bigint[]): bigint {
   return values.reduce((s, v) => s + v, 0n);
 }
 
+/**
+ * Reparte `total` (céntimos) en proporción a `pesos`; la suma del resultado es
+ * exactamente `total`. Regla de resto mayor:
+ *   1. Se reparte `|total|` con los pesos normalizados a suma positiva
+ *      (`p_i × signo(Σp)`) y se aplica al final `signo(total)`: así
+ *      `repartir(−T, p) = −repartir(T, p)` y `repartir(−T, −p) = −repartir(T, p)`,
+ *      de modo que una factura y su rectificativa netean parte a parte.
+ *   2. Cuota entera `floor(|total| × p_i / Σp)`; los céntimos sobrantes
+ *      (siempre `< n`) van uno a uno a las partes con mayor resto.
+ *   3. Desempate: a igualdad de resto, el índice más bajo (el llamador
+ *      ordena las partes de forma estable).
+ * Casos límite: sin pesos, `[]` si `total = 0` y `RangeError` si no; suma de
+ * pesos 0 → se reintenta con `|p_i|`; si todos son 0, todo al índice 0.
+ */
+export function repartirCents(
+  total: bigint,
+  pesos: readonly bigint[],
+): bigint[] {
+  const n = pesos.length;
+  if (n === 0) {
+    if (total === 0n) return [];
+    throw new RangeError('No se puede repartir un importe sin partes');
+  }
+  if (total === 0n) return pesos.map(() => 0n);
+  let w = sumCents(pesos);
+  let normalizados: bigint[];
+  if (w > 0n) normalizados = [...pesos];
+  else if (w < 0n) {
+    normalizados = pesos.map((p) => -p);
+    w = -w;
+  } else {
+    normalizados = pesos.map((p) => (p < 0n ? -p : p));
+    w = sumCents(normalizados);
+    if (w === 0n) {
+      return pesos.map((_, i) => (i === 0 ? total : 0n));
+    }
+  }
+  const negativo = total < 0n;
+  const abs = negativo ? -total : total;
+  const cuotas: bigint[] = [];
+  const restos: bigint[] = [];
+  for (const p of normalizados) {
+    const num = abs * p;
+    let q = num / w;
+    let r = num % w;
+    if (r < 0n) {
+      q -= 1n;
+      r += w;
+    }
+    cuotas.push(q);
+    restos.push(r);
+  }
+  const sobrante = Number(abs - sumCents(cuotas));
+  const orden = restos
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => (a.r === b.r ? a.i - b.i : a.r > b.r ? -1 : 1));
+  for (let k = 0; k < sobrante; k++) cuotas[orden[k].i] += 1n;
+  return negativo ? cuotas.map((c) => -c) : cuotas;
+}
+
 /** `precio(4) × cantidad(4)` → céntimos. Sustituye a `round2(unitPrice * quantity)`. */
 export function lineAmountCents(
   unitPrice: string | number,

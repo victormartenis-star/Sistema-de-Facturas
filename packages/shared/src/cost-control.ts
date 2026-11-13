@@ -3,9 +3,10 @@ import {
   computeVatBreakdown,
   round2,
   type InvoiceLineAmount,
+  type VatBreakdown,
   type VatGroup,
 } from './calculo';
-import { fromCents, sumCents, toCents } from './dinero';
+import { fromCents, repartirCents, sumCents, toCents } from './dinero';
 
 /**
  * Control de desviaciones y analítica de costes en tiempo real (Fase 10).
@@ -473,6 +474,78 @@ function ladoRetenciones(
   };
 }
 
+/** Orden estable de obras: `projectId` ascendente, `null` (sin obra) al final. */
+function compararObras(a: string | null, b: string | null): number {
+  if (a === b) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return a < b ? -1 : 1;
+}
+
+/**
+ * Parte de `total` (céntimos) que corresponde a `projectId` cuando se reparte
+ * en proporción a `bases` (céntimos por obra; `null` = sin obra, grupo propio).
+ */
+function parteDeObra(
+  total: bigint,
+  bases: Map<string | null, bigint>,
+  projectId: string,
+): bigint {
+  const claves = [...bases.keys()].sort(compararObras);
+  const partes = repartirCents(
+    total,
+    claves.map((k) => bases.get(k) ?? 0n),
+  );
+  const i = claves.indexOf(projectId);
+  return i < 0 ? 0n : partes[i];
+}
+
+export interface RetencionMovimientoFactura extends RetencionMovimiento {
+  invoiceId: string;
+}
+
+export interface BaseFacturaObra {
+  invoiceId: string;
+  /** Obra de las líneas; `null` = sin obra. */
+  projectId: string | null;
+  /** Base de las líneas de esa obra en esa factura. */
+  baseAmount: number | string;
+}
+
+/**
+ * La retención es de cabecera (sobre la base total de la factura). Devuelve la
+ * parte de cada vencimiento que corresponde a `projectId`, repartida entre las
+ * obras de la factura en proporción a su base (resto mayor, desempate por
+ * `projectId` ascendente, `null` al final). Las líneas sin obra son un grupo
+ * propio y retienen su parte. Las partes de 0 céntimos se descartan.
+ */
+export function prorratearRetencionesDeObra(
+  movs: RetencionMovimientoFactura[],
+  bases: BaseFacturaObra[],
+  projectId: string,
+): RetencionMovimiento[] {
+  const porFactura = new Map<string, Map<string | null, bigint>>();
+  for (const b of bases) {
+    const m = porFactura.get(b.invoiceId) ?? new Map<string | null, bigint>();
+    m.set(b.projectId, (m.get(b.projectId) ?? 0n) + toCents(b.baseAmount));
+    porFactura.set(b.invoiceId, m);
+  }
+  const out: RetencionMovimiento[] = [];
+  for (const mov of movs) {
+    const obras = porFactura.get(mov.invoiceId);
+    if (!obras) continue;
+    const parte = parteDeObra(toCents(mov.amount), obras, projectId);
+    if (parte === 0n) continue;
+    out.push({
+      direction: mov.direction,
+      amount: fromCents(parte),
+      dueDate: mov.dueDate,
+      status: mov.status,
+    });
+  }
+  return out;
+}
+
 /** `hoy` entra como parámetro (esta capa no lee el reloj). */
 export function computeRetencionesObra(
   movs: RetencionMovimiento[],
@@ -496,7 +569,8 @@ export function computeRetencionesObra(
 export interface FacturaIvaInput {
   kind: 'compra' | 'venta';
   isp: boolean;
-  lines: InvoiceLineAmount[];
+  /** `projectId` solo se usa al pedir el IVA de una obra concreta. */
+  lines: (InvoiceLineAmount & { projectId?: string | null })[];
 }
 
 export interface IvaObraDto {
@@ -516,8 +590,50 @@ export interface IvaObraDto {
 
 type AcumuladoIva = Map<number, { base: bigint; vat: bigint }>;
 
-/** No reimplementa el IVA: llama a `computeVatBreakdown` por factura y agrega. */
-export function computeIvaObra(facturas: FacturaIvaInput[]): IvaObraDto {
+/** Desglose de la factura reducido a la parte de la obra `obra`. */
+function desgloseDeObra(f: FacturaIvaInput, obra: string): VatBreakdown {
+  const completo = computeVatBreakdown(f.lines, f.isp);
+  // Con ISP la cuota oficial es la autoliquidada (la teórica).
+  const groups: VatGroup[] = [];
+  for (const g of completo.groups) {
+    const bases = new Map<string | null, bigint>();
+    for (const l of f.lines) {
+      if (l.vatPct !== g.vatPct) continue;
+      const k = l.projectId ?? null;
+      bases.set(k, (bases.get(k) ?? 0n) + toCents(l.baseAmount));
+    }
+    if (!bases.has(obra)) continue;
+    groups.push({
+      vatPct: g.vatPct,
+      baseAmount: fromCents(bases.get(obra) ?? 0n),
+      vatAmount: fromCents(parteDeObra(toCents(g.vatAmount), bases, obra)),
+    });
+  }
+  const base = sumCents(groups.map((g) => toCents(g.baseAmount)));
+  const vat = sumCents(groups.map((g) => toCents(g.vatAmount)));
+  return {
+    groups,
+    baseAmount: fromCents(base),
+    vatAmount: f.isp ? 0 : fromCents(vat),
+    totalAmount: fromCents(f.isp ? base : base + vat),
+    isp: f.isp,
+    selfAssessedVat: f.isp ? fromCents(vat) : 0,
+  };
+}
+
+/**
+ * No reimplementa el IVA: llama a `computeVatBreakdown` por factura y agrega.
+ *
+ * Sin `projectId`: agrega las líneas recibidas tal cual. Con `projectId`,
+ * `lines` debe traer TODAS las líneas de cada factura (con su `projectId`):
+ * la cuota oficial de cada tipo se reparte entre las obras en proporción a su
+ * base (resto mayor), así la suma entre obras cuadra al céntimo con la
+ * factura. La base de la obra es exacta (suma de sus líneas); no se prorratea.
+ */
+export function computeIvaObra(
+  facturas: FacturaIvaInput[],
+  projectId?: string,
+): IvaObraDto {
   const repercutido: AcumuladoIva = new Map();
   const soportado: AcumuladoIva = new Map();
   let ispEmitidas = 0n;
@@ -535,7 +651,16 @@ export function computeIvaObra(facturas: FacturaIvaInput[]): IvaObraDto {
   };
 
   for (const f of facturas) {
-    const b = computeVatBreakdown(f.lines, f.isp);
+    if (
+      projectId !== undefined &&
+      !f.lines.some((l) => l.projectId === projectId)
+    ) {
+      continue;
+    }
+    const b =
+      projectId === undefined
+        ? computeVatBreakdown(f.lines, f.isp)
+        : desgloseDeObra(f, projectId);
     if (f.isp) {
       if (f.kind === 'venta') ispEmitidas += toCents(b.baseAmount);
       else {

@@ -170,6 +170,75 @@ describe('Economía de obra (integración) — GET /projects/:id/economics', () 
     expect(body.iva.totalSoportado).toBe(0); // las compras siguen en borrador
   });
 
+  /** Venta aprobada de 100,07 + 100,07 al 21 % repartida en dos obras, retención 5 %. */
+  async function ventaRepartida(token: string, a: string, b: string) {
+    const cliente = await createContact(app, token, { kind: 'cliente' });
+    const res = await authed(app, token)
+      .post('/invoices')
+      .send({
+        kind: 'venta',
+        contactId: cliente.id,
+        invoiceNumber: `FV-${unico()}`,
+        issueDate: '2026-09-14',
+        dueDate: '2026-10-14',
+        retentionPct: 5,
+        lines: [
+          {
+            description: 'Obra A',
+            baseAmount: 100.07,
+            vatPct: 21,
+            projectId: a,
+          },
+          {
+            description: 'Obra B',
+            baseAmount: 100.07,
+            vatPct: 21,
+            projectId: b,
+          },
+        ],
+      })
+      .expect(201);
+    await authed(app, token)
+      .post(`/invoices/${res.body.id}/aprobar`)
+      .expect(201);
+    return res.body.id as string;
+  }
+
+  const cents = (n: number) => Math.round(n * 100);
+
+  it('una factura repartida entre dos obras se prorratea y la suma cuadra con la factura', async () => {
+    const admin = await registerUser(app);
+    const token = admin.accessToken;
+    const obraA = await createProject(app, token);
+    const obraB = await createProject(app, token);
+    await ventaRepartida(token, obraA.id, obraB.id);
+
+    const [menor, mayor] = [obraA.id, obraB.id].sort();
+    const eco = async (id: string) =>
+      (await authed(app, token).get(`/projects/${id}/economics`).expect(200))
+        .body;
+    const eMenor = await eco(menor);
+    const eMayor = await eco(mayor);
+
+    expect(eMenor.margen.facturadoVenta).toBe(100.07);
+    expect(eMayor.margen.facturadoVenta).toBe(100.07);
+    // Retención de la factura: 10,01 -> 5,01 + 5,00 (antes 10,01 en cada obra).
+    expect(eMenor.retenciones.aCobrarDeCliente.pendiente).toBe(5.01);
+    expect(eMayor.retenciones.aCobrarDeCliente.pendiente).toBe(5);
+    expect(
+      cents(eMenor.retenciones.aCobrarDeCliente.pendiente) +
+        cents(eMayor.retenciones.aCobrarDeCliente.pendiente),
+    ).toBe(1001);
+    // IVA de la factura: 42,03 -> 21,02 + 21,01 (antes 21,01 + 21,01).
+    expect(eMenor.iva.totalRepercutido).toBe(21.02);
+    expect(eMayor.iva.totalRepercutido).toBe(21.01);
+    expect(
+      cents(eMenor.iva.totalRepercutido) + cents(eMayor.iva.totalRepercutido),
+    ).toBe(4203);
+    expect(eMenor.iva.repercutido[0].baseAmount).toBe(100.07);
+    expect(eMayor.iva.repercutido[0].baseAmount).toBe(100.07);
+  });
+
   it('un usuario obra solo ve la economía de sus obras (404 en las ajenas)', async () => {
     const admin = await registerUser(app);
     const propia = await createProject(app, admin.accessToken);

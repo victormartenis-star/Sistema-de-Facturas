@@ -17,7 +17,8 @@ import {
   DesviacionPartidaInput,
   FacturaIvaInput,
   ObraEconomicsDto,
-  RetencionMovimiento,
+  BaseFacturaObra,
+  RetencionMovimientoFactura,
   FasePlanificadaInput,
   SobrecostePartidaInput,
   buildCurvaS,
@@ -27,6 +28,7 @@ import {
   computeIvaObra,
   computeMargenBrutoObra,
   computeRetencionesObra,
+  prorratearRetencionesDeObra,
   computeSobrecostePorPartida,
   fromCents,
   sumCents,
@@ -343,13 +345,16 @@ export class CostControlService {
       .orderBy(sql`${certifications.seq} desc`)
       .limit(1);
 
-    // Facturación emitida (aprobada, pagada o rectificada); las rectificativas
-    // entran con su signo, así original y rectificativa netean.
-    const lineasEmitidas = await this.dbs.db
+    // Una sola consulta: TODAS las líneas de las facturas no anuladas que
+    // tocan la obra. Las de otras obras solo sirven de peso para el prorrateo
+    // (la respuesta contiene únicamente importes de la obra pedida).
+    const lineas = await this.dbs.db
       .select({
         invoiceId: invoiceLines.invoiceId,
         kind: invoices.kind,
         isp: invoices.isp,
+        status: invoices.status,
+        projectId: invoiceLines.projectId,
         baseAmount: invoiceLines.baseAmount,
         vatPct: invoiceLines.vatPct,
       })
@@ -357,18 +362,31 @@ export class CostControlService {
       .innerJoin(invoices, eq(invoiceLines.invoiceId, invoices.id))
       .where(
         and(
-          eq(invoiceLines.projectId, projectId),
-          inArray(invoices.status, ['aprobada', 'pagada', 'rectificada']),
+          ne(invoices.status, 'anulada'),
           isNull(invoices.deletedAt),
+          inArray(
+            invoiceLines.invoiceId,
+            this.dbs.db
+              .select({ id: invoiceLines.invoiceId })
+              .from(invoiceLines)
+              .where(eq(invoiceLines.projectId, projectId)),
+          ),
         ),
       );
+
+    // Facturación emitida (aprobada, pagada o rectificada); las rectificativas
+    // entran con su signo, así original y rectificativa netean. La base es
+    // exacta por línea: no se prorratea.
+    const emitidas = lineas.filter((l) =>
+      (['aprobada', 'pagada', 'rectificada'] as string[]).includes(l.status),
+    );
     const facturadoVenta = sumCents(
-      lineasEmitidas
-        .filter((l) => l.kind === 'venta')
+      emitidas
+        .filter((l) => l.projectId === projectId && l.kind === 'venta')
         .map((l) => toCents(l.baseAmount)),
     );
     const porFactura = new Map<string, FacturaIvaInput>();
-    for (const l of lineasEmitidas) {
+    for (const l of emitidas) {
       const f = porFactura.get(l.invoiceId) ?? {
         kind: l.kind,
         isp: l.isp,
@@ -377,31 +395,26 @@ export class CostControlService {
       f.lines.push({
         baseAmount: Number(l.baseAmount),
         vatPct: Number(l.vatPct),
+        projectId: l.projectId,
       });
       porFactura.set(l.invoiceId, f);
     }
 
-    // Retenciones: vencimientos de retención de las facturas (no anuladas)
-    // con líneas en la obra. Una factura repartida entre obras cuenta entera
-    // en cada una: limitación conocida.
-    const idsFacturas = (
-      await this.dbs.db
-        .selectDistinct({ id: invoices.id })
-        .from(invoiceLines)
-        .innerJoin(invoices, eq(invoiceLines.invoiceId, invoices.id))
-        .where(
-          and(
-            eq(invoiceLines.projectId, projectId),
-            ne(invoices.status, 'anulada'),
-            isNull(invoices.deletedAt),
-          ),
-        )
-    ).map((r) => r.id);
-    const movimientos: RetencionMovimiento[] =
+    // Retenciones: la retención es de cabecera (sobre la base total de la
+    // factura). Una factura repartida entre obras aporta a cada una su parte,
+    // en proporción a su base (resto mayor; ver prorratearRetencionesDeObra).
+    const idsFacturas = [...new Set(lineas.map((l) => l.invoiceId))];
+    const bases: BaseFacturaObra[] = lineas.map((l) => ({
+      invoiceId: l.invoiceId,
+      projectId: l.projectId,
+      baseAmount: l.baseAmount,
+    }));
+    const movimientos: RetencionMovimientoFactura[] =
       idsFacturas.length === 0
         ? []
         : await this.dbs.db
             .select({
+              invoiceId: paymentMilestones.invoiceId,
               direction: paymentMilestones.direction,
               amount: paymentMilestones.amount,
               dueDate: paymentMilestones.dueDate,
@@ -431,8 +444,11 @@ export class CostControlService {
         ),
       }),
       desviaciones: computeDesviacionPorPartida(desviacionRows),
-      retenciones: computeRetencionesObra(movimientos, todayIso()),
-      iva: computeIvaObra([...porFactura.values()]),
+      retenciones: computeRetencionesObra(
+        prorratearRetencionesDeObra(movimientos, bases, projectId),
+        todayIso(),
+      ),
+      iva: computeIvaObra([...porFactura.values()], projectId),
     };
   }
 

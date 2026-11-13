@@ -14,6 +14,7 @@ import {
   payableAmount,
   planMilestones,
   planRectificationMilestones,
+  repartirImporte,
   round2,
   startOfMonth,
   startOfWeek,
@@ -554,5 +555,53 @@ describe('planRectificationMilestones', () => {
       ['cobro', 'ordinario', 95],
       ['cobro', 'retencion', 5],
     ]);
+  });
+});
+
+describe('repartirImporte', () => {
+  it('la suma del reparto es exactamente el total', () => {
+    expect(repartirImporte(10.02, [100.1, 100.2])).toEqual([5.01, 5.01]);
+    expect(repartirImporte(10.01, [100.07, 100.07])).toEqual([5.01, 5.0]);
+  });
+
+  it('3 obras con céntimos sobrantes: resto mayor, desempate por índice bajo', () => {
+    expect(repartirImporte(100, [1, 1, 1])).toEqual([33.34, 33.33, 33.33]);
+    expect(repartirImporte(0.05, [1, 1, 1])).toEqual([0.02, 0.02, 0.01]);
+    expect(repartirImporte(0.1, [1, 1, 4])).toEqual([0.02, 0.02, 0.06]);
+  });
+
+  it('una sola obra recibe el importe intacto', () => {
+    expect(repartirImporte(123.45, [987.65])).toEqual([123.45]);
+  });
+
+  it('signo negativo simétrico: el reparto de −T es el opuesto del de T', () => {
+    expect(repartirImporte(-100, [1, 1, 1])).toEqual([-33.34, -33.33, -33.33]);
+    expect(repartirImporte(-100, [-1, -1, -1])).toEqual([
+      -33.34, -33.33, -33.33,
+    ]);
+    expect(repartirImporte(100, [-1, -1, -1])).toEqual([33.34, 33.33, 33.33]);
+  });
+
+  it('propiedad: suma exacta con totales y pesos variados', () => {
+    const casos = [
+      [1, 2, 3],
+      [0.07, 0.07, 0.07],
+      [5, 0, 5],
+      [9, -3, 4],
+    ];
+    for (let t = -50; t <= 50; t += 7) {
+      for (const pesos of casos) {
+        const parts = repartirImporte(t / 7, pesos);
+        const suma = parts.reduce((s, x) => s + Math.round(x * 100), 0);
+        expect(suma).toBe(Math.round((t / 7) * 100));
+      }
+    }
+  });
+
+  it('límites', () => {
+    expect(repartirImporte(0, [1, 2])).toEqual([0, 0]);
+    expect(repartirImporte(5, [0, 0])).toEqual([5, 0]);
+    expect(repartirImporte(0, [])).toEqual([]);
+    expect(() => repartirImporte(1, [])).toThrow(RangeError);
   });
 });

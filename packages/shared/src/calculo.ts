@@ -10,7 +10,13 @@
  * §4 (dominio financiero del sector).
  */
 
-import { applyPct, fromCents, sumCents, toCents } from './dinero';
+import {
+  applyPct,
+  fromCents,
+  repartirCents,
+  sumCents,
+  toCents,
+} from './dinero';
 
 /* ───────────────────────────── importes ───────────────────────────── */
 
@@ -145,6 +151,19 @@ export function computeVatBreakdown(
     isp,
     selfAssessedVat: isp ? fromCents(theoreticalVat) : 0,
   };
+}
+
+/**
+ * Reparte un importe entre partes en proporción a sus pesos, en céntimos
+ * enteros. Devuelve un importe por peso, en el mismo orden; la suma es
+ * exactamente `total`. Regla de resto mayor con desempate por índice más bajo
+ * y simetría de signo (ver `repartirCents`).
+ */
+export function repartirImporte(
+  total: number | string,
+  pesos: readonly (number | string)[],
+): number[] {
+  return repartirCents(toCents(total), pesos.map(toCents)).map(fromCents);
 }
 
 /** Importe realmente exigible ahora: el total menos lo retenido en garantía. */
