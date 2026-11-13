@@ -12,6 +12,7 @@ import { ApiError, categoriesApi, contactsApi } from '@/lib/api';
 import { useDebouncedValue } from '@/lib/hooks';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { useToast } from '@/components/toast';
+import { Autorizado } from '@/components/autorizado';
 import { IconPencil, IconPlus, IconTrash, IconUsers } from '@/components/icons';
 import {
   EmptyState,
@@ -173,10 +174,12 @@ export default function ContactosPage() {
             </option>
           ))}
         </select>
-        <button onClick={openCreate} className={btnPrimaryCls}>
-          <IconPlus size={15} />
-          Nuevo contacto
-        </button>
+        <Autorizado accion="crear">
+          <button onClick={openCreate} className={btnPrimaryCls}>
+            <IconPlus size={15} />
+            Nuevo contacto
+          </button>
+        </Autorizado>
       </PageHeader>
 
       {query.isLoading && <TableSkeleton />}
@@ -195,10 +198,12 @@ export default function ContactosPage() {
           }
         >
           {!search && !kind && (
-            <button onClick={openCreate} className={btnPrimaryCls}>
-              <IconPlus size={15} />
-              Crear el primer contacto
-            </button>
+            <Autorizado accion="crear">
+              <button onClick={openCreate} className={btnPrimaryCls}>
+                <IconPlus size={15} />
+                Crear el primer contacto
+              </button>
+            </Autorizado>
           )}
         </EmptyState>
       )}
@@ -254,20 +259,24 @@ export default function ContactosPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => openEdit(c)}
-                        title="Editar"
-                        className="rounded-md p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
-                      >
-                        <IconPencil size={15} />
-                      </button>
-                      <button
-                        onClick={() => setDeleteTarget(c)}
-                        title="Eliminar"
-                        className="rounded-md p-1.5 text-gray-400 transition hover:bg-red-50 hover:text-red-600"
-                      >
-                        <IconTrash size={15} />
-                      </button>
+                      <Autorizado accion="editar">
+                        <button
+                          onClick={() => openEdit(c)}
+                          title="Editar"
+                          className="rounded-md p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
+                        >
+                          <IconPencil size={15} />
+                        </button>
+                      </Autorizado>
+                      <Autorizado accion="borrar">
+                        <button
+                          onClick={() => setDeleteTarget(c)}
+                          title="Eliminar"
+                          className="rounded-md p-1.5 text-gray-400 transition hover:bg-red-50 hover:text-red-600"
+                        >
+                          <IconTrash size={15} />
+                        </button>
+                      </Autorizado>
                     </div>
                   </td>
                 </tr>

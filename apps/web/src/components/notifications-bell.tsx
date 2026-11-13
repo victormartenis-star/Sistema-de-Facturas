@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { alertsApi, formatDate } from '@/lib/api';
 import { IconBell, IconCheck } from './icons';
+import { Autorizado } from './autorizado';
 
 const TYPE_LABELS: Record<string, string> = {
   compliance_doc: 'Homologación',
@@ -74,13 +75,15 @@ export function NotificationsBell() {
                 Notificaciones
               </p>
               {(listQuery.data ?? []).some((n) => !n.read) && (
-                <button
-                  onClick={markAllRead}
-                  className="flex items-center gap-1 text-xs font-medium text-sky-600 hover:underline"
-                >
-                  <IconCheck size={12} />
-                  Marcar todas leídas
-                </button>
+                <Autorizado accion="editar">
+                  <button
+                    onClick={markAllRead}
+                    className="flex items-center gap-1 text-xs font-medium text-sky-600 hover:underline"
+                  >
+                    <IconCheck size={12} />
+                    Marcar todas leídas
+                  </button>
+                </Autorizado>
               )}
             </div>
 
@@ -116,13 +119,15 @@ export function NotificationsBell() {
                       </p>
                     </div>
                     {!n.read && (
-                      <button
-                        onClick={() => markRead(n.id)}
-                        title="Marcar como leída"
-                        className="shrink-0 rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-sky-600"
-                      >
-                        <IconCheck size={14} />
-                      </button>
+                      <Autorizado accion="editar">
+                        <button
+                          onClick={() => markRead(n.id)}
+                          title="Marcar como leída"
+                          className="shrink-0 rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-sky-600"
+                        >
+                          <IconCheck size={14} />
+                        </button>
+                      </Autorizado>
                     )}
                   </div>
                   {n.link && (

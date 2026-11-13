@@ -7,6 +7,8 @@ import { useMemo, useRef, useState } from 'react';
 import type { BimModelDto, BudgetItemDto } from '@erp/shared';
 import { bimApi, budgetsApi, projectsApi } from '@/lib/api';
 import { useToast } from '@/components/toast';
+import { Autorizado } from '@/components/autorizado';
+import { usePermisos } from '@/lib/permisos';
 import { BimViewer, type ElementClickInfo } from '@/components/bim';
 import { Modal, btnGhostCls, btnPrimaryCls } from '@/components/ui';
 import { IconCube, IconPlus, IconTrash, IconUpload } from '@/components/icons';
@@ -17,6 +19,7 @@ const errText = (e: unknown) =>
 export default function BimPage() {
   const { id: projectId } = useParams<{ id: string }>();
   const toast = useToast();
+  const { can } = usePermisos();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -156,13 +159,15 @@ export default function BimPage() {
             className="hidden"
             onChange={handleFileChosen}
           />
-          <button
-            className={btnPrimaryCls}
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploadMutation.isPending}
-          >
-            <IconUpload size={15} /> Subir modelo .ifc
-          </button>
+          <Autorizado accion="crear">
+            <button
+              className={btnPrimaryCls}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadMutation.isPending}
+            >
+              <IconUpload size={15} /> Subir modelo .ifc
+            </button>
+          </Autorizado>
         </div>
       </div>
 
@@ -193,16 +198,18 @@ export default function BimPage() {
               >
                 {model.name}
               </button>
-              <button
-                className="shrink-0 text-gray-400 opacity-0 transition hover:text-red-600 group-hover:opacity-100"
-                onClick={() => {
-                  if (confirm(`¿Eliminar el modelo "${model.name}"?`)) {
-                    removeMutation.mutate(model.id);
-                  }
-                }}
-              >
-                <IconTrash size={14} />
-              </button>
+              <Autorizado accion="borrar">
+                <button
+                  className="shrink-0 text-gray-400 opacity-0 transition hover:text-red-600 group-hover:opacity-100"
+                  onClick={() => {
+                    if (confirm(`¿Eliminar el modelo "${model.name}"?`)) {
+                      removeMutation.mutate(model.id);
+                    }
+                  }}
+                >
+                  <IconTrash size={14} />
+                </button>
+              </Autorizado>
             </div>
           ))}
         </div>
@@ -250,7 +257,15 @@ export default function BimPage() {
         onClose={() => setSelectedElement(null)}
         title={selectedElement?.name ?? selectedElement?.ifcType ?? 'Elemento'}
       >
-        {selectedElement && (
+        {selectedElement && !can('editar') && (
+          <p className="text-sm text-gray-600">
+            {currentLink
+              ? 'Elemento vinculado a una partida.'
+              : 'Elemento sin vincular.'}{' '}
+            Tu rol es de solo lectura.
+          </p>
+        )}
+        {selectedElement && can('editar') && (
           <ElementLinkForm
             key={selectedElement.globalId}
             elementInfo={selectedElement}

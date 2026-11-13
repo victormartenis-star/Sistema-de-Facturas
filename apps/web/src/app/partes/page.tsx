@@ -9,6 +9,7 @@ import {
 } from '@erp/shared';
 import { partesDiariosApi, projectsApi, trabajadoresApi } from '@/lib/api';
 import { useToast } from '@/components/toast';
+import { Autorizado } from '@/components/autorizado';
 import { IconCalendar, IconCheck } from '@/components/icons';
 import {
   EmptyState,
@@ -331,19 +332,21 @@ export default function PartesDiariosPage() {
 
       {projectId && (
         <div className="space-y-8">
-          <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <h2 className="mb-3 text-sm font-semibold">
-              Nuevo parte de personal
-            </h2>
-            <PersonalQuickForm projectId={projectId} />
-          </section>
+          <Autorizado accion="crear">
+            <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+              <h2 className="mb-3 text-sm font-semibold">
+                Nuevo parte de personal
+              </h2>
+              <PersonalQuickForm projectId={projectId} />
+            </section>
 
-          <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <h2 className="mb-3 text-sm font-semibold">
-              Nuevo parte de maquinaria
-            </h2>
-            <MaquinariaQuickForm projectId={projectId} />
-          </section>
+            <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+              <h2 className="mb-3 text-sm font-semibold">
+                Nuevo parte de maquinaria
+              </h2>
+              <MaquinariaQuickForm projectId={projectId} />
+            </section>
+          </Autorizado>
 
           <section>
             <h2 className="mb-2 text-sm font-semibold">Partes de personal</h2>
@@ -393,12 +396,14 @@ export default function PartesDiariosPage() {
                               <IconCheck size={12} /> Aprobado
                             </span>
                           ) : (
-                            <button
-                              className="text-xs font-medium text-amber-600 hover:text-amber-800"
-                              onClick={() => approvePersonal.mutate(p.id)}
-                            >
-                              Aprobar
-                            </button>
+                            <Autorizado accion="cambiarEstado">
+                              <button
+                                className="text-xs font-medium text-amber-600 hover:text-amber-800"
+                                onClick={() => approvePersonal.mutate(p.id)}
+                              >
+                                Aprobar
+                              </button>
+                            </Autorizado>
                           )}
                         </td>
                       </tr>
@@ -455,12 +460,14 @@ export default function PartesDiariosPage() {
                               <IconCheck size={12} /> Aprobado
                             </span>
                           ) : (
-                            <button
-                              className="text-xs font-medium text-amber-600 hover:text-amber-800"
-                              onClick={() => approveMaquinaria.mutate(m.id)}
-                            >
-                              Aprobar
-                            </button>
+                            <Autorizado accion="cambiarEstado">
+                              <button
+                                className="text-xs font-medium text-amber-600 hover:text-amber-800"
+                                onClick={() => approveMaquinaria.mutate(m.id)}
+                              >
+                                Aprobar
+                              </button>
+                            </Autorizado>
                           )}
                         </td>
                       </tr>

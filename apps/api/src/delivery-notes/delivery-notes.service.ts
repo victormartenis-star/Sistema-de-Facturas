@@ -195,6 +195,7 @@ export class DeliveryNotesService {
       // Albarán y estado del pedido en una sola transacción: si el refresco
       // falla, no queda un albarán con el pedido desfasado.
       const row = await this.dbs.db.transaction(async (tx) => {
+        await this.orders.bloquearPedidos(tx, [data.orderId]);
         const [created] = await tx
           .insert(deliveryNotes)
           .values({
@@ -224,15 +225,20 @@ export class DeliveryNotesService {
     id: string,
     input: DeliveryNoteUpdateInput,
   ): Promise<DeliveryNoteDto> {
-    await this.find(id);
+    const previa = await this.find(id);
     const data = deliveryNoteUpdateSchema.parse(input);
     const campos = Object.entries(data)
       .filter(([, v]) => v !== undefined)
       .map(([k]) => k);
     try {
       await this.dbs.db.transaction(async (tx) => {
-        // Las reglas de estado se comprueban releyendo la fila con bloqueo.
+        // Orden de bloqueo: pedido(s) -> albarán. Luego se relee la fila con
+        // bloqueo para aplicar las reglas de estado sobre el estado real.
+        await this.orders.bloquearPedidos(tx, [previa.orderId, data.orderId]);
         const note = await this.lockNote(tx, id);
+        if (note.orderId !== previa.orderId) {
+          throw new ConflictException('El albarán ha cambiado: recarga');
+        }
         const bloqueo = deliveryNoteEditBlockReason(
           {
             status: note.status as DeliveryNoteStatus,
@@ -273,7 +279,7 @@ export class DeliveryNotesService {
         const pedidos = new Set<string>();
         if (note.orderId) pedidos.add(note.orderId);
         if (data.orderId) pedidos.add(data.orderId);
-        for (const pedido of pedidos) {
+        for (const pedido of [...pedidos].sort()) {
           await this.orders.refreshStatus(pedido, tx);
         }
       });
@@ -301,13 +307,7 @@ export class DeliveryNotesService {
     // simultáneas de albaranes del mismo pedido se serializan, así la segunda
     // ve lo recibido por la primera y el 3-way match no se salta el importe.
     await this.dbs.db.transaction(async (tx) => {
-      if (note.orderId) {
-        await tx
-          .select({ id: purchaseOrders.id })
-          .from(purchaseOrders)
-          .where(eq(purchaseOrders.id, note.orderId))
-          .for('update');
-      }
+      await this.orders.bloquearPedidos(tx, [note.orderId]);
       const [locked] = await tx
         .select({ status: deliveryNotes.status })
         .from(deliveryNotes)
@@ -350,13 +350,7 @@ export class DeliveryNotesService {
 
     await this.dbs.db.transaction(async (tx) => {
       // Mismo orden de bloqueo que `validate`: pedido -> albarán.
-      if (note.orderId) {
-        await tx
-          .select({ id: purchaseOrders.id })
-          .from(purchaseOrders)
-          .where(eq(purchaseOrders.id, note.orderId))
-          .for('update');
-      }
+      await this.orders.bloquearPedidos(tx, [note.orderId]);
       const locked = await this.lockNote(tx, id);
       if (
         !canReturnDeliveryNote({
@@ -389,9 +383,13 @@ export class DeliveryNotesService {
   }
 
   async remove(id: string): Promise<void> {
-    await this.find(id);
+    const previa = await this.find(id);
     await this.dbs.db.transaction(async (tx) => {
+      await this.orders.bloquearPedidos(tx, [previa.orderId]);
       const note = await this.lockNote(tx, id);
+      if (note.orderId !== previa.orderId) {
+        throw new ConflictException('El albarán ha cambiado: recarga');
+      }
       const estado = {
         status: note.status as DeliveryNoteStatus,
         invoiceId: note.invoiceId,

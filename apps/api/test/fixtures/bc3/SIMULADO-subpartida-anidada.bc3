@@ -1,0 +1,14 @@
+SIMULADO — mock de estructura estándar, no validado contra Presto
+~V|SIMULADO — FIEBDC-3/2016 mock, no validado contra Presto|
+~C|OBR##||Obra SIMULADA|0|
+~C|CAP01#||Capitulo SIMULADO|0|
+~C|PA|m2|Partida con subpartida anidada|0|
+~C|SUB01|m3|Subpartida hormigon armado|0|
+~C|MO01|h|Oficial primera|20.00||1|
+~C|MAT01|m3|Hormigon|80.00||3|
+~D|OBR##|CAP01#|1|
+~D|CAP01#|PA|4|
+~D|PA|SUB01|0.25|1|
+~D|PA|MO01|1|1|
+~D|SUB01|MO01|2|1|
+~D|SUB01|MAT01|1|1|

@@ -18,6 +18,7 @@ import {
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { IconInbox } from '@/components/icons';
 import { useToast } from '@/components/toast';
+import { Autorizado } from '@/components/autorizado';
 import {
   EmptyState,
   ErrorBanner,
@@ -125,15 +126,17 @@ export default function PedidosPage() {
         subtitle="Sin pedido no hay compra · sin pedido no hay albarán validado"
         count={orders.length}
       >
-        <button
-          className={btnPrimaryCls}
-          onClick={() => {
-            setEditing(null);
-            setFormOpen(true);
-          }}
-        >
-          Nuevo pedido
-        </button>
+        <Autorizado accion="crear">
+          <button
+            className={btnPrimaryCls}
+            onClick={() => {
+              setEditing(null);
+              setFormOpen(true);
+            }}
+          >
+            Nuevo pedido
+          </button>
+        </Autorizado>
       </PageHeader>
 
       {/* Las tres cifras que se miran en la reunión mensual */}
@@ -295,22 +298,26 @@ export default function PedidosPage() {
                     <StatusBadge status={o.status} />
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
-                    <button
-                      className="text-xs text-gray-500 hover:text-gray-900"
-                      onClick={() => {
-                        setEditing(o);
-                        setFormOpen(true);
-                      }}
-                    >
-                      Editar
-                    </button>
-                    {o.status !== 'cerrado' && o.status !== 'anulado' && (
+                    <Autorizado accion="editar">
                       <button
-                        className="ml-3 text-xs text-gray-500 hover:text-gray-900"
-                        onClick={() => setClosing(o)}
+                        className="text-xs text-gray-500 hover:text-gray-900"
+                        onClick={() => {
+                          setEditing(o);
+                          setFormOpen(true);
+                        }}
                       >
-                        Cerrar
+                        Editar
                       </button>
+                    </Autorizado>
+                    {o.status !== 'cerrado' && o.status !== 'anulado' && (
+                      <Autorizado accion="cambiarEstado">
+                        <button
+                          className="ml-3 text-xs text-gray-500 hover:text-gray-900"
+                          onClick={() => setClosing(o)}
+                        >
+                          Cerrar
+                        </button>
+                      </Autorizado>
                     )}
                   </td>
                 </tr>

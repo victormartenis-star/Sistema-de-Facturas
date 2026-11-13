@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, type FormEvent } from 'react';
 import { copilotoApi, type CopilotoMessage } from '@/lib/api';
 import { IconSparkles, IconX, IconLoader } from './icons';
+import { Autorizado } from './autorizado';
 
 interface ChatMsg {
   role: 'user' | 'assistant';
@@ -147,17 +148,26 @@ export function Copiloto() {
                 <p className="text-center text-xs text-gray-400">
                   Haz una pregunta o elige una sugerencia:
                 </p>
-                <div className="flex flex-col gap-1.5">
-                  {SUGGESTED.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => send(s)}
-                      className="rounded-lg border border-gray-200 px-3 py-2 text-left text-xs text-gray-700 hover:border-amber-300 hover:bg-amber-50"
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
+                <Autorizado
+                  accion="crear"
+                  alternativa={
+                    <p className="text-center text-xs text-gray-400">
+                      Tu rol es de solo lectura: el copiloto no está disponible.
+                    </p>
+                  }
+                >
+                  <div className="flex flex-col gap-1.5">
+                    {SUGGESTED.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => send(s)}
+                        className="rounded-lg border border-gray-200 px-3 py-2 text-left text-xs text-gray-700 hover:border-amber-300 hover:bg-amber-50"
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </Autorizado>
               </div>
             )}
 
@@ -203,25 +213,27 @@ export function Copiloto() {
           </div>
 
           {/* Input */}
-          <form
-            onSubmit={handleSubmit}
-            className="flex gap-2 border-t border-gray-100 p-3"
-          >
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Escribe tu pregunta…"
-              disabled={loading}
-              className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 disabled:opacity-50"
-            />
-            <button
-              type="submit"
-              disabled={loading || !input.trim()}
-              className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-40"
+          <Autorizado accion="crear">
+            <form
+              onSubmit={handleSubmit}
+              className="flex gap-2 border-t border-gray-100 p-3"
             >
-              →
-            </button>
-          </form>
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Escribe tu pregunta…"
+                disabled={loading}
+                className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 disabled:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={loading || !input.trim()}
+                className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-40"
+              >
+                →
+              </button>
+            </form>
+          </Autorizado>
         </div>
       )}
     </>

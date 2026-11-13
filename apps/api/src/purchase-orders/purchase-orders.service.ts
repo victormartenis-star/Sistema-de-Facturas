@@ -46,6 +46,8 @@ import { ProveedoresService } from '../modules/proveedores/proveedores.service';
 /** Importes servidos y facturados de un pedido, sacados de sus albaranes. */
 interface Delivered {
   deliveredAmount: number;
+  /** Solo albaranes validados o facturados: lo que ya cuenta como recibido. */
+  receivedAmount: number;
   invoicedAmount: number;
   count: number;
 }
@@ -197,31 +199,34 @@ export class PurchaseOrdersService {
     const data = purchaseOrderUpdateSchema.parse(input);
     if (data.contactId) await this.assertContactExists(data.contactId);
 
-    await this.dbs.db
-      .update(purchaseOrders)
-      .set({
-        ...(data.contactId !== undefined && { contactId: data.contactId }),
-        ...(data.orderDate !== undefined && { orderDate: data.orderDate }),
-        ...(data.phaseId !== undefined && { phaseId: data.phaseId ?? null }),
-        ...(data.categoryId !== undefined && {
-          categoryId: data.categoryId ?? null,
-        }),
-        ...(data.description !== undefined && {
-          description: data.description,
-        }),
-        ...(data.amount !== undefined && { amount: data.amount.toFixed(2) }),
-        ...(data.expectedDate !== undefined && {
-          expectedDate: data.expectedDate ?? null,
-        }),
-        ...(data.requestedBy !== undefined && {
-          requestedBy: data.requestedBy ?? null,
-        }),
-        ...(data.urgent !== undefined && { urgent: data.urgent }),
-        ...(data.notes !== undefined && { notes: data.notes ?? null }),
-        updatedAt: new Date(),
-      })
-      .where(eq(purchaseOrders.id, id));
-    await this.refreshStatus(id);
+    await this.dbs.db.transaction(async (tx) => {
+      await this.bloquearPedidos(tx, [id]);
+      await tx
+        .update(purchaseOrders)
+        .set({
+          ...(data.contactId !== undefined && { contactId: data.contactId }),
+          ...(data.orderDate !== undefined && { orderDate: data.orderDate }),
+          ...(data.phaseId !== undefined && { phaseId: data.phaseId ?? null }),
+          ...(data.categoryId !== undefined && {
+            categoryId: data.categoryId ?? null,
+          }),
+          ...(data.description !== undefined && {
+            description: data.description,
+          }),
+          ...(data.amount !== undefined && { amount: data.amount.toFixed(2) }),
+          ...(data.expectedDate !== undefined && {
+            expectedDate: data.expectedDate ?? null,
+          }),
+          ...(data.requestedBy !== undefined && {
+            requestedBy: data.requestedBy ?? null,
+          }),
+          ...(data.urgent !== undefined && { urgent: data.urgent }),
+          ...(data.notes !== undefined && { notes: data.notes ?? null }),
+          updatedAt: new Date(),
+        })
+        .where(eq(purchaseOrders.id, id));
+      await this.refreshStatus(id, tx);
+    });
     return this.get(id);
   }
 
@@ -282,28 +287,46 @@ export class PurchaseOrdersService {
   }
 
   /**
-   * Recalcula el estado del pedido a partir de sus albaranes. Lo llama el
-   * módulo de albaranes cada vez que uno se crea, se imputa o se factura.
+   * Bloquea los pedidos (`FOR UPDATE`) en orden ascendente de id. Orden de
+   * bloqueo único en todo el módulo: pedido(s) -> albarán(es); así dos
+   * operaciones concurrentes sobre el mismo pedido no se interbloquean.
    */
-  async refreshStatus(
-    id: string,
-    executor: DbOrTx = this.dbs.db,
+  async bloquearPedidos(
+    tx: DbOrTx,
+    ids: Array<string | null | undefined>,
   ): Promise<void> {
-    const [order] = await executor
+    const unicos = [...new Set(ids.filter((i): i is string => !!i))].sort();
+    for (const id of unicos) {
+      await tx
+        .select({ id: purchaseOrders.id })
+        .from(purchaseOrders)
+        .where(eq(purchaseOrders.id, id))
+        .for('update');
+    }
+  }
+
+  /**
+   * Recalcula el estado del pedido a partir de sus albaranes VALIDADOS (un
+   * albarán pendiente aún no cuenta como servido). Bloquea el pedido con
+   * `FOR UPDATE` antes de leer la suma: debe llamarse dentro de una
+   * transacción y, si hay albaranes bloqueados, después de bloquear el pedido.
+   */
+  async refreshStatus(id: string, tx: DbOrTx): Promise<void> {
+    const [order] = await tx
       .select()
       .from(purchaseOrders)
       .where(and(eq(purchaseOrders.id, id), isNull(purchaseOrders.deletedAt)))
-      .limit(1);
+      .for('update');
     if (!order) return;
 
-    const delivered = (await this.deliveredByOrder([id], executor)).get(id);
+    const delivered = (await this.deliveredByOrder([id], tx)).get(id);
     const next = deriveOrderStatus(
       order.status as PurchaseOrderStatus,
       Number(order.amount),
-      delivered?.deliveredAmount ?? 0,
+      delivered?.receivedAmount ?? 0,
     );
     if (next !== order.status) {
-      await executor
+      await tx
         .update(purchaseOrders)
         .set({ status: next, updatedAt: new Date() })
         .where(eq(purchaseOrders.id, id));
@@ -369,6 +392,7 @@ export class PurchaseOrdersService {
       .select({
         orderId: deliveryNotes.orderId,
         delivered: sql<string>`coalesce(sum(${deliveryNotes.amount}), 0)`,
+        received: sql<string>`coalesce(sum(${deliveryNotes.amount}) filter (where ${deliveryNotes.status} in ('validado', 'facturado')), 0)`,
         invoiced: sql<string>`coalesce(sum(${deliveryNotes.amount}) filter (where ${deliveryNotes.invoiceId} is not null), 0)`,
         count: sql<string>`count(*)`,
       })
@@ -385,6 +409,7 @@ export class PurchaseOrdersService {
       if (!r.orderId) continue;
       map.set(r.orderId, {
         deliveredAmount: round2(Number(r.delivered)),
+        receivedAmount: round2(Number(r.received)),
         invoicedAmount: round2(Number(r.invoiced)),
         count: Number(r.count),
       });

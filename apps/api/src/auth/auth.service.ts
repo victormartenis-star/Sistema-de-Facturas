@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { createHash, randomBytes } from 'node:crypto';
-import { refreshTokens, User, users } from '@erp/db';
+import { DbOrTx, refreshTokens, User, users } from '@erp/db';
 import {
   AccessTokenPayload,
   AuthTokensDto,
@@ -25,6 +25,8 @@ const REFRESH_TTL_SECONDS = Number(
   process.env.JWT_REFRESH_TTL ?? 30 * 24 * 60 * 60,
 );
 const UNIQUE_VIOLATION = '23505';
+const MSG_REGISTRO_CERRADO =
+  'El registro público está cerrado; pide a un administrador que cree tu cuenta';
 
 export function toUserDto(row: User): UserDto {
   return {
@@ -66,40 +68,63 @@ export class AuthService {
    * de la empresa por defecto. Si no hay usuarios activos, el primero se crea
    * como `admin`; si ya hay alguno, el registro está cerrado (403) y los
    * usuarios los crea un admin con `POST /users`. Nunca se acepta un rol.
+   *
+   * Concurrencia: el recuento y el alta van en una transacción cuya PRIMERA
+   * sentencia es `pg_advisory_xact_lock` por empresa; el recuento que decide
+   * se hace ya con el bloqueo, así que el perdedor de la carrera ve al admin
+   * recién confirmado y recibe 403. El hash (lento) se calcula fuera, sin
+   * retener el bloqueo, y los tokens se emiten tras el commit.
+   * No cubre: `POST /users` (exige un admin ya existente).
    */
   async register(input: RegisterInput): Promise<AuthTokensDto> {
-    const db = this.dbs.db;
     const companyId = await this.dbs.getDefaultCompanyId();
 
-    const [{ count }] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(users)
-      .where(and(eq(users.companyId, companyId), isNull(users.deletedAt)));
-    if (count > 0) {
-      throw new ForbiddenException(
-        'El registro público está cerrado; pide a un administrador que cree tu cuenta',
-      );
+    // Rechazo rápido (camino normal con el registro cerrado): sin hash ni bloqueo.
+    if ((await this.contarUsuarios(this.dbs.db, companyId)) > 0) {
+      throw new ForbiddenException(MSG_REGISTRO_CERRADO);
     }
+    const passwordHash = await hashPassword(input.password);
     const role: UserRole = 'admin';
 
+    let user: User;
     try {
-      const [user] = await db
-        .insert(users)
-        .values({
-          companyId,
-          email: input.email,
-          passwordHash: await hashPassword(input.password),
-          fullName: input.fullName,
-          role,
-        })
-        .returning();
-      return this.issueTokens(user);
+      user = await this.dbs.db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtext(${'bootstrap-registro:' + companyId}))`,
+        );
+        if ((await this.contarUsuarios(tx, companyId)) > 0) {
+          throw new ForbiddenException(MSG_REGISTRO_CERRADO);
+        }
+        const [row] = await tx
+          .insert(users)
+          .values({
+            companyId,
+            email: input.email,
+            passwordHash,
+            fullName: input.fullName,
+            role,
+          })
+          .returning();
+        return row;
+      });
     } catch (err) {
       if ((err as { code?: string }).code === UNIQUE_VIOLATION) {
         throw new ConflictException('Ya existe un usuario con ese email');
       }
       throw err;
     }
+    return this.issueTokens(user);
+  }
+
+  private async contarUsuarios(
+    executor: DbOrTx,
+    companyId: string,
+  ): Promise<number> {
+    const [{ count }] = await executor
+      .select({ count: sql<number>`count(*)::int` })
+      .from(users)
+      .where(and(eq(users.companyId, companyId), isNull(users.deletedAt)));
+    return count;
   }
 
   async login(input: LoginInput): Promise<AuthTokensDto> {

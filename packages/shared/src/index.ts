@@ -48,3 +48,4 @@ export * from './search';
 export * from './informes';
 export * from './paginacion';
 export * from './capacidades';
+export * from './seed-campo';

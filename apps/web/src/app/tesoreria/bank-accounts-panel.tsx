@@ -6,6 +6,7 @@ import type { BankAccountCreateInput, BankAccountKind } from '@erp/shared';
 import { BANK_ACCOUNT_KIND_LABELS } from '@erp/shared';
 import { formatEur, treasuryApi } from '@/lib/api';
 import { useToast } from '@/components/toast';
+import { Autorizado } from '@/components/autorizado';
 import { IconPlus, IconWallet } from '@/components/icons';
 import {
   ErrorBanner,
@@ -49,12 +50,14 @@ export function BankAccountsPanel() {
     <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold">Cuentas bancarias y caja</h2>
-        <button
-          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-amber-600 hover:bg-amber-50"
-          onClick={() => setOpen(true)}
-        >
-          <IconPlus size={13} /> Nueva
-        </button>
+        <Autorizado accion="crear">
+          <button
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-amber-600 hover:bg-amber-50"
+            onClick={() => setOpen(true)}
+          >
+            <IconPlus size={13} /> Nueva
+          </button>
+        </Autorizado>
       </div>
       {accountsQuery.error && (
         <ErrorBanner message={errText(accountsQuery.error)} />

@@ -23,6 +23,7 @@ import {
 } from '@erp/shared';
 import { formatDate, formatEur, treasuryApi } from '@/lib/api';
 import { useToast } from '@/components/toast';
+import { Autorizado } from '@/components/autorizado';
 import {
   IconAlertTriangle,
   IconCheck,
@@ -402,23 +403,32 @@ export default function TesoreriaPage() {
                             : 'Pago'}
                       </td>
                       <td className="px-3 py-2.5">
-                        <select
-                          className="rounded-md border border-gray-200 bg-transparent px-1.5 py-1 text-xs text-gray-600"
-                          value={m.paymentInstrument}
-                          onChange={(e) =>
-                            instrumentMutation.mutate({
-                              id: m.id,
-                              paymentInstrument: e.target
-                                .value as PaymentInstrument,
-                            })
+                        <Autorizado
+                          accion="editar"
+                          alternativa={
+                            <span className="text-xs text-gray-600">
+                              {PAYMENT_INSTRUMENT_LABELS[m.paymentInstrument]}
+                            </span>
                           }
                         >
-                          {PAYMENT_INSTRUMENTS.map((pi) => (
-                            <option key={pi} value={pi}>
-                              {PAYMENT_INSTRUMENT_LABELS[pi]}
-                            </option>
-                          ))}
-                        </select>
+                          <select
+                            className="rounded-md border border-gray-200 bg-transparent px-1.5 py-1 text-xs text-gray-600"
+                            value={m.paymentInstrument}
+                            onChange={(e) =>
+                              instrumentMutation.mutate({
+                                id: m.id,
+                                paymentInstrument: e.target
+                                  .value as PaymentInstrument,
+                              })
+                            }
+                          >
+                            {PAYMENT_INSTRUMENTS.map((pi) => (
+                              <option key={pi} value={pi}>
+                                {PAYMENT_INSTRUMENT_LABELS[pi]}
+                              </option>
+                            ))}
+                          </select>
+                        </Autorizado>
                       </td>
                       <td
                         className={`px-3 py-2.5 text-right font-medium tabular-nums ${
@@ -431,22 +441,24 @@ export default function TesoreriaPage() {
                         {formatEur(m.amount)}
                       </td>
                       <td className="px-3 py-2.5 text-right">
-                        {m.status === 'previsto' ? (
-                          <button
-                            onClick={() => payMutation.mutate(m.id)}
-                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50"
-                          >
-                            <IconCheck size={13} />
-                            Liquidar
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => reopenMutation.mutate(m.id)}
-                            className="rounded-md px-2 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100"
-                          >
-                            Reabrir
-                          </button>
-                        )}
+                        <Autorizado accion="cambiarEstado">
+                          {m.status === 'previsto' ? (
+                            <button
+                              onClick={() => payMutation.mutate(m.id)}
+                              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50"
+                            >
+                              <IconCheck size={13} />
+                              Liquidar
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => reopenMutation.mutate(m.id)}
+                              className="rounded-md px-2 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100"
+                            >
+                              Reabrir
+                            </button>
+                          )}
+                        </Autorizado>
                       </td>
                     </tr>
                   );

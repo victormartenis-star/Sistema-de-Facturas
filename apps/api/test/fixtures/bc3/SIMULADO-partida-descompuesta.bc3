@@ -1,0 +1,13 @@
+SIMULADO — mock de estructura estándar, no validado contra Presto
+~V|SIMULADO — FIEBDC-3/2016 mock, no validado contra Presto|
+~C|OBR##||Obra SIMULADA|0|
+~C|CAP01#||Capitulo SIMULADO|0|
+~C|P01|m2|Solera con descomposicion|0|
+~C|MO01|h|Oficial primera|20.00||1|
+~C|MAT01|m3|Hormigon|80.00||3|
+~C|MAQ01|h|Vibrador|10.00||2|
+~D|OBR##|CAP01#|1|
+~D|CAP01#|P01|10|
+~D|P01|MO01|0.5|1.05|
+~D|P01|MAT01|0.2|1.05|
+~D|P01|MAQ01|0.1|1.05|

@@ -1,0 +1,9 @@
+SIMULADO — mock de estructura estándar, no validado contra Presto
+~V|SIMULADO — FIEBDC-3/2016 mock, no validado contra Presto|
+~C|OBR##||Obra SIMULADA|0|
+~C|CAP01#||Capitulo SIMULADO|0|
+~C|P01|m2|Partida simple uno|100.00|
+~C|P02|m3|Partida simple dos|50.00|
+~D|OBR##|CAP01#|1|
+~D|CAP01#|P01|1|
+~D|CAP01#|P02|4|

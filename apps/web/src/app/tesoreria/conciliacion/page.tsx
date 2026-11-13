@@ -20,6 +20,7 @@ import {
   type BankTransactionSuggestionDto,
 } from '@/lib/api';
 import { useToast } from '@/components/toast';
+import { Autorizado } from '@/components/autorizado';
 import { IconCheck, IconUpload, IconWallet, IconX } from '@/components/icons';
 import {
   EmptyState,
@@ -285,7 +286,9 @@ export default function ConciliacionPage() {
 
       {activeAccountId && (
         <>
-          <ImportPanel bankAccountId={activeAccountId} disabled={false} />
+          <Autorizado accion="importar">
+            <ImportPanel bankAccountId={activeAccountId} disabled={false} />
+          </Autorizado>
 
           {transactionsQuery.isLoading && <TableSkeleton rows={5} />}
           {transactionsQuery.error && (
@@ -333,10 +336,12 @@ export default function ConciliacionPage() {
                         {formatEur(tx.amount)}
                       </td>
                       <td className="px-4 py-3">
-                        <ReconcileCell
-                          transaction={tx}
-                          suggestion={suggestionsByTx.get(tx.id)}
-                        />
+                        <Autorizado accion="cambiarEstado">
+                          <ReconcileCell
+                            transaction={tx}
+                            suggestion={suggestionsByTx.get(tx.id)}
+                          />
+                        </Autorizado>
                       </td>
                     </tr>
                   ))}

@@ -2,6 +2,8 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AuthTokensDto } from '@erp/shared';
 import { authed, createTestApp, loginUser, registerUser } from './helpers';
+import { sql } from 'drizzle-orm';
+import { getDb } from '@erp/db';
 import { resetTestDb, seedCompany } from './reset-db';
 
 describe('Auth (integración)', () => {
@@ -97,6 +99,60 @@ describe('Auth (integración)', () => {
           fullName: 'Otro',
         })
         .expect(403);
+    });
+
+    it('registros concurrentes sobre BD vacía: exactamente 1 admin (201) y el resto 403', async () => {
+      const N = 12;
+      const MSG =
+        'El registro público está cerrado; pide a un administrador que cree tu cuenta';
+      for (let vuelta = 0; vuelta < 3; vuelta++) {
+        if (vuelta > 0) await resetTestDb();
+        const respuestas = await Promise.all(
+          Array.from({ length: N }, (_, i) =>
+            request(app.getHttpServer())
+              .post('/auth/register')
+              .send({
+                email: `carrera-${vuelta}-${i}@test.dintel.es`,
+                password: 'Test1234!',
+                fullName: `Carrera ${i}`,
+              }),
+          ),
+        );
+        const estados = respuestas.map((r) => r.status);
+        expect(estados.filter((e) => e === 201)).toHaveLength(1);
+        expect(estados.filter((e) => e === 403)).toHaveLength(N - 1);
+        for (const r of respuestas.filter((x) => x.status === 403)) {
+          expect(r.body.message).toBe(MSG);
+        }
+        const ganador = respuestas.find((r) => r.status === 201)!
+          .body as AuthTokensDto;
+        expect(ganador.user.role).toBe('admin');
+
+        const filas = await getDb().execute(
+          sql`select role, count(*)::int as n from users where deleted_at is null group by role`,
+        );
+        expect(filas.rows).toEqual([{ role: 'admin', n: 1 }]);
+        const lista = (
+          await authed(app, ganador.accessToken).get('/users').expect(200)
+        ).body as unknown[];
+        expect(lista).toHaveLength(1);
+      }
+    });
+
+    it('registros concurrentes con el mismo email: 1 alta (201) y el resto 403', async () => {
+      const N = 12;
+      const respuestas = await Promise.all(
+        Array.from({ length: N }, () =>
+          request(app.getHttpServer()).post('/auth/register').send({
+            email: 'mismo@test.dintel.es',
+            password: 'Test1234!',
+            fullName: 'Mismo',
+          }),
+        ),
+      );
+      const estados = respuestas.map((r) => r.status);
+      expect(estados.filter((e) => e === 201)).toHaveLength(1);
+      expect(estados.filter((e) => e === 403)).toHaveLength(N - 1);
     });
 
     it('rechaza una contraseña demasiado corta con 400 (ZodValidationPipe)', async () => {

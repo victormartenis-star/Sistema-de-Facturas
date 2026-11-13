@@ -1,5 +1,7 @@
 import { INestApplication } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
 import request from 'supertest';
+import { getDb, purchaseOrders } from '@erp/db';
 import {
   authed,
   createContact,
@@ -327,39 +329,114 @@ describe('Delivery Notes (integración) — CRUD de albaranes', () => {
       await api.delete(`/delivery-notes/${noteId}`).expect(404);
     });
 
-    it('al borrar un albarán pendiente se refresca el estado del pedido', async () => {
-      const admin = await registerUser(app);
-      const project = await createProject(app, admin.accessToken);
-      const contact = await createContact(app, admin.accessToken, {
-        kind: 'proveedor',
-      });
-      const order = await authed(app, admin.accessToken)
+    /** Pedido de `amount` € con su proveedor, listo para recibir albaranes. */
+    async function pedido(token: string, amount: number) {
+      const project = await createProject(app, token);
+      const contact = await createContact(app, token, { kind: 'proveedor' });
+      const order = await authed(app, token)
         .post('/purchase-orders')
         .send({
           projectId: project.id,
           contactId: contact.id,
           orderDate: '2026-09-14',
           description: 'Suministro',
-          amount: 100,
+          amount,
         })
         .expect(201);
-      const note = await authed(app, admin.accessToken)
+      return { project, contact, orderId: order.body.id as string };
+    }
+    async function albaran(
+      token: string,
+      p: { contact: { id: string }; orderId: string },
+      amount: number,
+    ) {
+      const res = await authed(app, token)
         .post('/delivery-notes')
         .send({
-          contactId: contact.id,
-          orderId: order.body.id,
-          noteNumber: `ALB-${Date.now()}`,
+          contactId: p.contact.id,
+          orderId: p.orderId,
+          noteNumber: `ALB-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           noteDate: '2026-09-14',
-          amount: 100,
+          amount,
         })
         .expect(201);
-      await authed(app, admin.accessToken)
-        .delete(`/delivery-notes/${note.body.id}`)
-        .expect(204);
-      const after = await authed(app, admin.accessToken)
-        .get(`/purchase-orders/${order.body.id}`)
+      return res.body.id as string;
+    }
+    async function estadoPedido(token: string, orderId: string) {
+      const res = await authed(app, token)
+        .get(`/purchase-orders/${orderId}`)
         .expect(200);
-      expect(after.body.status).toBe(order.body.status);
+      return res.body.status as string;
+    }
+
+    it('el pedido pasa a servido al VALIDAR el albarán, no al registrarlo; devolver lo deshace', async () => {
+      const admin = await registerUser(app);
+      const t = admin.accessToken;
+      const p = await pedido(t, 100);
+      const n1 = await albaran(t, p, 40);
+      expect(await estadoPedido(t, p.orderId)).toBe('emitido');
+      await authed(app, t).post(`/delivery-notes/${n1}/validar`).expect(201);
+      expect(await estadoPedido(t, p.orderId)).toBe('servido_parcial');
+
+      const n2 = await albaran(t, p, 60);
+      expect(await estadoPedido(t, p.orderId)).toBe('servido_parcial');
+      await authed(app, t).post(`/delivery-notes/${n2}/validar`).expect(201);
+      expect(await estadoPedido(t, p.orderId)).toBe('servido');
+
+      await authed(app, t)
+        .post(`/delivery-notes/${n2}/devolver`)
+        .send({ motivo: 'Importe mal anotado' })
+        .expect(201);
+      expect(await estadoPedido(t, p.orderId)).toBe('servido_parcial');
+    });
+
+    it('al borrar un albarán pendiente se refresca el estado del pedido', async () => {
+      const admin = await registerUser(app);
+      const t = admin.accessToken;
+      const p = await pedido(t, 100);
+      const noteId = await albaran(t, p, 100);
+      expect(await estadoPedido(t, p.orderId)).toBe('emitido');
+      // Estado desfasado a propósito: solo un refresco real al borrar lo corrige.
+      await getDb()
+        .update(purchaseOrders)
+        .set({ status: 'servido' })
+        .where(eq(purchaseOrders.id, p.orderId));
+      expect(await estadoPedido(t, p.orderId)).toBe('servido');
+
+      await authed(app, t).delete(`/delivery-notes/${noteId}`).expect(204);
+      expect(await estadoPedido(t, p.orderId)).toBe('emitido');
+    });
+
+    it('albaranes concurrentes sobre un mismo pedido: estado final coherente y sin interbloqueos', async () => {
+      const admin = await registerUser(app);
+      const t = admin.accessToken;
+      const p = await pedido(t, 80);
+      for (let vuelta = 0; vuelta < 3; vuelta++) {
+        const ids = await Promise.all(
+          Array.from({ length: 8 }, () => albaran(t, p, 10)),
+        );
+        const val = await Promise.all(
+          ids.map((id) => authed(app, t).post(`/delivery-notes/${id}/validar`)),
+        );
+        expect(val.map((r) => r.status)).toEqual(ids.map(() => 201));
+        expect(await estadoPedido(t, p.orderId)).toBe('servido');
+
+        const dev = await Promise.all(
+          ids.map((id) =>
+            authed(app, t)
+              .post(`/delivery-notes/${id}/devolver`)
+              .send({ motivo: 'Prueba de concurrencia' }),
+          ),
+        );
+        expect(dev.map((r) => r.status)).toEqual(ids.map(() => 201));
+        expect(await estadoPedido(t, p.orderId)).toBe('emitido');
+
+        const del = await Promise.all(
+          ids.map((id) => authed(app, t).delete(`/delivery-notes/${id}`)),
+        );
+        expect(del.map((r) => r.status)).toEqual(ids.map(() => 204));
+        expect(await estadoPedido(t, p.orderId)).toBe('emitido');
+      }
     });
   });
 

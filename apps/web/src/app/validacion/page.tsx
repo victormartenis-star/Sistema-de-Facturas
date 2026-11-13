@@ -23,6 +23,7 @@ import {
 import { DocStatusBadge } from '@/components/doc-status-badge';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { useToast } from '@/components/toast';
+import { Autorizado } from '@/components/autorizado';
 import {
   IconAlertTriangle,
   IconCheck,
@@ -411,18 +412,22 @@ export default function ValidacionPage() {
                   <IconExternalLink size={13} />
                   Abrir original
                 </a>
-                <button
-                  onClick={() => reprocessMutation.mutate(selected.documentId)}
-                  disabled={reprocessMutation.isPending || pipelineOff}
-                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-amber-600 transition hover:bg-amber-50 disabled:opacity-40"
-                >
-                  {reprocessMutation.isPending ? (
-                    <IconLoader size={13} className="animate-spin" />
-                  ) : (
-                    <IconSparkles size={13} />
-                  )}
-                  Releer con IA
-                </button>
+                <Autorizado accion="editar">
+                  <button
+                    onClick={() =>
+                      reprocessMutation.mutate(selected.documentId)
+                    }
+                    disabled={reprocessMutation.isPending || pipelineOff}
+                    className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-amber-600 transition hover:bg-amber-50 disabled:opacity-40"
+                  >
+                    {reprocessMutation.isPending ? (
+                      <IconLoader size={13} className="animate-spin" />
+                    ) : (
+                      <IconSparkles size={13} />
+                    )}
+                    Releer con IA
+                  </button>
+                </Autorizado>
               </div>
 
               {selected.status === 'procesando' && (
@@ -660,29 +665,31 @@ export default function ValidacionPage() {
                     </span>
                   </label>
 
-                  <div className="flex flex-wrap justify-end gap-2 pt-1">
-                    <button
-                      onClick={() => setRejectTarget(selected)}
-                      className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
-                    >
-                      <IconX size={14} />
-                      Descartar
-                    </button>
-                    <button
-                      onClick={() => validateMutation.mutate()}
-                      disabled={
-                        validateMutation.isPending || !selected.extraction
-                      }
-                      className={`${btnPrimaryCls} disabled:opacity-40`}
-                    >
-                      {validateMutation.isPending ? (
-                        <IconLoader size={14} className="animate-spin" />
-                      ) : (
-                        <IconCheck size={14} />
-                      )}
-                      Validar
-                    </button>
-                  </div>
+                  <Autorizado accion="cambiarEstado">
+                    <div className="flex flex-wrap justify-end gap-2 pt-1">
+                      <button
+                        onClick={() => setRejectTarget(selected)}
+                        className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
+                      >
+                        <IconX size={14} />
+                        Descartar
+                      </button>
+                      <button
+                        onClick={() => validateMutation.mutate()}
+                        disabled={
+                          validateMutation.isPending || !selected.extraction
+                        }
+                        className={`${btnPrimaryCls} disabled:opacity-40`}
+                      >
+                        {validateMutation.isPending ? (
+                          <IconLoader size={14} className="animate-spin" />
+                        ) : (
+                          <IconCheck size={14} />
+                        )}
+                        Validar
+                      </button>
+                    </div>
+                  </Autorizado>
                 </div>
               </div>
             </div>

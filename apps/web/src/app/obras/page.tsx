@@ -13,6 +13,7 @@ import { useDebouncedValue } from '@/lib/hooks';
 import { StatusBadge } from '@/components/status-badge';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { useToast } from '@/components/toast';
+import { Autorizado } from '@/components/autorizado';
 import {
   IconBuilding,
   IconPencil,
@@ -154,10 +155,12 @@ export default function ObrasPage() {
             </option>
           ))}
         </select>
-        <button onClick={openCreate} className={btnPrimaryCls}>
-          <IconPlus size={15} />
-          Nueva obra
-        </button>
+        <Autorizado accion="crear" recurso="obra">
+          <button onClick={openCreate} className={btnPrimaryCls}>
+            <IconPlus size={15} />
+            Nueva obra
+          </button>
+        </Autorizado>
       </PageHeader>
 
       {query.isLoading && <TableSkeleton />}
@@ -225,20 +228,24 @@ export default function ObrasPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => openEdit(p)}
-                        title="Editar"
-                        className="rounded-md p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
-                      >
-                        <IconPencil size={15} />
-                      </button>
-                      <button
-                        onClick={() => setDeleteTarget(p)}
-                        title="Eliminar"
-                        className="rounded-md p-1.5 text-gray-400 transition hover:bg-red-50 hover:text-red-600"
-                      >
-                        <IconTrash size={15} />
-                      </button>
+                      <Autorizado accion="editar" recurso="obra">
+                        <button
+                          onClick={() => openEdit(p)}
+                          title="Editar"
+                          className="rounded-md p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
+                        >
+                          <IconPencil size={15} />
+                        </button>
+                      </Autorizado>
+                      <Autorizado accion="borrar" recurso="obra">
+                        <button
+                          onClick={() => setDeleteTarget(p)}
+                          title="Eliminar"
+                          className="rounded-md p-1.5 text-gray-400 transition hover:bg-red-50 hover:text-red-600"
+                        >
+                          <IconTrash size={15} />
+                        </button>
+                      </Autorizado>
                     </div>
                   </td>
                 </tr>
