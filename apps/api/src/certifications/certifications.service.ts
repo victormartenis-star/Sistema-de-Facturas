@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, isNull, SQL } from 'drizzle-orm';
-import { Certification, certifications, projects } from '@erp/db';
+import { Certification, certifications, projects, Tx } from '@erp/db';
 import {
   CertificationCreateInput,
   CertificationDto,
@@ -17,6 +17,8 @@ import {
 import { AuditService } from '../audit/audit.service';
 import { DbService } from '../db/db.service';
 import { InvoicesService } from '../invoices/invoices.service';
+
+const UNIQUE_VIOLATION = '23505';
 
 function toDto(row: Certification): CertificationDto {
   const cumulative = Number(row.cumulativeAmount);
@@ -82,50 +84,67 @@ export class CertificationsService {
       );
     }
 
-    const [prev] = await this.dbs.db
-      .select()
-      .from(certifications)
-      .where(
-        and(
-          eq(certifications.projectId, data.projectId),
-          isNull(certifications.deletedAt),
-        ),
-      )
-      .orderBy(desc(certifications.seq))
-      .limit(1);
+    // Se bloquea la fila de la obra: dos altas simultáneas se serializan y la
+    // segunda ve la certificación anterior de la primera (seq y acumulado
+    // correctos, sin chocar con el índice único).
+    let row: Certification;
+    try {
+      row = await this.dbs.db.transaction(async (tx) => {
+        await this.lockProject(tx, data.projectId);
+        const [prev] = await tx
+          .select()
+          .from(certifications)
+          .where(
+            and(
+              eq(certifications.projectId, data.projectId),
+              isNull(certifications.deletedAt),
+            ),
+          )
+          .orderBy(desc(certifications.seq))
+          .limit(1);
 
-    const prevPct = prev ? Number(prev.cumulativePct) : 0;
-    const prevCumulative = prev ? Number(prev.cumulativeAmount) : 0;
-    if (data.cumulativePct <= prevPct) {
-      throw new ConflictException(
-        `El % a origen debe superar el ${prevPct.toFixed(2)} % ya certificado`,
-      );
+        const prevPct = prev ? Number(prev.cumulativePct) : 0;
+        const prevCumulative = prev ? Number(prev.cumulativeAmount) : 0;
+        if (data.cumulativePct <= prevPct) {
+          throw new ConflictException(
+            `El % a origen debe superar el ${prevPct.toFixed(2)} % ya certificado`,
+          );
+        }
+
+        const retentionPct = data.retentionPct ?? Number(project.retentionPct);
+        const { cumulativeAmount, periodAmount, retentionAmount } =
+          computeCertification(
+            Number(project.contractAmount),
+            data.cumulativePct,
+            prevCumulative,
+            retentionPct,
+          );
+
+        const [created] = await tx
+          .insert(certifications)
+          .values({
+            companyId,
+            projectId: data.projectId,
+            seq: prev ? prev.seq + 1 : 1,
+            certDate: data.certDate,
+            cumulativePct: data.cumulativePct.toFixed(2),
+            cumulativeAmount: cumulativeAmount.toFixed(2),
+            periodAmount: periodAmount.toFixed(2),
+            retentionPct: retentionPct.toFixed(2),
+            retentionAmount: retentionAmount.toFixed(2),
+            notes: data.notes ?? null,
+          })
+          .returning();
+        return created;
+      });
+    } catch (err) {
+      if ((err as { code?: string }).code === UNIQUE_VIOLATION) {
+        throw new ConflictException(
+          'Ya existe una certificación con ese número en la obra: reintenta',
+        );
+      }
+      throw err;
     }
-
-    const retentionPct = data.retentionPct ?? Number(project.retentionPct);
-    const { cumulativeAmount, periodAmount, retentionAmount } =
-      computeCertification(
-        Number(project.contractAmount),
-        data.cumulativePct,
-        prevCumulative,
-        retentionPct,
-      );
-
-    const [row] = await this.dbs.db
-      .insert(certifications)
-      .values({
-        companyId,
-        projectId: data.projectId,
-        seq: prev ? prev.seq + 1 : 1,
-        certDate: data.certDate,
-        cumulativePct: data.cumulativePct.toFixed(2),
-        cumulativeAmount: cumulativeAmount.toFixed(2),
-        periodAmount: periodAmount.toFixed(2),
-        retentionPct: retentionPct.toFixed(2),
-        retentionAmount: retentionAmount.toFixed(2),
-        notes: data.notes ?? null,
-      })
-      .returning();
     void this.audit.log({
       entityType: 'certification',
       entityId: row.id,
@@ -158,7 +177,7 @@ export class CertificationsService {
       `acumulado ${Number(cert.cumulativeAmount).toFixed(2)} €, ` +
       `anterior ${(Number(cert.cumulativeAmount) - Number(cert.periodAmount)).toFixed(2)} €)`;
 
-    const invoiceDto = await this.invoicesService.create({
+    const prep = await this.invoicesService.prepararCreacion({
       kind: 'venta',
       contactId: data.contactId,
       invoiceNumber: data.invoiceNumber,
@@ -178,22 +197,55 @@ export class CertificationsService {
       ],
       deliveryNoteIds: [],
     });
-    await this.invoicesService.approve(invoiceDto.id);
 
-    const [row] = await this.dbs.db
-      .update(certifications)
-      .set({
-        status: 'facturada',
-        invoiceId: invoiceDto.id,
-        updatedAt: new Date(),
-      })
-      .where(eq(certifications.id, id))
-      .returning();
+    // Crear la factura, aprobarla (vencimientos) y marcar la certificación
+    // como facturada es una sola operación: o ocurre todo o nada. El bloqueo
+    // de la certificación impide facturarla dos veces en paralelo.
+    const { row, invoiceId } = await this.dbs.db.transaction(async (tx) => {
+      const [locked] = await tx
+        .select({ status: certifications.status })
+        .from(certifications)
+        .where(and(eq(certifications.id, id), isNull(certifications.deletedAt)))
+        .for('update');
+      if (!locked || locked.status !== 'borrador') {
+        throw new ConflictException('La certificación ya está facturada');
+      }
+      const invoice = await this.invoicesService.crearEnTx(
+        tx,
+        prep.companyId,
+        prep.data,
+        prep.amounts,
+      );
+      await this.invoicesService.aprobarEnTx(tx, invoice, prep.contact);
+      const [updated] = await tx
+        .update(certifications)
+        .set({
+          status: 'facturada',
+          invoiceId: invoice.id,
+          updatedAt: new Date(),
+        })
+        .where(eq(certifications.id, id))
+        .returning();
+      return { row: updated, invoiceId: invoice.id };
+    });
+    // Auditoría tras el commit (si fallara, no debe abortar la transacción).
+    void this.audit.log({
+      entityType: 'invoice',
+      entityId: invoiceId,
+      action: 'create',
+      newData: { invoiceId, kind: 'venta', status: 'borrador' },
+    });
+    void this.audit.log({
+      entityType: 'invoice',
+      entityId: invoiceId,
+      action: 'update',
+      newData: { status: 'aprobada' },
+    });
     void this.audit.log({
       entityType: 'certification',
       entityId: id,
       action: 'update',
-      newData: { status: 'facturada', invoiceId: invoiceDto.id },
+      newData: { status: 'facturada', invoiceId },
     });
     return toDto(row);
   }
@@ -205,32 +257,46 @@ export class CertificationsService {
         'No se puede eliminar una certificación facturada: anula antes su factura',
       );
     }
-    const [last] = await this.dbs.db
-      .select({ seq: certifications.seq })
-      .from(certifications)
-      .where(
-        and(
-          eq(certifications.projectId, cert.projectId),
-          isNull(certifications.deletedAt),
-        ),
-      )
-      .orderBy(desc(certifications.seq))
-      .limit(1);
-    if (last && last.seq !== cert.seq) {
-      throw new ConflictException(
-        'Solo se puede eliminar la última certificación de la obra',
-      );
-    }
-    await this.dbs.db
-      .update(certifications)
-      .set({ deletedAt: new Date(), updatedAt: new Date() })
-      .where(eq(certifications.id, id));
+    // Misma exclusión por obra que `create`: sin ella, un alta simultánea
+    // puede dejar de ser la "última" justo después de comprobarlo.
+    await this.dbs.db.transaction(async (tx) => {
+      await this.lockProject(tx, cert.projectId);
+      const [last] = await tx
+        .select({ seq: certifications.seq })
+        .from(certifications)
+        .where(
+          and(
+            eq(certifications.projectId, cert.projectId),
+            isNull(certifications.deletedAt),
+          ),
+        )
+        .orderBy(desc(certifications.seq))
+        .limit(1);
+      if (last && last.seq !== cert.seq) {
+        throw new ConflictException(
+          'Solo se puede eliminar la última certificación de la obra',
+        );
+      }
+      await tx
+        .update(certifications)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(eq(certifications.id, id));
+    });
     void this.audit.log({
       entityType: 'certification',
       entityId: id,
       action: 'delete',
       oldData: cert,
     });
+  }
+
+  /** Bloquea la fila de la obra hasta el fin de la transacción (serializa altas/bajas). */
+  private async lockProject(tx: Tx, projectId: string): Promise<void> {
+    await tx
+      .select({ id: projects.id })
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .for('update');
   }
 
   private async find(id: string): Promise<Certification> {

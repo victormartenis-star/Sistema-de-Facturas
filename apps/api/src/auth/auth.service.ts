@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   UnauthorizedException,
@@ -61,8 +62,10 @@ export class AuthService {
   }
 
   /**
-   * Alta de usuario. MVP monoempresa: cuelga de la empresa por defecto.
-   * El primer usuario de la empresa es `admin` sea cual sea el rol pedido.
+   * Registro público: solo sirve para el bootstrap. MVP monoempresa: cuelga
+   * de la empresa por defecto. Si no hay usuarios activos, el primero se crea
+   * como `admin`; si ya hay alguno, el registro está cerrado (403) y los
+   * usuarios los crea un admin con `POST /users`. Nunca se acepta un rol.
    */
   async register(input: RegisterInput): Promise<AuthTokensDto> {
     const db = this.dbs.db;
@@ -72,8 +75,12 @@ export class AuthService {
       .select({ count: sql<number>`count(*)::int` })
       .from(users)
       .where(and(eq(users.companyId, companyId), isNull(users.deletedAt)));
-    const role: UserRole =
-      count === 0 ? 'admin' : (input.role ?? 'administracion');
+    if (count > 0) {
+      throw new ForbiddenException(
+        'El registro público está cerrado; pide a un administrador que cree tu cuenta',
+      );
+    }
+    const role: UserRole = 'admin';
 
     try {
       const [user] = await db

@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import type { AuthTokensDto, UserDto } from '@erp/shared';
+import { isReadOnlyRole, type AuthTokensDto, type UserDto } from '@erp/shared';
 import {
   authApi,
   clearStoredSession,
@@ -21,6 +21,8 @@ import {
 interface AuthContextValue {
   user: UserDto | null;
   ready: boolean;
+  /** El usuario es de solo lectura (rol `lector`): la API le rechaza las escrituras. */
+  soloLectura: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (input: {
     email: string;
@@ -117,7 +119,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [router]);
 
   const value = useMemo(
-    () => ({ user, ready, login, register, logout, applyTokens }),
+    () => ({
+      user,
+      ready,
+      soloLectura: user ? isReadOnlyRole(user.role) : false,
+      login,
+      register,
+      logout,
+      applyTokens,
+    }),
     [user, ready, login, register, logout, applyTokens],
   );
 

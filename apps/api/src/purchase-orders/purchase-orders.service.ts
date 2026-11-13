@@ -15,6 +15,7 @@ import {
   sql,
 } from 'drizzle-orm';
 import {
+  DbOrTx,
   PurchaseOrder,
   contacts,
   deliveryNotes,
@@ -284,22 +285,25 @@ export class PurchaseOrdersService {
    * Recalcula el estado del pedido a partir de sus albaranes. Lo llama el
    * módulo de albaranes cada vez que uno se crea, se imputa o se factura.
    */
-  async refreshStatus(id: string): Promise<void> {
-    const [order] = await this.dbs.db
+  async refreshStatus(
+    id: string,
+    executor: DbOrTx = this.dbs.db,
+  ): Promise<void> {
+    const [order] = await executor
       .select()
       .from(purchaseOrders)
       .where(and(eq(purchaseOrders.id, id), isNull(purchaseOrders.deletedAt)))
       .limit(1);
     if (!order) return;
 
-    const delivered = (await this.deliveredByOrder([id])).get(id);
+    const delivered = (await this.deliveredByOrder([id], executor)).get(id);
     const next = deriveOrderStatus(
       order.status as PurchaseOrderStatus,
       Number(order.amount),
       delivered?.deliveredAmount ?? 0,
     );
     if (next !== order.status) {
-      await this.dbs.db
+      await executor
         .update(purchaseOrders)
         .set({ status: next, updatedAt: new Date() })
         .where(eq(purchaseOrders.id, id));
@@ -356,11 +360,12 @@ export class PurchaseOrdersService {
   /** Suma de albaranes por pedido, en una sola consulta (sin N+1). */
   private async deliveredByOrder(
     orderIds: string[],
+    executor: DbOrTx = this.dbs.db,
   ): Promise<Map<string, Delivered>> {
     const map = new Map<string, Delivered>();
     if (orderIds.length === 0) return map;
 
-    const rows = await this.dbs.db
+    const rows = await executor
       .select({
         orderId: deliveryNotes.orderId,
         delivered: sql<string>`coalesce(sum(${deliveryNotes.amount}), 0)`,

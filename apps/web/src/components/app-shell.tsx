@@ -14,7 +14,7 @@ const AUTH_PATHS = ['/login', '/registro'];
 /** Shell de la app: sin sidebar en login/registro; gate de sesión en el resto. */
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { ready, user } = useAuth();
+  const { ready, user, soloLectura } = useAuth();
   const isAuthPage = AUTH_PATHS.some(
     (p) => pathname === p || pathname.startsWith(`${p}/`),
   );
@@ -35,6 +35,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     <>
       <Sidebar />
       <div className="min-h-screen pl-16 lg:pl-56">
+        {soloLectura && (
+          <div className="bg-slate-100 px-4 py-1.5 text-center text-xs font-medium text-slate-700">
+            Modo solo lectura: puedes consultar pero no modificar datos
+          </div>
+        )}
         <main className="mx-auto max-w-6xl px-4 py-8 lg:px-8">{children}</main>
       </div>
       <Copiloto />

@@ -1,5 +1,10 @@
 import { INestApplication } from '@nestjs/common';
-import { authed, createTestApp, registerUser } from './helpers';
+import {
+  authed,
+  createTestApp,
+  createUserWithRole,
+  registerUser,
+} from './helpers';
 import { resetTestDb, seedCompany } from './reset-db';
 
 describe('Investors (integración) — inversores y cuentas en participación', () => {
@@ -149,7 +154,7 @@ describe('Investors (integración) — inversores y cuentas en participación', 
       })
       .expect(201);
 
-    const obraUser = await registerUser(app, { role: 'obra' });
+    const obraUser = await createUserWithRole(app, admin.accessToken, 'obra');
     const obraClient = authed(app, obraUser.accessToken);
     const list = (await obraClient.get('/investment-accounts').expect(200))
       .body;

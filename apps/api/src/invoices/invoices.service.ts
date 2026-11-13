@@ -16,7 +16,6 @@ import {
 } from 'drizzle-orm';
 import {
   Contact,
-  Db,
   Invoice,
   certifications,
   contacts,
@@ -26,6 +25,7 @@ import {
   paymentMilestones,
   projectPhases,
   projects,
+  Tx,
 } from '@erp/db';
 import {
   InvoiceCreateInput,
@@ -49,8 +49,8 @@ import { ProveedoresService } from '../modules/proveedores/proveedores.service';
 import { AuditService } from '../audit/audit.service';
 import { DbService } from '../db/db.service';
 
-/** Cliente de transacción de drizzle (el callback de db.transaction). */
-type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+type InvoiceCreateData = ReturnType<typeof invoiceCreateSchema.parse>;
+type InvoiceAmounts = ReturnType<typeof computeInvoiceAmounts>;
 
 const UNIQUE_VIOLATION = '23505';
 
@@ -110,9 +110,35 @@ export class InvoicesService {
   }
 
   async create(input: InvoiceCreateInput): Promise<InvoiceDto> {
+    const { companyId, data, amounts } = await this.prepararCreacion(input);
+    const invoiceId = await this.dbs.db.transaction(
+      async (tx) => (await this.crearEnTx(tx, companyId, data, amounts)).id,
+    );
+    const dto = await this.get(invoiceId);
+    void this.audit.log({
+      entityType: 'invoice',
+      entityId: invoiceId,
+      action: 'create',
+      newData: { invoiceId, kind: dto.kind, status: dto.status },
+    });
+    return dto;
+  }
+
+  /**
+   * Validaciones previas a crear una factura (fuera de transacción): esquema,
+   * contacto de la empresa y acceso a las obras de las líneas. Devuelve lo
+   * que necesita `crearEnTx`. Lo usa también `CertificationsService` para
+   * facturar dentro de su propia transacción.
+   */
+  async prepararCreacion(input: InvoiceCreateInput): Promise<{
+    companyId: string;
+    data: InvoiceCreateData;
+    amounts: InvoiceAmounts;
+    contact: Contact;
+  }> {
     const companyId = await this.dbs.getCompanyId();
     const data = invoiceCreateSchema.parse(input);
-    await this.findContact(data.contactId);
+    const contact = await this.findContact(data.contactId);
     const allowed = await this.dbs.getObrasAccesibles();
     if (
       allowed !== null &&
@@ -132,62 +158,65 @@ export class InvoicesService {
       data.isp,
       data.retentionPct,
     );
+    return { companyId, data, amounts, contact };
+  }
 
-    const invoiceId = await this.dbs.db.transaction(async (tx) => {
-      let row: Invoice;
-      try {
-        [row] = await tx
-          .insert(invoices)
-          .values({
-            companyId,
-            kind: data.kind,
-            contactId: data.contactId,
-            invoiceNumber: data.invoiceNumber,
-            issueDate: data.issueDate,
-            dueDate: data.dueDate ?? null,
-            baseAmount: amounts.baseAmount.toFixed(2),
-            vatAmount: amounts.vatAmount.toFixed(2),
-            totalAmount: amounts.totalAmount.toFixed(2),
-            isp: data.isp,
-            retentionPct: data.retentionPct.toFixed(2),
-            retentionAmount: amounts.retentionAmount.toFixed(2),
-            retentionReleaseDate: data.retentionReleaseDate ?? null,
-            notes: data.notes ?? null,
-          })
-          .returning();
-      } catch (err) {
-        this.rethrowDuplicateNumber(err, data.invoiceNumber);
-      }
-      await tx.insert(invoiceLines).values(
-        data.lines.map((l, i) => ({
-          invoiceId: row.id,
-          description: l.description,
-          baseAmount: l.baseAmount.toFixed(2),
-          vatPct: l.vatPct.toFixed(2),
-          projectId: l.projectId ?? null,
-          phaseId: l.phaseId ?? null,
-          categoryId: l.categoryId ?? null,
-          sortOrder: i,
-        })),
+  /**
+   * Inserta factura, líneas y vínculo con albaranes dentro de la transacción
+   * recibida. Solo usa `tx`: no lee por el pool, para poder encadenarse con
+   * `aprobarEnTx` en la misma transacción.
+   */
+  async crearEnTx(
+    tx: Tx,
+    companyId: string,
+    data: InvoiceCreateData,
+    amounts: InvoiceAmounts,
+  ): Promise<Invoice> {
+    let row: Invoice;
+    try {
+      [row] = await tx
+        .insert(invoices)
+        .values({
+          companyId,
+          kind: data.kind,
+          contactId: data.contactId,
+          invoiceNumber: data.invoiceNumber,
+          issueDate: data.issueDate,
+          dueDate: data.dueDate ?? null,
+          baseAmount: amounts.baseAmount.toFixed(2),
+          vatAmount: amounts.vatAmount.toFixed(2),
+          totalAmount: amounts.totalAmount.toFixed(2),
+          isp: data.isp,
+          retentionPct: data.retentionPct.toFixed(2),
+          retentionAmount: amounts.retentionAmount.toFixed(2),
+          retentionReleaseDate: data.retentionReleaseDate ?? null,
+          notes: data.notes ?? null,
+        })
+        .returning();
+    } catch (err) {
+      this.rethrowDuplicateNumber(err, data.invoiceNumber);
+    }
+    await tx.insert(invoiceLines).values(
+      data.lines.map((l, i) => ({
+        invoiceId: row.id,
+        description: l.description,
+        baseAmount: l.baseAmount.toFixed(2),
+        vatPct: l.vatPct.toFixed(2),
+        projectId: l.projectId ?? null,
+        phaseId: l.phaseId ?? null,
+        categoryId: l.categoryId ?? null,
+        sortOrder: i,
+      })),
+    );
+    if (data.kind === 'compra' && data.deliveryNoteIds.length > 0) {
+      await this.linkDeliveryNotes(
+        tx,
+        row.id,
+        data.contactId,
+        data.deliveryNoteIds,
       );
-      if (data.kind === 'compra' && data.deliveryNoteIds.length > 0) {
-        await this.linkDeliveryNotes(
-          tx,
-          row.id,
-          data.contactId,
-          data.deliveryNoteIds,
-        );
-      }
-      return row.id;
-    });
-    const dto = await this.get(invoiceId);
-    void this.audit.log({
-      entityType: 'invoice',
-      entityId: invoiceId,
-      action: 'create',
-      newData: { invoiceId, kind: dto.kind, status: dto.status },
-    });
-    return dto;
+    }
+    return row;
   }
 
   /** Solo se puede editar una factura en borrador. */
@@ -316,44 +345,9 @@ export class InvoicesService {
       );
     }
 
-    await this.dbs.db.transaction(async (tx) => {
-      if (invoice.kind === 'compra') {
-        const notes = await tx
-          .select()
-          .from(deliveryNotes)
-          .where(
-            and(
-              eq(deliveryNotes.invoiceId, id),
-              isNull(deliveryNotes.deletedAt),
-            ),
-          );
-        if (notes.length === 0) {
-          throw new ConflictException(
-            'No se puede aprobar: la factura de compra no tiene albaranes asociados. Vincula los albaranes validados del proveedor.',
-          );
-        }
-        const notesTotal = round2(
-          notes.reduce((s, n) => s + Number(n.amount), 0),
-        );
-        const base = Number(invoice.baseAmount);
-        if (!amountsMatch(notesTotal, base)) {
-          throw new ConflictException(
-            `No se puede aprobar: la base de la factura (${base.toFixed(2)} €) no cuadra con la suma de los albaranes (${notesTotal.toFixed(2)} €)`,
-          );
-        }
-        await tx
-          .update(deliveryNotes)
-          .set({ status: 'facturado', updatedAt: new Date() })
-          .where(eq(deliveryNotes.invoiceId, id));
-      }
-
-      await tx
-        .update(invoices)
-        .set({ status: 'aprobada', updatedAt: new Date() })
-        .where(eq(invoices.id, id));
-
-      await this.insertMilestones(tx, invoice, contact);
-    });
+    await this.dbs.db.transaction((tx) =>
+      this.aprobarEnTx(tx, invoice, contact),
+    );
     void this.audit.log({
       entityType: 'invoice',
       entityId: id,
@@ -361,6 +355,49 @@ export class InvoicesService {
       newData: { status: 'aprobada' },
     });
     return this.get(id);
+  }
+
+  /**
+   * Aprueba una factura dentro de la transacción recibida: valida y marca los
+   * albaranes (compra), pasa la factura a `aprobada` y genera sus
+   * vencimientos. Solo usa `tx`. Las comprobaciones de homologación PRL
+   * (solo compra) las hace `approve` antes de abrir la transacción.
+   */
+  async aprobarEnTx(tx: Tx, invoice: Invoice, contact: Contact): Promise<void> {
+    const id = invoice.id;
+    if (invoice.kind === 'compra') {
+      const notes = await tx
+        .select()
+        .from(deliveryNotes)
+        .where(
+          and(eq(deliveryNotes.invoiceId, id), isNull(deliveryNotes.deletedAt)),
+        );
+      if (notes.length === 0) {
+        throw new ConflictException(
+          'No se puede aprobar: la factura de compra no tiene albaranes asociados. Vincula los albaranes validados del proveedor.',
+        );
+      }
+      const notesTotal = round2(
+        notes.reduce((s, n) => s + Number(n.amount), 0),
+      );
+      const base = Number(invoice.baseAmount);
+      if (!amountsMatch(notesTotal, base)) {
+        throw new ConflictException(
+          `No se puede aprobar: la base de la factura (${base.toFixed(2)} €) no cuadra con la suma de los albaranes (${notesTotal.toFixed(2)} €)`,
+        );
+      }
+      await tx
+        .update(deliveryNotes)
+        .set({ status: 'facturado', updatedAt: new Date() })
+        .where(eq(deliveryNotes.invoiceId, id));
+    }
+
+    await tx
+      .update(invoices)
+      .set({ status: 'aprobada', updatedAt: new Date() })
+      .where(eq(invoices.id, id));
+
+    await this.insertMilestones(tx, invoice, contact);
   }
 
   /** Marca la factura como pagada/cobrada y liquida sus vencimientos. */

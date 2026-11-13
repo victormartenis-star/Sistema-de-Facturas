@@ -17,6 +17,7 @@ import {
   sum,
 } from 'drizzle-orm';
 import {
+  DbOrTx,
   DeliveryNote,
   contacts,
   deliveryNotes,
@@ -147,21 +148,28 @@ export class DeliveryNotesService {
     const companyId = await this.dbs.getCompanyId();
     const data = deliveryNoteCreateSchema.parse(input);
     try {
-      const [row] = await this.dbs.db
-        .insert(deliveryNotes)
-        .values({
-          companyId,
-          contactId: data.contactId,
-          projectId: data.projectId ?? null,
-          phaseId: data.phaseId ?? null,
-          orderId: data.orderId ?? null,
-          noteNumber: data.noteNumber,
-          noteDate: data.noteDate,
-          description: data.description ?? null,
-          amount: data.amount.toFixed(2),
-        })
-        .returning();
-      if (row.orderId) await this.orders.refreshStatus(row.orderId);
+      // Albarán y estado del pedido en una sola transacción: si el refresco
+      // falla, no queda un albarán con el pedido desfasado.
+      const row = await this.dbs.db.transaction(async (tx) => {
+        const [created] = await tx
+          .insert(deliveryNotes)
+          .values({
+            companyId,
+            contactId: data.contactId,
+            projectId: data.projectId ?? null,
+            phaseId: data.phaseId ?? null,
+            orderId: data.orderId ?? null,
+            noteNumber: data.noteNumber,
+            noteDate: data.noteDate,
+            description: data.description ?? null,
+            amount: data.amount.toFixed(2),
+          })
+          .returning();
+        if (created.orderId) {
+          await this.orders.refreshStatus(created.orderId, tx);
+        }
+        return created;
+      });
       return this.get(row.id);
     } catch (err) {
       this.rethrowDuplicateNumber(err, data.noteNumber);
@@ -220,21 +228,42 @@ export class DeliveryNotesService {
       throw new ConflictException('Solo se validan albaranes pendientes');
     }
 
-    const dto = await this.get(id);
-    if (dto.blockReason) {
-      // 422: la petición es correcta, la regla de negocio no se cumple.
-      throw new UnprocessableEntityException(dto.blockReason);
-    }
+    // Transacción con bloqueo (pedido -> albarán): dos validaciones
+    // simultáneas de albaranes del mismo pedido se serializan, así la segunda
+    // ve lo recibido por la primera y el 3-way match no se salta el importe.
+    await this.dbs.db.transaction(async (tx) => {
+      if (note.orderId) {
+        await tx
+          .select({ id: purchaseOrders.id })
+          .from(purchaseOrders)
+          .where(eq(purchaseOrders.id, note.orderId))
+          .for('update');
+      }
+      const [locked] = await tx
+        .select({ status: deliveryNotes.status })
+        .from(deliveryNotes)
+        .where(and(eq(deliveryNotes.id, id), isNull(deliveryNotes.deletedAt)))
+        .for('update');
+      if (!locked || locked.status !== 'pendiente') {
+        throw new ConflictException('Solo se validan albaranes pendientes');
+      }
 
-    await this.dbs.db
-      .update(deliveryNotes)
-      .set({
-        status: 'validado',
-        validatedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(deliveryNotes.id, id));
-    if (note.orderId) await this.orders.refreshStatus(note.orderId);
+      const dto = await this.get(id, tx);
+      if (dto.blockReason) {
+        // 422: la petición es correcta, la regla de negocio no se cumple.
+        throw new UnprocessableEntityException(dto.blockReason);
+      }
+
+      await tx
+        .update(deliveryNotes)
+        .set({
+          status: 'validado',
+          validatedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(deliveryNotes.id, id));
+      if (note.orderId) await this.orders.refreshStatus(note.orderId, tx);
+    });
     return this.get(id);
   }
 
@@ -251,8 +280,11 @@ export class DeliveryNotesService {
       .where(eq(deliveryNotes.id, id));
   }
 
-  private async get(id: string): Promise<DeliveryNoteDto> {
-    const [row] = await this.dbs.db
+  private async get(
+    id: string,
+    executor: DbOrTx = this.dbs.db,
+  ): Promise<DeliveryNoteDto> {
+    const [row] = await executor
       .select({
         note: deliveryNotes,
         contactName: contacts.legalName,
@@ -274,7 +306,7 @@ export class DeliveryNotesService {
     // 3-way match banda 1↔2: importe ya recibido en albaranes validados del pedido
     let alreadyDelivered: number | null = null;
     if (row.note.orderId) {
-      const [agg] = await this.dbs.db
+      const [agg] = await executor
         .select({ total: sum(deliveryNotes.amount) })
         .from(deliveryNotes)
         .where(

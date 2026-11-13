@@ -25,14 +25,13 @@ export interface RegisterOverrides {
   email?: string;
   password?: string;
   fullName?: string;
-  role?: UserRole;
 }
 
 /**
- * `POST /auth/register`. El primer usuario de la empresa siempre sale
- * `admin` sin importar el `role` pedido (regla de `AuthService.register`,
- * MVP monoempresa) — para un `obra`/`gerente`/`administracion` de verdad
- * hace falta que ya haya un admin registrado antes.
+ * `POST /auth/register`: solo sirve para el bootstrap. El primer usuario de
+ * la empresa sale siempre `admin`; con la empresa ya poblada el registro
+ * público está cerrado (403). Para crear usuarios con otro rol usa
+ * `createUserWithRole`.
  */
 export async function registerUser(
   app: INestApplication,
@@ -44,10 +43,33 @@ export async function registerUser(
       email: overrides.email ?? uniqueEmail('user'),
       password: overrides.password ?? 'Test1234!',
       fullName: overrides.fullName ?? 'Usuario de Prueba',
-      role: overrides.role,
     })
     .expect(201);
   return res.body as AuthTokensDto;
+}
+
+/**
+ * Crea un usuario con el rol dado vía `POST /users` (como admin) y devuelve
+ * sus tokens tras iniciar sesión. No relaja el registro público.
+ */
+export async function createUserWithRole(
+  app: INestApplication,
+  adminToken: string,
+  role: UserRole,
+  overrides: RegisterOverrides = {},
+): Promise<AuthTokensDto> {
+  const email = overrides.email ?? uniqueEmail(role);
+  const password = overrides.password ?? 'Test1234!';
+  await authed(app, adminToken)
+    .post('/users')
+    .send({
+      email,
+      password,
+      fullName: overrides.fullName ?? 'Usuario de Prueba',
+      role,
+    })
+    .expect(201);
+  return loginUser(app, email, password);
 }
 
 export async function loginUser(

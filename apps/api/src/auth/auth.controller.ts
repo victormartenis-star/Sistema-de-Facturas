@@ -24,6 +24,7 @@ import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { AuthService } from './auth.service';
 import { AuthenticatedRequest } from './jwt-auth.guard';
 import { Public } from './public.decorator';
+import { PermiteLector } from './read-only.guard';
 
 /** Límite estricto para los dos puntos de entrada de credenciales: 5/min por IP en vez de los 100/min globales. */
 const AUTH_THROTTLE = { default: { limit: 5, ttl: 60_000 } };
@@ -76,6 +77,7 @@ export class AuthController {
   }
 
   /** Cambio de contraseña propia (exige la actual). Ver `changePassword` en el servicio. */
+  @PermiteLector()
   @Patch('password')
   @HttpCode(204)
   async changePassword(

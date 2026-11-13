@@ -23,10 +23,9 @@ describe('Auth (integración)', () => {
   });
 
   describe('POST /auth/register', () => {
-    it('registra al primer usuario de la empresa como admin', async () => {
+    it('registra al primer usuario de la empresa como admin (bootstrap)', async () => {
       const tokens = await registerUser(app, {
         email: 'primero@test.dintel.es',
-        role: 'obra', // pedido explícitamente, pero el primero siempre es admin
       });
       expect(tokens.user.role).toBe('admin');
       expect(tokens.user.email).toBe('primero@test.dintel.es');
@@ -35,16 +34,60 @@ describe('Auth (integración)', () => {
       expect(tokens.expiresIn).toBeGreaterThan(0);
     });
 
-    it('respeta el rol pedido a partir del segundo usuario', async () => {
+    it('cierra el registro público con 403 si ya hay un usuario activo y no crea el usuario', async () => {
       await registerUser(app, { email: 'admin@test.dintel.es' });
-      const tokens = await registerUser(app, {
-        email: 'obra@test.dintel.es',
-        role: 'obra',
-      });
-      expect(tokens.user.role).toBe('obra');
+      const res = await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({
+          email: 'segundo@test.dintel.es',
+          password: 'Test1234!',
+          fullName: 'Segundo',
+        })
+        .expect(403);
+      expect(res.body.message).toBe(
+        'El registro público está cerrado; pide a un administrador que cree tu cuenta',
+      );
+      await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: 'segundo@test.dintel.es', password: 'Test1234!' })
+        .expect(401);
     });
 
-    it('rechaza un email duplicado con 409', async () => {
+    it('ignora `role` en el cuerpo del bootstrap: el primero es admin igualmente', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({
+          email: 'primero@test.dintel.es',
+          password: 'Test1234!',
+          fullName: 'Primero',
+          role: 'obra',
+        })
+        .expect(201);
+      expect((res.body as AuthTokensDto).user.role).toBe('admin');
+    });
+
+    it('un registro con role: admin no escala privilegios (403 y sin usuario creado)', async () => {
+      const admin = await registerUser(app, { email: 'admin@test.dintel.es' });
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({
+          email: 'intruso@test.dintel.es',
+          password: 'Test1234!',
+          fullName: 'Intruso',
+          role: 'admin',
+        })
+        .expect(403);
+      await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: 'intruso@test.dintel.es', password: 'Test1234!' })
+        .expect(401);
+      const users = (
+        await authed(app, admin.accessToken).get('/users').expect(200)
+      ).body as { email: string }[];
+      expect(users.map((u) => u.email)).toEqual(['admin@test.dintel.es']);
+    });
+
+    it('con el registro cerrado, un email duplicado también responde 403', async () => {
       await registerUser(app, { email: 'dup@test.dintel.es' });
       await request(app.getHttpServer())
         .post('/auth/register')
@@ -53,7 +96,7 @@ describe('Auth (integración)', () => {
           password: 'Test1234!',
           fullName: 'Otro',
         })
-        .expect(409);
+        .expect(403);
     });
 
     it('rechaza una contraseña demasiado corta con 400 (ZodValidationPipe)', async () => {

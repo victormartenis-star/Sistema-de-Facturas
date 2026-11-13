@@ -7,6 +7,7 @@ export const USER_ROLES = [
   'obra',
   'subcontrata',
   'cliente',
+  'lector',
 ] as const;
 
 export type UserRole = (typeof USER_ROLES)[number];
@@ -18,6 +19,7 @@ export const USER_ROLE_LABELS: Record<UserRole, string> = {
   obra: 'Obra',
   subcontrata: 'Subcontrata (portal)',
   cliente: 'Cliente (portal)',
+  lector: 'Lector (solo lectura)',
 };
 
 /** Roles de solo-portal (Fase 14): no ven la app principal, solo `apps/web/src/app/portals`. */
@@ -26,6 +28,16 @@ export type PortalRole = (typeof PORTAL_ROLES)[number];
 
 export function isPortalRole(role: UserRole): role is PortalRole {
   return (PORTAL_ROLES as readonly UserRole[]).includes(role);
+}
+
+/**
+ * Roles de solo lectura: ven lo mismo que `gerente` pero el `ReadOnlyGuard`
+ * de la API les bloquea toda escritura (POST/PUT/PATCH/DELETE).
+ */
+export const READ_ONLY_ROLES = ['lector'] as const;
+
+export function isReadOnlyRole(role: UserRole): boolean {
+  return (READ_ONLY_ROLES as readonly UserRole[]).includes(role);
 }
 
 const email = z.string().trim().toLowerCase().email('Email no válido').max(200);
@@ -48,7 +60,6 @@ export const registerSchema = z.object({
     .trim()
     .min(1, 'El nombre es obligatorio')
     .max(200, 'Máximo 200 caracteres'),
-  role: z.enum(USER_ROLES).default('administracion'),
 });
 
 export const refreshSchema = z.object({
@@ -72,8 +83,8 @@ export const resetPasswordSchema = z.object({
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 
 export type LoginInput = z.infer<typeof loginSchema>;
-/** Tipo de entrada para el registro: `role` es opcional (default `'administracion'` en el servidor). */
-export type RegisterInput = z.input<typeof registerSchema>;
+/** Registro público (solo bootstrap del primer admin): no admite `role`. */
+export type RegisterInput = z.infer<typeof registerSchema>;
 export type RefreshInput = z.infer<typeof refreshSchema>;
 
 export interface UserDto {

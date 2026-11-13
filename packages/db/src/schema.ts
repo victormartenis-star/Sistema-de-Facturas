@@ -3,6 +3,7 @@ import {
   AnyPgColumn,
   boolean,
   date,
+  index,
   integer,
   jsonb,
   numeric,
@@ -215,6 +216,7 @@ export const documents = pgTable(
   },
   // Dedupe exacto por contenido; el borrado lógico permite volver a subir
   (t) => [
+    index('documents_project_id_idx').on(t.projectId),
     uniqueIndex('documents_dedupe_idx')
       .on(t.companyId, t.fileSha256)
       .where(sql`deleted_at IS NULL`),
@@ -350,6 +352,12 @@ export const invoices = pgTable(
   },
   // Un mismo proveedor/cliente no puede repetir número de factura activo
   (t) => [
+    index('invoices_company_status_issue_date_idx').on(
+      t.companyId,
+      t.status,
+      t.issueDate,
+    ),
+    index('invoices_contact_id_idx').on(t.contactId),
     uniqueIndex('invoices_contact_number_unique')
       .on(t.companyId, t.kind, t.contactId, t.invoiceNumber)
       .where(sql`deleted_at IS NULL`),
@@ -357,21 +365,28 @@ export const invoices = pgTable(
 );
 
 /** Líneas de factura: aquí vive la imputación analítica obra/partida. */
-export const invoiceLines = pgTable('invoice_lines', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  invoiceId: uuid('invoice_id')
-    .notNull()
-    .references(() => invoices.id, { onDelete: 'cascade' }),
-  description: text('description').notNull(),
-  baseAmount: numeric('base_amount', { precision: 14, scale: 2 }).notNull(),
-  vatPct: numeric('vat_pct', { precision: 5, scale: 2 })
-    .notNull()
-    .default('21.00'),
-  projectId: uuid('project_id').references(() => projects.id),
-  phaseId: uuid('phase_id').references(() => projectPhases.id),
-  categoryId: uuid('category_id').references(() => categories.id),
-  sortOrder: integer('sort_order').notNull().default(0),
-});
+export const invoiceLines = pgTable(
+  'invoice_lines',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    invoiceId: uuid('invoice_id')
+      .notNull()
+      .references(() => invoices.id, { onDelete: 'cascade' }),
+    description: text('description').notNull(),
+    baseAmount: numeric('base_amount', { precision: 14, scale: 2 }).notNull(),
+    vatPct: numeric('vat_pct', { precision: 5, scale: 2 })
+      .notNull()
+      .default('21.00'),
+    projectId: uuid('project_id').references(() => projects.id),
+    phaseId: uuid('phase_id').references(() => projectPhases.id),
+    categoryId: uuid('category_id').references(() => categories.id),
+    sortOrder: integer('sort_order').notNull().default(0),
+  },
+  (t) => [
+    index('invoice_lines_invoice_id_idx').on(t.invoiceId),
+    index('invoice_lines_project_phase_idx').on(t.projectId, t.phaseId),
+  ],
+);
 
 export const certStatusEnum = pgEnum('cert_status', ['borrador', 'facturada']);
 
@@ -418,6 +433,7 @@ export const certifications = pgTable(
       .defaultNow(),
   },
   (t) => [
+    index('certifications_invoice_id_idx').on(t.invoiceId),
     uniqueIndex('certifications_project_seq_unique')
       .on(t.projectId, t.seq)
       .where(sql`deleted_at IS NULL`),
@@ -496,6 +512,7 @@ export const purchaseOrders = pgTable(
       .defaultNow(),
   },
   (t) => [
+    index('purchase_orders_contact_id_idx').on(t.contactId),
     uniqueIndex('purchase_orders_number_unique')
       .on(t.companyId, t.orderNumber)
       .where(sql`deleted_at IS NULL`),
@@ -540,6 +557,9 @@ export const deliveryNotes = pgTable(
       .defaultNow(),
   },
   (t) => [
+    index('delivery_notes_order_status_idx').on(t.orderId, t.status),
+    index('delivery_notes_invoice_id_idx').on(t.invoiceId),
+    index('delivery_notes_project_id_idx').on(t.projectId),
     uniqueIndex('delivery_notes_contact_number_unique')
       .on(t.companyId, t.contactId, t.noteNumber)
       .where(sql`deleted_at IS NULL`),
@@ -580,30 +600,41 @@ export const milestoneStatusEnum = pgEnum('milestone_status', [
  * uno ordinario (total - retención) y, si hay retención de garantía,
  * otro diferido a la fecha de liberación de la garantía.
  */
-export const paymentMilestones = pgTable('payment_milestones', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  companyId: uuid('company_id')
-    .notNull()
-    .references(() => companies.id),
-  invoiceId: uuid('invoice_id')
-    .notNull()
-    .references(() => invoices.id, { onDelete: 'cascade' }),
-  direction: milestoneDirectionEnum('direction').notNull(),
-  kind: milestoneKindEnum('kind').notNull().default('ordinario'),
-  paymentInstrument: paymentInstrumentEnum('payment_instrument')
-    .notNull()
-    .default('transferencia'),
-  dueDate: date('due_date').notNull(),
-  amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
-  status: milestoneStatusEnum('status').notNull().default('previsto'),
-  paidAt: date('paid_at'),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const paymentMilestones = pgTable(
+  'payment_milestones',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    invoiceId: uuid('invoice_id')
+      .notNull()
+      .references(() => invoices.id, { onDelete: 'cascade' }),
+    direction: milestoneDirectionEnum('direction').notNull(),
+    kind: milestoneKindEnum('kind').notNull().default('ordinario'),
+    paymentInstrument: paymentInstrumentEnum('payment_instrument')
+      .notNull()
+      .default('transferencia'),
+    dueDate: date('due_date').notNull(),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    status: milestoneStatusEnum('status').notNull().default('previsto'),
+    paidAt: date('paid_at'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('payment_milestones_invoice_id_idx').on(t.invoiceId),
+    index('payment_milestones_company_status_due_idx').on(
+      t.companyId,
+      t.status,
+      t.dueDate,
+    ),
+  ],
+);
 
 /* ───────────────── Homologación de subcontratas (PRL) ─────────────────
  * En construcción el contratista principal responde solidariamente de las
@@ -624,50 +655,58 @@ export const complianceDocTypeEnum = pgEnum('compliance_doc_type', [
 ]);
 
 /** Documento de homologación aportado por una subcontrata o proveedor. */
-export const contactComplianceDocs = pgTable('contact_compliance_docs', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  companyId: uuid('company_id')
-    .notNull()
-    .references(() => companies.id),
-  contactId: uuid('contact_id')
-    .notNull()
-    .references(() => contacts.id),
-  docType: complianceDocTypeEnum('doc_type').notNull(),
-  // El archivo se reaprovecha del módulo documental (dedupe + almacenamiento)
-  documentId: uuid('document_id').references(() => documents.id),
-  issuedAt: date('issued_at'),
-  // Sin fecha de caducidad el documento se considera permanente
-  expiresAt: date('expires_at'),
-  rejected: boolean('rejected').notNull().default(false),
-  notes: text('notes'),
-  deletedAt: timestamp('deleted_at', { withTimezone: true }),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const contactComplianceDocs = pgTable(
+  'contact_compliance_docs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id),
+    docType: complianceDocTypeEnum('doc_type').notNull(),
+    // El archivo se reaprovecha del módulo documental (dedupe + almacenamiento)
+    documentId: uuid('document_id').references(() => documents.id),
+    issuedAt: date('issued_at'),
+    // Sin fecha de caducidad el documento se considera permanente
+    expiresAt: date('expires_at'),
+    rejected: boolean('rejected').notNull().default(false),
+    notes: text('notes'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index('contact_compliance_docs_contact_id_idx').on(t.contactId)],
+);
 
 /**
  * Exención temporal: permite operar con un contacto bloqueado bajo la
  * responsabilidad de quien la concede. Exige motivo y fecha de caducidad.
  */
-export const complianceWaivers = pgTable('compliance_waivers', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  companyId: uuid('company_id')
-    .notNull()
-    .references(() => companies.id),
-  contactId: uuid('contact_id')
-    .notNull()
-    .references(() => contacts.id),
-  reason: text('reason').notNull(),
-  validUntil: date('valid_until').notNull(),
-  revokedAt: timestamp('revoked_at', { withTimezone: true }),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const complianceWaivers = pgTable(
+  'compliance_waivers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id),
+    reason: text('reason').notNull(),
+    validUntil: date('valid_until').notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index('compliance_waivers_contact_id_idx').on(t.contactId)],
+);
 
 /**
  * Resultado bruto del pipeline OCR/IA (02-base-de-datos.md §2.4).
@@ -676,19 +715,23 @@ export const complianceWaivers = pgTable('compliance_waivers', {
  * extraídos, `confidence` la confianza 0-1 por campo y `warnings` los avisos
  * (descuadre, NIF inválido, duplicado…).
  */
-export const extractions = pgTable('extractions', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  documentId: uuid('document_id')
-    .notNull()
-    .references(() => documents.id, { onDelete: 'cascade' }),
-  model: text('model').notNull(),
-  payload: jsonb('payload').notNull(),
-  confidence: jsonb('confidence').notNull(),
-  warnings: jsonb('warnings').notNull().default([]),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const extractions = pgTable(
+  'extractions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    model: text('model').notNull(),
+    payload: jsonb('payload').notNull(),
+    confidence: jsonb('confidence').notNull(),
+    warnings: jsonb('warnings').notNull().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index('extractions_document_id_idx').on(t.documentId)],
+);
 
 /**
  * Identidad y acceso (02-base-de-datos.md §2.1).
@@ -708,6 +751,9 @@ export const userRoleEnum = pgEnum('user_role', [
   'obra',
   'subcontrata',
   'cliente',
+  // Fase 2: solo lectura sobre toda la empresa (como `gerente`); la API
+  // (`ReadOnlyGuard`) le bloquea cualquier escritura.
+  'lector',
 ]);
 
 export const users = pgTable(
@@ -756,19 +802,23 @@ export const userProjectAccess = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.projectId] })],
 );
 
-export const refreshTokens = pgTable('refresh_tokens', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id')
-    .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  // sha256 del token opaco entregado al cliente; el token en claro no se guarda
-  tokenHash: text('token_hash').notNull().unique(),
-  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-  revokedAt: timestamp('revoked_at', { withTimezone: true }),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const refreshTokens = pgTable(
+  'refresh_tokens',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // sha256 del token opaco entregado al cliente; el token en claro no se guarda
+    tokenHash: text('token_hash').notNull().unique(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index('refresh_tokens_user_id_idx').on(t.userId)],
+);
 
 export type Company = typeof companies.$inferSelect;
 export type User = typeof users.$inferSelect;
@@ -817,29 +867,33 @@ export const budgetStatusEnum = pgEnum('budget_status', [
  * solo puede haber un presupuesto `activo` por obra a la vez.
  * `source`: 'manual' | 'bc3' — indica si se creó a mano o se importó desde Presto/BC3.
  */
-export const budgets = pgTable('budgets', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  companyId: uuid('company_id')
-    .notNull()
-    .references(() => companies.id),
-  projectId: uuid('project_id')
-    .notNull()
-    .references(() => projects.id, { onDelete: 'cascade' }),
-  name: text('name').notNull(),
-  status: budgetStatusEnum('status').notNull().default('borrador'),
-  /** 'manual' | 'bc3' */
-  source: text('source').notNull().default('manual'),
-  /** Cuándo se importó el archivo BC3 (nulo si es manual). */
-  importedAt: timestamp('imported_at', { withTimezone: true }),
-  notes: text('notes'),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  deletedAt: timestamp('deleted_at', { withTimezone: true }),
-});
+export const budgets = pgTable(
+  'budgets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    status: budgetStatusEnum('status').notNull().default('borrador'),
+    /** 'manual' | 'bc3' */
+    source: text('source').notNull().default('manual'),
+    /** Cuándo se importó el archivo BC3 (nulo si es manual). */
+    importedAt: timestamp('imported_at', { withTimezone: true }),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (t) => [index('budgets_project_status_idx').on(t.projectId, t.status)],
+);
 
 /**
  * Partidas del presupuesto. Admite árbol BC3 completo (capítulos, subcapítulos
@@ -890,6 +944,7 @@ export const budgetItems = pgTable(
       .defaultNow(),
   },
   (t) => [
+    index('budget_items_phase_id_idx').on(t.phaseId),
     // Código único dentro de un presupuesto
     unique().on(t.budgetId, t.code),
   ],
@@ -942,6 +997,7 @@ export const certificationLines = pgTable(
       .defaultNow(),
   },
   (t) => [
+    index('certification_lines_budget_item_id_idx').on(t.budgetItemId),
     // Una partida aparece solo una vez por certificación
     unique().on(t.certificationId, t.budgetItemId),
   ],
@@ -1014,34 +1070,38 @@ export const comparativoStatusEnum = pgEnum('comparativo_status', [
   'cancelado',
 ]);
 
-export const comparativos = pgTable('comparativos', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  companyId: uuid('company_id')
-    .notNull()
-    .references(() => companies.id),
-  projectId: uuid('project_id')
-    .notNull()
-    .references(() => projects.id),
-  /** Fase/capítulo que se está comparando — fija qué partidas entran en la matriz. */
-  phaseId: uuid('phase_id')
-    .notNull()
-    .references(() => projectPhases.id),
-  title: text('title').notNull(),
-  status: comparativoStatusEnum('status').notNull().default('abierto'),
-  awardedAt: timestamp('awarded_at', { withTimezone: true }),
-  /** Pedido/subcontrata borrador generado al adjudicar (ver `adjudicar()`). */
-  purchaseOrderId: uuid('purchase_order_id').references(
-    () => purchaseOrders.id,
-  ),
-  notes: text('notes'),
-  deletedAt: timestamp('deleted_at', { withTimezone: true }),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const comparativos = pgTable(
+  'comparativos',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    /** Fase/capítulo que se está comparando — fija qué partidas entran en la matriz. */
+    phaseId: uuid('phase_id')
+      .notNull()
+      .references(() => projectPhases.id),
+    title: text('title').notNull(),
+    status: comparativoStatusEnum('status').notNull().default('abierto'),
+    awardedAt: timestamp('awarded_at', { withTimezone: true }),
+    /** Pedido/subcontrata borrador generado al adjudicar (ver `adjudicar()`). */
+    purchaseOrderId: uuid('purchase_order_id').references(
+      () => purchaseOrders.id,
+    ),
+    notes: text('notes'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index('comparativos_project_phase_idx').on(t.projectId, t.phaseId)],
+);
 
 /** Oferta de un proveedor/subcontrata para un comparativo. */
 export const comparativoOfertas = pgTable(
@@ -1134,104 +1194,116 @@ export const parteMaquinariaOwnershipEnum = pgEnum(
 );
 
 /** Parte de personal: horas ordinarias/extra de un operario, imputadas a obra y partida. */
-export const partesPersonal = pgTable('partes_personal', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  companyId: uuid('company_id')
-    .notNull()
-    .references(() => companies.id),
-  projectId: uuid('project_id')
-    .notNull()
-    .references(() => projects.id),
-  /** Partida de imputación; nulo = coste general de obra sin partida concreta. */
-  phaseId: uuid('phase_id').references(() => projectPhases.id, {
-    onDelete: 'set null',
-  }),
-  /** Texto libre histórico; desde el maestro de trabajadores el alta nueva debería enlazar `trabajadorId`. */
-  workerName: text('worker_name').notNull(),
-  /** Ficha del maestro de trabajadores; nulo en partes históricos o sin ficha dada de alta. */
-  trabajadorId: uuid('trabajador_id').references(() => trabajadores.id, {
-    onDelete: 'set null',
-  }),
-  categoryId: uuid('category_id').references(() => categories.id),
-  workDate: date('work_date').notNull(),
-  ordinaryHours: numeric('ordinary_hours', { precision: 5, scale: 2 })
-    .notNull()
-    .default('0'),
-  overtimeHours: numeric('overtime_hours', { precision: 5, scale: 2 })
-    .notNull()
-    .default('0'),
-  /** Coste €/hora de la empresa por ese operario, no su nómina bruta. */
-  ordinaryRate: numeric('ordinary_rate', {
-    precision: 10,
-    scale: 2,
-  }).notNull(),
-  overtimeRate: numeric('overtime_rate', {
-    precision: 10,
-    scale: 2,
-  }).notNull(),
-  /** Precalculado: ordinary_hours×ordinary_rate + overtime_hours×overtime_rate. */
-  totalCost: numeric('total_cost', { precision: 14, scale: 2 }).notNull(),
-  notes: text('notes'),
-  approvedBy: uuid('approved_by').references(() => users.id, {
-    onDelete: 'set null',
-  }),
-  approvedAt: timestamp('approved_at', { withTimezone: true }),
-  deletedAt: timestamp('deleted_at', { withTimezone: true }),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const partesPersonal = pgTable(
+  'partes_personal',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    /** Partida de imputación; nulo = coste general de obra sin partida concreta. */
+    phaseId: uuid('phase_id').references(() => projectPhases.id, {
+      onDelete: 'set null',
+    }),
+    /** Texto libre histórico; desde el maestro de trabajadores el alta nueva debería enlazar `trabajadorId`. */
+    workerName: text('worker_name').notNull(),
+    /** Ficha del maestro de trabajadores; nulo en partes históricos o sin ficha dada de alta. */
+    trabajadorId: uuid('trabajador_id').references(() => trabajadores.id, {
+      onDelete: 'set null',
+    }),
+    categoryId: uuid('category_id').references(() => categories.id),
+    workDate: date('work_date').notNull(),
+    ordinaryHours: numeric('ordinary_hours', { precision: 5, scale: 2 })
+      .notNull()
+      .default('0'),
+    overtimeHours: numeric('overtime_hours', { precision: 5, scale: 2 })
+      .notNull()
+      .default('0'),
+    /** Coste €/hora de la empresa por ese operario, no su nómina bruta. */
+    ordinaryRate: numeric('ordinary_rate', {
+      precision: 10,
+      scale: 2,
+    }).notNull(),
+    overtimeRate: numeric('overtime_rate', {
+      precision: 10,
+      scale: 2,
+    }).notNull(),
+    /** Precalculado: ordinary_hours×ordinary_rate + overtime_hours×overtime_rate. */
+    totalCost: numeric('total_cost', { precision: 14, scale: 2 }).notNull(),
+    notes: text('notes'),
+    approvedBy: uuid('approved_by').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('partes_personal_project_date_idx').on(t.projectId, t.workDate),
+  ],
+);
 
 /** Parte de maquinaria: horas de uso, combustible y coste, propia o alquilada. */
-export const partesMaquinaria = pgTable('partes_maquinaria', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  companyId: uuid('company_id')
-    .notNull()
-    .references(() => companies.id),
-  projectId: uuid('project_id')
-    .notNull()
-    .references(() => projects.id),
-  phaseId: uuid('phase_id').references(() => projectPhases.id, {
-    onDelete: 'set null',
-  }),
-  /**
-   * Texto libre histórico (Fase 10): se mantiene por compatibilidad con
-   * partes ya creados. Desde Fase 13 el alta nueva debería enlazar
-   * `equipoId` al maestro; `machineName` sigue mostrándose si no hay ficha.
-   */
-  machineName: text('machine_name').notNull(),
-  /** Ficha del maestro de equipos (Fase 13); nulo en partes históricos o sin ficha dada de alta. */
-  equipoId: uuid('equipo_id').references(() => equipos.id, {
-    onDelete: 'set null',
-  }),
-  ownership: parteMaquinariaOwnershipEnum('ownership')
-    .notNull()
-    .default('propia'),
-  workDate: date('work_date').notNull(),
-  hoursUsed: numeric('hours_used', { precision: 6, scale: 2 })
-    .notNull()
-    .default('0'),
-  fuelLiters: numeric('fuel_liters', { precision: 8, scale: 2 }),
-  /** Coste €/hora — amortización+mantenimiento si es propia, tarifa si es alquilada. */
-  hourlyRate: numeric('hourly_rate', { precision: 10, scale: 2 }).notNull(),
-  /** Precalculado: hours_used × hourly_rate (el combustible se anota, no se sobreprecia aparte). */
-  totalCost: numeric('total_cost', { precision: 14, scale: 2 }).notNull(),
-  notes: text('notes'),
-  approvedBy: uuid('approved_by').references(() => users.id, {
-    onDelete: 'set null',
-  }),
-  approvedAt: timestamp('approved_at', { withTimezone: true }),
-  deletedAt: timestamp('deleted_at', { withTimezone: true }),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const partesMaquinaria = pgTable(
+  'partes_maquinaria',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    phaseId: uuid('phase_id').references(() => projectPhases.id, {
+      onDelete: 'set null',
+    }),
+    /**
+     * Texto libre histórico (Fase 10): se mantiene por compatibilidad con
+     * partes ya creados. Desde Fase 13 el alta nueva debería enlazar
+     * `equipoId` al maestro; `machineName` sigue mostrándose si no hay ficha.
+     */
+    machineName: text('machine_name').notNull(),
+    /** Ficha del maestro de equipos (Fase 13); nulo en partes históricos o sin ficha dada de alta. */
+    equipoId: uuid('equipo_id').references(() => equipos.id, {
+      onDelete: 'set null',
+    }),
+    ownership: parteMaquinariaOwnershipEnum('ownership')
+      .notNull()
+      .default('propia'),
+    workDate: date('work_date').notNull(),
+    hoursUsed: numeric('hours_used', { precision: 6, scale: 2 })
+      .notNull()
+      .default('0'),
+    fuelLiters: numeric('fuel_liters', { precision: 8, scale: 2 }),
+    /** Coste €/hora — amortización+mantenimiento si es propia, tarifa si es alquilada. */
+    hourlyRate: numeric('hourly_rate', { precision: 10, scale: 2 }).notNull(),
+    /** Precalculado: hours_used × hourly_rate (el combustible se anota, no se sobreprecia aparte). */
+    totalCost: numeric('total_cost', { precision: 14, scale: 2 }).notNull(),
+    notes: text('notes'),
+    approvedBy: uuid('approved_by').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('partes_maquinaria_project_date_idx').on(t.projectId, t.workDate),
+  ],
+);
 
 export type PartePersonal = typeof partesPersonal.$inferSelect;
 export type NewPartePersonal = typeof partesPersonal.$inferInsert;
@@ -2115,26 +2187,30 @@ export type ChangeOrder = typeof changeOrders.$inferSelect;
 export type NewChangeOrder = typeof changeOrders.$inferInsert;
 
 /** Línea de precio contradictorio/modificado: partida nueva o repreciada. */
-export const changeOrderLineas = pgTable('change_order_lineas', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  changeOrderId: uuid('change_order_id')
-    .notNull()
-    .references(() => changeOrders.id, { onDelete: 'cascade' }),
-  /** Partida existente que se reprecia; nulo si es una partida nueva. */
-  budgetItemId: uuid('budget_item_id').references(() => budgetItems.id),
-  descripcion: text('descripcion').notNull(),
-  unidad: text('unidad').notNull(),
-  cantidad: numeric('cantidad', { precision: 14, scale: 4 }).notNull(),
-  precioUnitario: numeric('precio_unitario', {
-    precision: 14,
-    scale: 4,
-  }).notNull(),
-  importe: numeric('importe', { precision: 14, scale: 2 }).notNull(),
-  sortOrder: integer('sort_order').notNull().default(0),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const changeOrderLineas = pgTable(
+  'change_order_lineas',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    changeOrderId: uuid('change_order_id')
+      .notNull()
+      .references(() => changeOrders.id, { onDelete: 'cascade' }),
+    /** Partida existente que se reprecia; nulo si es una partida nueva. */
+    budgetItemId: uuid('budget_item_id').references(() => budgetItems.id),
+    descripcion: text('descripcion').notNull(),
+    unidad: text('unidad').notNull(),
+    cantidad: numeric('cantidad', { precision: 14, scale: 4 }).notNull(),
+    precioUnitario: numeric('precio_unitario', {
+      precision: 14,
+      scale: 4,
+    }).notNull(),
+    importe: numeric('importe', { precision: 14, scale: 2 }).notNull(),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index('change_order_lineas_change_order_id_idx').on(t.changeOrderId)],
+);
 
 export type ChangeOrderLinea = typeof changeOrderLineas.$inferSelect;
 export type NewChangeOrderLinea = typeof changeOrderLineas.$inferInsert;

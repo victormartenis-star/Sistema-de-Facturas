@@ -1,0 +1,23 @@
+CREATE INDEX "budget_items_phase_id_idx" ON "budget_items" USING btree ("phase_id");--> statement-breakpoint
+CREATE INDEX "budgets_project_status_idx" ON "budgets" USING btree ("project_id","status");--> statement-breakpoint
+CREATE INDEX "certification_lines_budget_item_id_idx" ON "certification_lines" USING btree ("budget_item_id");--> statement-breakpoint
+CREATE INDEX "certifications_invoice_id_idx" ON "certifications" USING btree ("invoice_id");--> statement-breakpoint
+CREATE INDEX "change_order_lineas_change_order_id_idx" ON "change_order_lineas" USING btree ("change_order_id");--> statement-breakpoint
+CREATE INDEX "comparativos_project_phase_idx" ON "comparativos" USING btree ("project_id","phase_id");--> statement-breakpoint
+CREATE INDEX "compliance_waivers_contact_id_idx" ON "compliance_waivers" USING btree ("contact_id");--> statement-breakpoint
+CREATE INDEX "contact_compliance_docs_contact_id_idx" ON "contact_compliance_docs" USING btree ("contact_id");--> statement-breakpoint
+CREATE INDEX "delivery_notes_order_status_idx" ON "delivery_notes" USING btree ("order_id","status");--> statement-breakpoint
+CREATE INDEX "delivery_notes_invoice_id_idx" ON "delivery_notes" USING btree ("invoice_id");--> statement-breakpoint
+CREATE INDEX "delivery_notes_project_id_idx" ON "delivery_notes" USING btree ("project_id");--> statement-breakpoint
+CREATE INDEX "documents_project_id_idx" ON "documents" USING btree ("project_id");--> statement-breakpoint
+CREATE INDEX "extractions_document_id_idx" ON "extractions" USING btree ("document_id");--> statement-breakpoint
+CREATE INDEX "invoice_lines_invoice_id_idx" ON "invoice_lines" USING btree ("invoice_id");--> statement-breakpoint
+CREATE INDEX "invoice_lines_project_phase_idx" ON "invoice_lines" USING btree ("project_id","phase_id");--> statement-breakpoint
+CREATE INDEX "invoices_company_status_issue_date_idx" ON "invoices" USING btree ("company_id","status","issue_date");--> statement-breakpoint
+CREATE INDEX "invoices_contact_id_idx" ON "invoices" USING btree ("contact_id");--> statement-breakpoint
+CREATE INDEX "partes_maquinaria_project_date_idx" ON "partes_maquinaria" USING btree ("project_id","work_date");--> statement-breakpoint
+CREATE INDEX "partes_personal_project_date_idx" ON "partes_personal" USING btree ("project_id","work_date");--> statement-breakpoint
+CREATE INDEX "payment_milestones_invoice_id_idx" ON "payment_milestones" USING btree ("invoice_id");--> statement-breakpoint
+CREATE INDEX "payment_milestones_company_status_due_idx" ON "payment_milestones" USING btree ("company_id","status","due_date");--> statement-breakpoint
+CREATE INDEX "purchase_orders_contact_id_idx" ON "purchase_orders" USING btree ("contact_id");--> statement-breakpoint
+CREATE INDEX "refresh_tokens_user_id_idx" ON "refresh_tokens" USING btree ("user_id");

@@ -150,29 +150,40 @@ export class BudgetsService {
     const budget = await this.findBudget(id);
     const data = budgetUpdateSchema.parse(input);
 
-    // Si se quiere activar, desactivar el actual activo primero
-    if (data.status === 'activo' && budget.status !== 'activo') {
-      await this.dbs.db
-        .update(budgets)
-        .set({ status: 'cerrado', updatedAt: new Date() })
-        .where(
-          and(
-            eq(budgets.projectId, budget.projectId),
-            eq(budgets.status, 'activo'),
-          ),
-        );
-    }
+    // Cerrar el activo actual y activar el nuevo es una sola operación: si
+    // falla la segunda mitad, la obra no puede quedarse sin presupuesto
+    // activo. Se bloquea la fila de la obra para serializar dos activaciones
+    // simultáneas (si no, podrían quedar dos presupuestos activos).
+    const updated = await this.dbs.db.transaction(async (tx) => {
+      if (data.status === 'activo' && budget.status !== 'activo') {
+        await tx
+          .select({ id: projects.id })
+          .from(projects)
+          .where(eq(projects.id, budget.projectId))
+          .for('update');
+        await tx
+          .update(budgets)
+          .set({ status: 'cerrado', updatedAt: new Date() })
+          .where(
+            and(
+              eq(budgets.projectId, budget.projectId),
+              eq(budgets.status, 'activo'),
+            ),
+          );
+      }
 
-    const [updated] = await this.dbs.db
-      .update(budgets)
-      .set({
-        ...(data.name !== undefined && { name: data.name }),
-        ...(data.status !== undefined && { status: data.status }),
-        ...(data.notes !== undefined && { notes: data.notes }),
-        updatedAt: new Date(),
-      })
-      .where(eq(budgets.id, id))
-      .returning();
+      const [row] = await tx
+        .update(budgets)
+        .set({
+          ...(data.name !== undefined && { name: data.name }),
+          ...(data.status !== undefined && { status: data.status }),
+          ...(data.notes !== undefined && { notes: data.notes }),
+          updatedAt: new Date(),
+        })
+        .where(eq(budgets.id, id))
+        .returning();
+      return row;
+    });
 
     const [agg] = await this.dbs.db
       .select({
@@ -216,40 +227,54 @@ export class BudgetsService {
       );
     }
 
-    // Crear presupuesto
-    const [budget] = await this.dbs.db
-      .insert(budgets)
-      .values({
-        companyId,
-        projectId,
-        name,
-        source: 'bc3',
-        importedAt: new Date(),
-        notes: rootCode ? `Raíz BC3: ${rootCode}` : null,
-      })
-      .returning();
-
-    // Insertar partidas en lotes de 200
+    // Presupuesto y partidas en una sola transacción: si un lote falla no
+    // queda un presupuesto importado a medias.
     const BATCH = 200;
     const now = new Date();
-    for (let i = 0; i < items.length; i += BATCH) {
-      const slice = items.slice(i, i + BATCH);
-      await this.dbs.db.insert(budgetItems).values(
-        slice.map((item) => ({
-          budgetId: budget.id,
-          code: item.code,
-          name: item.name,
-          unit: item.unit,
-          unitPrice: item.unitPrice.toFixed(4),
-          quantity: item.quantity.toFixed(4),
-          totalAmount: item.totalAmount.toFixed(2),
-          level: item.level,
-          parentCode: item.parentCode ?? null,
-          sortOrder: item.sortOrder,
-          createdAt: now,
-          updatedAt: now,
-        })),
-      );
+    let budget: Budget;
+    try {
+      budget = await this.dbs.db.transaction(async (tx) => {
+        const [created] = await tx
+          .insert(budgets)
+          .values({
+            companyId,
+            projectId,
+            name,
+            source: 'bc3',
+            importedAt: new Date(),
+            notes: rootCode ? `Raíz BC3: ${rootCode}` : null,
+          })
+          .returning();
+
+        // Insertar partidas en lotes de 200
+        for (let i = 0; i < items.length; i += BATCH) {
+          const slice = items.slice(i, i + BATCH);
+          await tx.insert(budgetItems).values(
+            slice.map((item) => ({
+              budgetId: created.id,
+              code: item.code,
+              name: item.name,
+              unit: item.unit,
+              unitPrice: item.unitPrice.toFixed(4),
+              quantity: item.quantity.toFixed(4),
+              totalAmount: item.totalAmount.toFixed(2),
+              level: item.level,
+              parentCode: item.parentCode ?? null,
+              sortOrder: item.sortOrder,
+              createdAt: now,
+              updatedAt: now,
+            })),
+          );
+        }
+        return created;
+      });
+    } catch (err) {
+      if ((err as { code?: string }).code === UNIQUE_VIOLATION) {
+        throw new BadRequestException(
+          'El archivo BC3 contiene códigos de partida repetidos',
+        );
+      }
+      throw err;
     }
 
     const dto = budgetToDto(

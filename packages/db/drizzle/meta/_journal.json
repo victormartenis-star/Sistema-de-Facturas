@@ -197,6 +197,20 @@
       "when": 1789720800000,
       "tag": "0027_audit_log_partition",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1794571913153,
+      "tag": "0028_fase2_indices",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1794571959952,
+      "tag": "0029_fase2_rol_lector",
+      "breakpoints": true
     }
   ]
 }

@@ -70,3 +70,13 @@ export async function closeDb(): Promise<void> {
   pool = undefined;
   db = undefined;
 }
+
+/** Cliente de transacción de drizzle (el argumento del callback de `db.transaction`). */
+export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+
+/**
+ * Ejecutor de consultas: la conexión normal o una transacción. Los helpers
+ * que deban poder usarse dentro de una transacción reciben un `DbOrTx` y lo
+ * usan para TODAS sus lecturas y escrituras (el pool no ve filas sin confirmar).
+ */
+export type DbOrTx = Db | Tx;

@@ -40,6 +40,7 @@ const ROLE_COLORS: Record<UserRole, string> = {
   obra: 'bg-amber-100 text-amber-700',
   subcontrata: 'bg-teal-100 text-teal-700',
   cliente: 'bg-emerald-100 text-emerald-700',
+  lector: 'bg-slate-100 text-slate-700',
 };
 
 function RoleBadge({ role }: { role: UserRole }) {
@@ -511,6 +512,7 @@ export default function UsuariosPage() {
                 {r === 'gerente' && 'Todas las obras, sin administrar usuarios'}
                 {r === 'administracion' && 'Facturas, contactos y tesorería'}
                 {r === 'obra' && 'Solo obras asignadas'}
+                {r === 'lector' && 'Todas las obras, solo lectura'}
               </span>
             </div>
           ))}
