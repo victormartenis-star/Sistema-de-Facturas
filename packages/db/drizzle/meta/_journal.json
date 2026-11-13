@@ -190,6 +190,13 @@
       "when": 1789634400000,
       "tag": "0026_search_trgm",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1789720800000,
+      "tag": "0027_audit_log_partition",
+      "breakpoints": true
     }
   ]
 }

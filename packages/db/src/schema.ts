@@ -955,6 +955,19 @@ export type NewCertificationLine = typeof certificationLines.$inferInsert;
 export const AUDIT_ACTIONS = ['create', 'update', 'delete'] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
+/**
+ * **Particionada por mes desde la Fase 16** (`occurred_at`, particionado
+ * declarativo nativo — no modelado aquí porque Drizzle no puede expresar
+ * `PARTITION BY`/particiones hijas: vive solo en la migración
+ * `0027_audit_log_partition.sql`, igual que los índices GIN de trigramas de
+ * la Fase 15. La PK real en base de datos es compuesta `(id, occurred_at)`
+ * — Postgres exige que la clave de partición forme parte de la PK — aunque
+ * aquí siga declarada solo sobre `id` (no afecta a cómo `AuditService` usa
+ * la tabla: nunca hace `WHERE id = …`, y nada más del esquema referencia
+ * `audit_log.id` por FK). Altas de partición futuras: cron propio
+ * `AuditPartitionService` (`apps/api/src/audit/`) — sin `pg_partman`, no
+ * disponible en este entorno.
+ */
 export const auditLog = pgTable('audit_log', {
   id: uuid('id').primaryKey().defaultRandom(),
   /** Timestamp del evento (con zona horaria). */
