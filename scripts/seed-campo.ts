@@ -14,14 +14,25 @@
  *   npm run seed:campo -- --bd erp_dev --api http://localhost:3001 --confirmar
  *
  * Credenciales de un admin existente: SEED_EMAIL y SEED_PASSWORD (entorno).
- * Idempotente: cada entidad se busca por su clave natural antes de crearla.
+ * Además crea 3 usuarios de prueba (campo-*@erp.test: un lector y dos perfiles
+ * de obra) con contraseñas aleatorias; sus credenciales se guardan SOLO en el
+ * fichero de SEED_CAMPO_CREDENCIALES (obligatoria al escribir; fuera del repo).
+ * No se reejecuta: si ya existe la obra CAMPO-A aborta (`--limpiar` no está
+ * implementado). Dentro de una ejecución, cada entidad se busca por clave natural.
  * Requiere Node >= 22.18 (ejecuta TypeScript directamente) y `build:packages`.
  */
+import { randomBytes } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import {
+  PERFILES_USUARIO_CAMPO,
   conPrefijoCampo,
   decidirEjecucionSeedCampo,
   exigirEscritura,
+  generarPasswordCampo,
+  motivoAbortoPorExistentes,
   parsearArgsSeedCampo,
+  validarAsignacionesCampo,
   type ModoSeedCampo,
 } from '@erp/shared';
 
@@ -106,6 +117,8 @@ const PEDIDOS: Pedido[] = [
   { clave: P('PED-X2'), obra: P('B'), prov: PROV_ESTRUCT, importe: 4000 },
   { clave: P('PED-X3'), obra: P('A'), prov: PROV_ESTRUCT, importe: 3000 },
   { clave: P('PED-X4'), obra: P('B'), prov: PROV_ESTRUCT, importe: 1000 },
+  { clave: P('PED-X5'), obra: P('A'), prov: PROV_ESTRUCT, importe: 2000 },
+  { clave: P('PED-X6'), obra: P('B'), prov: PROV_ESTRUCT, importe: 1500 },
 ];
 
 const alb = (
@@ -127,6 +140,9 @@ const ALBARANES: Albaran[] = [
   alb('ALB-007', P('PED-X2'), 'B', PROV_ESTRUCT, 4000, true),
   alb('ALB-008', P('PED-X3'), 'A', PROV_ESTRUCT, 3000, true),
   alb('ALB-009', P('PED-X4'), 'B', PROV_ESTRUCT, 1000, true),
+  // Cruzados A/B: un mismo proveedor sirve a las dos obras y factura junto.
+  alb('ALB-010', P('PED-X5'), 'A', PROV_ESTRUCT, 2000, true),
+  alb('ALB-011', P('PED-X6'), 'B', PROV_ESTRUCT, 1500, true),
 ];
 
 const fac = (
@@ -172,8 +188,129 @@ const FACTURAS_COMPRA: FacturaCompra[] = [
     ],
     ['ALB-008', 'ALB-009'],
   ),
+  // Factura que junta los dos albaranes cruzados ALB-010 (A) y ALB-011 (B).
+  fac(
+    'C-X-003',
+    PROV_ESTRUCT,
+    {},
+    [
+      ['A', 2000],
+      ['B', 1500],
+    ],
+    ['ALB-010', 'ALB-011'],
+  ),
   // Borrador: aparece como «sin aprobar» en el KPI de costes.
   fac('C-A-002', PROV_HORMIGON, { borrador: true }, [['A', 2500]], []),
+];
+
+/** Rectificativas sobre ventas aprobadas (se dejan en borrador). */
+const RECTIFICATIVAS: {
+  original: string;
+  clase: 'total' | 'diferencias';
+  motivo: string;
+  obra?: string;
+  delta?: number;
+}[] = [
+  // Total: la API deriva las líneas negadas de la original (aprobarla la marcaría rectificada).
+  {
+    original: P('F-B-001'),
+    clase: 'total',
+    motivo: P('Rectificación total de prueba'),
+  },
+  // Parcial por diferencias: delta negativo de 5000 EUR en la obra A.
+  {
+    original: P('F-A-002'),
+    clase: 'diferencias',
+    motivo: P('Rectificación parcial de prueba'),
+    obra: P('A'),
+    delta: -5000,
+  },
+];
+
+interface ParteP {
+  obra: string;
+  partida: string;
+  operario: string;
+  dias: number;
+  ord: number;
+  extra: number;
+  tarifa: number;
+  tarifaExtra: number;
+}
+interface ParteM {
+  obra: string;
+  partida: string;
+  maquina: string;
+  propiedad: 'propia' | 'alquilada';
+  dias: number;
+  horas: number;
+  tarifa: number;
+}
+const pp = (
+  obra: string,
+  partida: string,
+  operario: string,
+  dias: number,
+  ord: number,
+  extra: number,
+  tarifa: number,
+): ParteP => ({
+  obra: P(obra),
+  partida: P(partida),
+  operario: P(operario),
+  dias,
+  ord,
+  extra,
+  tarifa,
+  tarifaExtra: tarifa * 1.5,
+});
+const PARTES_PERSONAL: ParteP[] = [
+  pp('A', '01.01', 'Operario 1', -6, 8, 0, 20),
+  pp('A', '01.01', 'Operario 2', -5, 8, 2, 22),
+  pp('A', '01.02', 'Operario 3', -4, 8, 1, 25),
+  pp('A', '02.01', 'Operario 4', -3, 6, 0, 18),
+  pp('B', '01.01', 'Operario 5', -6, 8, 0, 20),
+  pp('B', '01.02', 'Operario 6', -5, 8, 2, 22),
+  pp('B', '02.01', 'Operario 7', -4, 7, 0, 18),
+  pp('B', '01.01', 'Operario 8', -3, 8, 1, 25),
+];
+const PARTES_MAQUINARIA: ParteM[] = [
+  {
+    obra: P('A'),
+    partida: P('01.01'),
+    maquina: P('Excavadora'),
+    propiedad: 'propia',
+    dias: -6,
+    horas: 8,
+    tarifa: 60,
+  },
+  {
+    obra: P('A'),
+    partida: P('01.02'),
+    maquina: P('Grúa torre'),
+    propiedad: 'alquilada',
+    dias: -4,
+    horas: 6,
+    tarifa: 45,
+  },
+  {
+    obra: P('B'),
+    partida: P('01.01'),
+    maquina: P('Retroexcavadora'),
+    propiedad: 'alquilada',
+    dias: -5,
+    horas: 7,
+    tarifa: 50,
+  },
+  {
+    obra: P('B'),
+    partida: P('01.02'),
+    maquina: P('Camión grúa'),
+    propiedad: 'propia',
+    dias: -3,
+    horas: 5,
+    tarifa: 40,
+  },
 ];
 
 // ─── Simulación ─────────────────────────────────────────────────────────────
@@ -220,6 +357,24 @@ function imprimirPlan(): void {
       `  Factura compra ${f.numero}${f.borrador ? ' (borrador)' : ''}${f.isp ? ' ISP' : ''} ret ${f.retentionPct} %: ${f.lineas.map((l) => `${l.obra} ${l.base} EUR`).join(' + ')}`,
     );
   }
+  for (const r of RECTIFICATIVAS) {
+    console.log(
+      `  Rectificativa ${r.clase} de ${r.original} (borrador)${r.delta !== undefined ? `: ${r.delta} EUR en ${r.obra}` : ': líneas negadas de la original'}`,
+    );
+  }
+  for (const o of OBRAS) {
+    const n = PARTES_PERSONAL.filter((x) => x.obra === o.code).length;
+    const m = PARTES_MAQUINARIA.filter((x) => x.obra === o.code).length;
+    console.log(`  Partes en ${o.code}: ${n} de personal, ${m} de maquinaria`);
+  }
+  console.log(
+    '  Albaranes cruzados A/B: ALB-010 (A) + ALB-011 (B) en la factura C-X-003',
+  );
+  for (const u of PERFILES_USUARIO_CAMPO) {
+    console.log(
+      `  Usuario ${u.email} rol ${u.role}${u.obras.length ? ` obras ${u.obras.join(', ')}` : ''} (contraseña aleatoria, solo al fichero de credenciales)`,
+    );
+  }
 }
 
 // ─── Escritura (solo con --confirmar) ───────────────────────────────────────
@@ -240,6 +395,18 @@ async function escribirTodo(modo: ModoSeedCampo, api: string): Promise<void> {
   if (!email || !password) {
     throw new Error('Define SEED_EMAIL y SEED_PASSWORD (admin existente).');
   }
+  const rutaCreds = process.env.SEED_CAMPO_CREDENCIALES;
+  if (!rutaCreds) {
+    throw new Error(
+      'Define SEED_CAMPO_CREDENCIALES (fichero de credenciales fuera del repo).',
+    );
+  }
+  const rel = relative(process.cwd(), resolve(rutaCreds));
+  if (!rel.startsWith('..') && !isAbsolute(rel)) {
+    throw new Error('SEED_CAMPO_CREDENCIALES no puede estar dentro del repo.');
+  }
+  const erroresPerfiles = validarAsignacionesCampo(PERFILES_USUARIO_CAMPO);
+  if (erroresPerfiles.length > 0) throw new Error(erroresPerfiles.join('; '));
   let token = '';
 
   async function pedir<T>(ruta: string, init?: RequestInit): Promise<T> {
@@ -275,6 +442,11 @@ async function escribirTodo(modo: ModoSeedCampo, api: string): Promise<void> {
   });
   if (!sesion.ok) throw new Error(`Login fallido (${sesion.status}).`);
   token = ((await sesion.json()) as { accessToken: string }).accessToken;
+
+  // Idempotencia: si ya hay datos de campo, no se reejecuta.
+  const previas = await pedir<{ code: string }[]>('/projects');
+  const aborto = motivoAbortoPorExistentes(previas.map((x) => x.code));
+  if (aborto) throw new Error(aborto);
 
   async function asegurar<T extends Fila>(
     listar: () => Promise<T[]>,
@@ -514,6 +686,128 @@ async function escribirTodo(modo: ModoSeedCampo, api: string): Promise<void> {
     ) {
       await enviar('POST', `/invoices/${factura.id}/aprobar`);
     }
+  }
+
+  // Rectificativas sobre ventas ya aprobadas (la API valida estado y clase).
+  type FacturaFila = Fila & { invoiceNumber: string; status: string };
+  const todas = await pedir<FacturaFila[]>('/invoices');
+  for (const r of RECTIFICATIVAS) {
+    const orig = todas.find((x) => x.invoiceNumber === r.original);
+    if (!orig) throw new Error(`No existe la factura ${r.original}.`);
+    if (orig.status !== 'aprobada') {
+      throw new Error(
+        `${r.original} debe estar aprobada (está ${orig.status}).`,
+      );
+    }
+    const nueva = await enviar<FacturaFila>(
+      'POST',
+      `/invoices/${orig.id}/rectificar`,
+      {
+        clase: r.clase,
+        issueDate: fechaDesdeHoy(-1),
+        motivo: r.motivo,
+        ...(r.delta !== undefined && r.obra
+          ? {
+              lines: [
+                {
+                  description: `${r.motivo} ${r.obra}`,
+                  baseAmount: r.delta,
+                  vatPct: 21,
+                  projectId: obras[r.obra].id,
+                },
+              ],
+            }
+          : {}),
+      },
+    );
+    console.log(
+      `creada: rectificativa ${r.clase} ${nueva.invoiceNumber} de ${r.original}`,
+    );
+  }
+
+  // Partes de trabajo (personal y maquinaria) de A y B.
+  for (const x of PARTES_PERSONAL) {
+    await enviar('POST', '/partes-diarios/personal', {
+      projectId: obras[x.obra].id,
+      phaseId: partidas[`${x.obra}|${x.partida}`].id,
+      workerName: x.operario,
+      workDate: fechaDesdeHoy(x.dias),
+      ordinaryHours: x.ord,
+      overtimeHours: x.extra,
+      ordinaryRate: x.tarifa,
+      overtimeRate: x.tarifaExtra,
+      notes: P('parte de personal'),
+    });
+  }
+  for (const x of PARTES_MAQUINARIA) {
+    await enviar('POST', '/partes-diarios/maquinaria', {
+      projectId: obras[x.obra].id,
+      phaseId: partidas[`${x.obra}|${x.partida}`].id,
+      machineName: x.maquina,
+      ownership: x.propiedad,
+      workDate: fechaDesdeHoy(x.dias),
+      hoursUsed: x.horas,
+      hourlyRate: x.tarifa,
+      notes: P('parte de maquinaria'),
+    });
+  }
+  console.log(
+    `creados: ${PARTES_PERSONAL.length} partes de personal y ${PARTES_MAQUINARIA.length} de maquinaria`,
+  );
+
+  // Usuarios de prueba. Las contraseñas solo van al fichero de credenciales.
+  const credenciales: { email: string; password: string; role: string }[] = [];
+  const guardar = () => {
+    mkdirSync(dirname(resolve(rutaCreds)), { recursive: true });
+    writeFileSync(resolve(rutaCreds), JSON.stringify(credenciales, null, 2), {
+      mode: 0o600,
+    });
+  };
+  for (const u of PERFILES_USUARIO_CAMPO) {
+    const password = generarPasswordCampo(randomBytes(32));
+    const usuario = await enviar<Fila>('POST', '/users', {
+      email: u.email,
+      password,
+      fullName: u.fullName,
+      role: u.role,
+    });
+    credenciales.push({ email: u.email, password, role: u.role });
+    guardar();
+    if (u.obras.length > 0) {
+      await enviar('PUT', `/users/${usuario.id}/acceso-obras`, {
+        projectIds: u.obras.map((o) => obras[o].id),
+      });
+    }
+    console.log(`creado: usuario ${u.email} (${u.role})`);
+  }
+  console.log(
+    'Credenciales guardadas en el fichero de SEED_CAMPO_CREDENCIALES.',
+  );
+
+  // Comprobación: el lector no puede mutar.
+  const lector = credenciales.find((c) => c.role === 'lector');
+  if (lector) {
+    const ses = await fetch(`${api}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: lector.email, password: lector.password }),
+    });
+    const tokenLector = ((await ses.json()) as { accessToken: string })
+      .accessToken;
+    const intento = await fetch(`${api}/contacts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenLector}`,
+      },
+      body: JSON.stringify({
+        kind: 'cliente',
+        legalName: P('no debe crearse'),
+      }),
+    });
+    console.log(`lector POST /contacts -> ${intento.status} (esperado 403)`);
+    if (intento.status !== 403)
+      throw new Error('El lector no quedó en solo lectura.');
   }
   console.log('Seed de campo: completo.');
 }
