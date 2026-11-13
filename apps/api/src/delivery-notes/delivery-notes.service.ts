@@ -14,6 +14,7 @@ import {
   ne,
   or,
   SQL,
+  sql,
   sum,
 } from 'drizzle-orm';
 import {
@@ -38,6 +39,9 @@ import {
   deliveryNoteEditBlockReason,
   deliveryNoteReturnSchema,
   deliveryNoteUpdateSchema,
+  construirPagina,
+  calcularOffset,
+  type PaginaDto,
 } from '@erp/shared';
 import { AuditService } from '../audit/audit.service';
 import { DbService } from '../db/db.service';
@@ -101,7 +105,10 @@ export class DeliveryNotesService {
     status?: DeliveryNoteStatus;
     contactId?: string;
     availableForContact?: string;
-  }): Promise<DeliveryNoteDto[]> {
+    projectId?: string;
+    /** Con página, responde `PaginaDto`; sin ella, el array completo. */
+    pagina?: { page: number; pageSize: number };
+  }): Promise<DeliveryNoteDto[] | PaginaDto<DeliveryNoteDto>> {
     const companyId = this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     const filters: SQL[] = [
@@ -109,8 +116,15 @@ export class DeliveryNotesService {
       isNull(deliveryNotes.deletedAt),
     ];
     if (allowed !== null) {
-      if (allowed.length === 0) return [];
+      if (allowed.length === 0) {
+        return options.pagina
+          ? construirPagina([], 0, options.pagina.page, options.pagina.pageSize)
+          : [];
+      }
       filters.push(inArray(deliveryNotes.projectId, allowed));
+    }
+    if (options.projectId) {
+      filters.push(eq(deliveryNotes.projectId, options.projectId));
     }
     if (options.status) filters.push(eq(deliveryNotes.status, options.status));
     if (options.contactId) {
@@ -132,7 +146,16 @@ export class DeliveryNotesService {
         ) as SQL,
       );
     }
-    const rows = await this.dbs.db
+    let total = 0;
+    if (options.pagina) {
+      const [c] = await this.dbs.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(deliveryNotes)
+        .innerJoin(contacts, eq(deliveryNotes.contactId, contacts.id))
+        .where(and(...filters));
+      total = c?.n ?? 0;
+    }
+    const query = this.dbs.db
       .select({
         note: deliveryNotes,
         contactName: contacts.legalName,
@@ -147,8 +170,22 @@ export class DeliveryNotesService {
       .leftJoin(projects, eq(deliveryNotes.projectId, projects.id))
       .leftJoin(purchaseOrders, eq(deliveryNotes.orderId, purchaseOrders.id))
       .where(and(...filters))
-      .orderBy(desc(deliveryNotes.noteDate), desc(deliveryNotes.createdAt));
-    return rows.map((r) => toDto(r));
+      .orderBy(
+        desc(deliveryNotes.noteDate),
+        desc(deliveryNotes.createdAt),
+        desc(deliveryNotes.id),
+      );
+    if (!options.pagina) return (await query).map((r) => toDto(r));
+    const { page, pageSize } = options.pagina;
+    const rows = await query
+      .limit(pageSize)
+      .offset(calcularOffset(page, pageSize));
+    return construirPagina(
+      rows.map((r) => toDto(r)),
+      total,
+      page,
+      pageSize,
+    );
   }
 
   async create(input: DeliveryNoteCreateInput): Promise<DeliveryNoteDto> {

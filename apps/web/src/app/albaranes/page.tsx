@@ -20,7 +20,17 @@ import {
   formatEur,
   projectsApi,
 } from '@/lib/api';
-import { useDebouncedValue } from '@/lib/hooks';
+import { useListadoPaginado } from '@/lib/use-listado-paginado';
+import { usePermisos } from '@/lib/permisos';
+import { textoDeError } from '@/lib/errores';
+import {
+  BarraFiltros,
+  DataTable,
+  type ColumnaDef,
+  FiltroEstado,
+  FiltroObra,
+} from '@/components/data-table';
+import { Autorizado } from '@/components/autorizado';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { ReasonDialog } from '@/components/reason-dialog';
 import { useToast } from '@/components/toast';
@@ -32,17 +42,13 @@ import {
   IconTrash,
 } from '@/components/icons';
 import {
-  EmptyState,
-  ErrorBanner,
   Modal,
   PageHeader,
   SearchInput,
-  TableSkeleton,
   btnGhostCls,
   btnPrimaryCls,
   fieldCls,
   labelCls,
-  selectCls,
 } from '@/components/ui';
 
 const STATUS_STYLES: Record<DeliveryNoteStatus, string> = {
@@ -51,8 +57,7 @@ const STATUS_STYLES: Record<DeliveryNoteStatus, string> = {
   facturado: 'bg-emerald-100 text-emerald-700',
 };
 
-const errText = (e: unknown) =>
-  e instanceof Error ? e.message : 'Error inesperado';
+const errText = textoDeError;
 
 function NoteFormModal({
   open,
@@ -227,9 +232,7 @@ function NoteFormModal({
 export default function AlbaranesPage() {
   const qc = useQueryClient();
   const toast = useToast();
-  const [search, setSearch] = useState('');
-  const debouncedSearch = useDebouncedValue(search);
-  const [status, setStatus] = useState('');
+  const { can } = usePermisos();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<DeliveryNoteDto | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeliveryNoteDto | null>(
@@ -239,17 +242,18 @@ export default function AlbaranesPage() {
     null,
   );
 
-  const query = useQuery({
-    queryKey: ['delivery-notes', debouncedSearch, status],
-    queryFn: () =>
-      deliveryNotesApi.list({
-        search: debouncedSearch,
-        status: (status || undefined) as DeliveryNoteStatus | undefined,
-      }),
+  const listado = useListadoPaginado({
+    clave: 'delivery-notes',
+    filtrosIniciales: { search: '', status: '', projectId: '' },
+    camposConRetardo: ['search'],
+    consulta: (p) => deliveryNotesApi.listPaginado(p),
   });
+  const { filtros, setFiltro } = listado;
 
-  const invalidate = () =>
+  const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['delivery-notes'] });
+    qc.invalidateQueries({ queryKey: ['economics'] });
+  };
 
   const saveMutation = useMutation({
     mutationFn: (v: DeliveryNoteCreateInput) =>
@@ -297,170 +301,186 @@ export default function AlbaranesPage() {
     },
   });
 
-  const notes = query.data ?? [];
+  const abrirNuevo = () => {
+    setEditing(null);
+    saveMutation.reset();
+    setModalOpen(true);
+  };
+
+  const columnas: ColumnaDef<DeliveryNoteDto>[] = [
+    {
+      id: 'numero',
+      cabecera: 'Número',
+      celda: (n) => (
+        <span className="font-medium">
+          {n.noteNumber}
+          {n.description && (
+            <span
+              className="block max-w-52 truncate text-xs font-normal text-gray-500"
+              title={n.description}
+            >
+              {n.description}
+            </span>
+          )}
+        </span>
+      ),
+    },
+    { id: 'proveedor', cabecera: 'Proveedor', celda: (n) => n.contactName },
+    {
+      id: 'obra',
+      cabecera: 'Obra',
+      ocultaEnMovil: true,
+      celda: (n) => (
+        <span className="font-mono text-xs text-gray-600">
+          {n.projectCode ?? '—'}
+        </span>
+      ),
+    },
+    {
+      id: 'fecha',
+      cabecera: 'Fecha',
+      celda: (n) => (
+        <span className="text-gray-600">{formatDate(n.noteDate)}</span>
+      ),
+    },
+    {
+      id: 'importe',
+      cabecera: 'Importe',
+      alineacion: 'derecha',
+      celda: (n) => <span className="font-medium">{formatEur(n.amount)}</span>,
+    },
+    {
+      id: 'estado',
+      cabecera: 'Estado',
+      celda: (n) => (
+        <span
+          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_STYLES[n.status]}`}
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+          {DELIVERY_NOTE_STATUS_LABELS[n.status]}
+        </span>
+      ),
+    },
+  ];
 
   return (
     <div className="animate-fade-in-up">
       <PageHeader
         title="Albaranes y partes"
-        count={notes.length}
+        count={listado.total}
         subtitle="Circuito: pendiente → validado por jefe de obra → facturado"
       >
         <SearchInput
-          value={search}
-          onChange={setSearch}
+          value={filtros.search}
+          onChange={(v) => setFiltro('search', v)}
           placeholder="Buscar por número o proveedor…"
         />
-        <select
-          className={selectCls}
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-        >
-          <option value="">Todos los estados</option>
-          {DELIVERY_NOTE_STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {DELIVERY_NOTE_STATUS_LABELS[s]}
-            </option>
-          ))}
-        </select>
         <button
           onClick={() =>
             exportsApi
-              .download('albaranes', { status })
+              .download('albaranes', { status: filtros.status })
               .catch((e) => toast(errText(e), 'error'))
           }
           className={btnGhostCls}
         >
           Exportar CSV
         </button>
-        <button
-          onClick={() => {
-            setEditing(null);
-            saveMutation.reset();
-            setModalOpen(true);
-          }}
-          className={btnPrimaryCls}
-        >
-          <IconPlus size={15} />
-          Nuevo albarán
-        </button>
+        <Autorizado accion="crear" recurso="albaran">
+          <button onClick={abrirNuevo} className={btnPrimaryCls}>
+            <IconPlus size={15} />
+            Nuevo albarán
+          </button>
+        </Autorizado>
       </PageHeader>
 
-      {query.isLoading && <TableSkeleton />}
-      {query.isError && <ErrorBanner message={errText(query.error)} />}
-
-      {query.isSuccess && notes.length === 0 && (
-        <EmptyState
-          icon={<IconInbox size={26} />}
-          title={
-            search || status
-              ? 'Ningún albarán coincide con el filtro'
-              : 'Todavía no hay albaranes ni partes de trabajo'
-          }
+      <BarraFiltros
+        hayFiltros={listado.hayFiltros}
+        onLimpiar={listado.limpiarFiltros}
+      >
+        <FiltroObra
+          value={filtros.projectId}
+          onChange={(v) => setFiltro('projectId', v)}
         />
-      )}
+        <FiltroEstado<DeliveryNoteStatus>
+          value={filtros.status as DeliveryNoteStatus | ''}
+          onChange={(v) => setFiltro('status', v)}
+          estados={DELIVERY_NOTE_STATUSES}
+          etiquetas={DELIVERY_NOTE_STATUS_LABELS}
+        />
+      </BarraFiltros>
 
-      {notes.length > 0 && (
-        <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-200 bg-gray-50/60 text-left text-xs tracking-wide text-gray-500 uppercase">
-                <th className="px-4 py-3 font-medium">Número</th>
-                <th className="px-4 py-3 font-medium">Proveedor</th>
-                <th className="px-4 py-3 font-medium">Obra</th>
-                <th className="px-4 py-3 font-medium">Fecha</th>
-                <th className="px-4 py-3 text-right font-medium">Importe</th>
-                <th className="px-4 py-3 font-medium">Estado</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {notes.map((n) => (
-                <tr
-                  key={n.id}
-                  className="border-b border-gray-100 transition-colors last:border-0 hover:bg-amber-50/40"
+      <DataTable
+        etiqueta="Albaranes"
+        columnas={columnas}
+        filas={listado.filas}
+        idFila={(n) => n.id}
+        cargando={listado.cargando}
+        actualizando={listado.actualizando}
+        error={listado.error}
+        onReintentar={listado.reintentar}
+        hayFiltros={listado.hayFiltros}
+        paginacion={{
+          page: listado.page,
+          pageSize: listado.pageSize,
+          total: listado.total,
+          onPageChange: listado.setPage,
+          onPageSizeChange: listado.setPageSize,
+        }}
+        vacio={{
+          icono: <IconInbox size={26} />,
+          titulo: 'Todavía no hay albaranes ni partes de trabajo',
+        }}
+        vacioConFiltros={{
+          titulo: 'Ningún albarán coincide con el filtro',
+          onLimpiar: listado.limpiarFiltros,
+        }}
+        acciones={(n) => (
+          <>
+            {n.status === 'pendiente' && can('cambiarEstado', 'albaran') && (
+              <button
+                onClick={() => validateMutation.mutate(n.id)}
+                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-sky-600 hover:bg-sky-50"
+              >
+                <IconCheck size={13} />
+                Validar
+              </button>
+            )}
+            {canReturnDeliveryNote(n) && can('devolver', 'albaran') && (
+              <button
+                onClick={() => setReturnTarget(n)}
+                title="Devolver a pendiente para corregirlo"
+                className="rounded-md px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50"
+              >
+                Devolver
+              </button>
+            )}
+            {n.status === 'pendiente' && can('editar', 'albaran') && (
+              <button
+                onClick={() => {
+                  setEditing(n);
+                  saveMutation.reset();
+                  setModalOpen(true);
+                }}
+                title="Editar"
+                className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+              >
+                <IconPencil size={14} />
+              </button>
+            )}
+            {n.status === 'pendiente' &&
+              canDeleteDeliveryNote(n) &&
+              can('borrar', 'albaran') && (
+                <button
+                  onClick={() => setDeleteTarget(n)}
+                  title="Eliminar"
+                  className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
                 >
-                  <td className="px-4 py-3 font-medium">
-                    {n.noteNumber}
-                    {n.description && (
-                      <span
-                        className="block max-w-52 truncate text-xs font-normal text-gray-500"
-                        title={n.description}
-                      >
-                        {n.description}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">{n.contactName}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-gray-600">
-                    {n.projectCode ?? '—'}
-                  </td>
-                  <td className="px-4 py-3 text-gray-600">
-                    {formatDate(n.noteDate)}
-                  </td>
-                  <td className="px-4 py-3 text-right font-medium tabular-nums">
-                    {formatEur(n.amount)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_STYLES[n.status]}`}
-                    >
-                      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-                      {DELIVERY_NOTE_STATUS_LABELS[n.status]}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-1 whitespace-nowrap">
-                      {n.status === 'pendiente' && (
-                        <button
-                          onClick={() => validateMutation.mutate(n.id)}
-                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-sky-600 hover:bg-sky-50"
-                        >
-                          <IconCheck size={13} />
-                          Validar
-                        </button>
-                      )}
-                      {canReturnDeliveryNote(n) && (
-                        <button
-                          onClick={() => setReturnTarget(n)}
-                          title="Devolver a pendiente para corregirlo"
-                          className="rounded-md px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50"
-                        >
-                          Devolver
-                        </button>
-                      )}
-                      {n.status === 'pendiente' && (
-                        <>
-                          <button
-                            onClick={() => {
-                              setEditing(n);
-                              saveMutation.reset();
-                              setModalOpen(true);
-                            }}
-                            title="Editar"
-                            className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-                          >
-                            <IconPencil size={14} />
-                          </button>
-                          {canDeleteDeliveryNote(n) && (
-                            <button
-                              onClick={() => setDeleteTarget(n)}
-                              title="Eliminar"
-                              className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                            >
-                              <IconTrash size={14} />
-                            </button>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+                  <IconTrash size={14} />
+                </button>
+              )}
+          </>
+        )}
+      />
 
       <NoteFormModal
         open={modalOpen}

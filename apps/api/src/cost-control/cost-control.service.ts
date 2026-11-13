@@ -27,6 +27,7 @@ import {
   computeDesviacionPorPartida,
   computeIvaObra,
   computeMargenBrutoObra,
+  computeMargenPrevistoObra,
   computeRetencionesObra,
   prorratearRetencionesDeObra,
   computeSobrecostePorPartida,
@@ -428,27 +429,34 @@ export class CostControlService {
               ),
             );
 
+    const margen = computeMargenBrutoObra({
+      certificado: lastCert?.cumulativeAmount ?? 0,
+      facturadoVenta: fromCents(facturadoVenta),
+      costes: {
+        facturasCompra: totalOrigen('facturasCompra'),
+        partesPersonal: totalOrigen('partesPersonal'),
+        partesMaquinaria: totalOrigen('partesMaquinaria'),
+      },
+      facturasCompraEnBorrador: fromCents(
+        sumCents(borradorRows.map((r) => toCents(r.total))),
+      ),
+    });
     return {
       projectId: project.id,
       generadoEn: new Date().toISOString(),
-      margen: computeMargenBrutoObra({
-        certificado: lastCert?.cumulativeAmount ?? 0,
-        facturadoVenta: fromCents(facturadoVenta),
-        costes: {
-          facturasCompra: totalOrigen('facturasCompra'),
-          partesPersonal: totalOrigen('partesPersonal'),
-          partesMaquinaria: totalOrigen('partesMaquinaria'),
-        },
-        facturasCompraEnBorrador: fromCents(
-          sumCents(borradorRows.map((r) => toCents(r.total))),
-        ),
-      }),
+      margen,
       desviaciones: computeDesviacionPorPartida(desviacionRows),
       retenciones: computeRetencionesObra(
         prorratearRetencionesDeObra(movimientos, bases, projectId),
         todayIso(),
       ),
       iva: computeIvaObra([...porFactura.values()], projectId),
+      // El presupuesto activo se trata como coste previsto.
+      previsto: computeMargenPrevistoObra({
+        contrato: project.contractAmount,
+        totalPresupuestado: fromCents(sumCents([...budgetByPhase.values()])),
+        margenActualPct: margen.margenSobreCertificadoPct,
+      }),
     };
   }
 

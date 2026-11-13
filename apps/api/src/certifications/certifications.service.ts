@@ -3,13 +3,17 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, desc, eq, inArray, isNull, SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, SQL, sql } from 'drizzle-orm';
 import { Certification, certifications, projects, Tx } from '@erp/db';
 import {
   CertificationCreateInput,
   CertificationDto,
   CertificationInvoiceInput,
   CertificationRectifyInput,
+  CertStatus,
+  PaginaDto,
+  calcularOffset,
+  construirPagina,
   certificationCreateSchema,
   certificationInvoiceSchema,
   certificationPctBlockReason,
@@ -55,7 +59,12 @@ export class CertificationsService {
     private readonly audit: AuditService,
   ) {}
 
-  async list(projectId?: string): Promise<CertificationDto[]> {
+  async list(
+    projectId?: string,
+    status?: CertStatus,
+    /** Con página, responde `PaginaDto` (lo último primero); sin ella, el array completo. */
+    pagina?: { page: number; pageSize: number },
+  ): Promise<CertificationDto[] | PaginaDto<CertificationDto>> {
     const companyId = this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     const filters: SQL[] = [
@@ -63,16 +72,48 @@ export class CertificationsService {
       isNull(certifications.deletedAt),
     ];
     if (allowed !== null) {
-      if (allowed.length === 0) return [];
+      if (allowed.length === 0) {
+        return pagina
+          ? construirPagina([], 0, pagina.page, pagina.pageSize)
+          : [];
+      }
       filters.push(inArray(certifications.projectId, allowed));
     }
     if (projectId) filters.push(eq(certifications.projectId, projectId));
+    if (status) filters.push(eq(certifications.status, status));
+    if (!pagina) {
+      const rows = await this.dbs.db
+        .select()
+        .from(certifications)
+        .where(and(...filters))
+        .orderBy(
+          asc(certifications.projectId),
+          asc(certifications.seq),
+          asc(certifications.id),
+        );
+      return rows.map(toDto);
+    }
+    const [c] = await this.dbs.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(certifications)
+      .where(and(...filters));
     const rows = await this.dbs.db
       .select()
       .from(certifications)
       .where(and(...filters))
-      .orderBy(asc(certifications.projectId), asc(certifications.seq));
-    return rows.map(toDto);
+      .orderBy(
+        asc(certifications.projectId),
+        desc(certifications.seq),
+        desc(certifications.id),
+      )
+      .limit(pagina.pageSize)
+      .offset(calcularOffset(pagina.page, pagina.pageSize));
+    return construirPagina(
+      rows.map(toDto),
+      c?.n ?? 0,
+      pagina.page,
+      pagina.pageSize,
+    );
   }
 
   /**

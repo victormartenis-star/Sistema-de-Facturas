@@ -1,5 +1,5 @@
 import { DOCUMENT_MAX_SIZE_MB } from '@erp/shared';
-import type { ExportRecurso } from '@erp/shared';
+import type { ExportRecurso, PaginaDto } from '@erp/shared';
 import type { AuditLogDto, AuditQuery, ComplianceAlertDto } from '@erp/shared';
 import type {
   BimElementLinkDto,
@@ -235,6 +235,20 @@ export function clearStoredSession(): void {
   localStorage.removeItem(ACCESS_KEY);
   localStorage.removeItem(REFRESH_KEY);
   localStorage.removeItem(USER_KEY);
+}
+
+/** Query string de un listado: omite vacíos, conserva `0` y `false`. */
+function filtrosAQuery(
+  filtros: Record<string, string | number | boolean | null | undefined>,
+): string {
+  const params = new URLSearchParams();
+  for (const k of Object.keys(filtros).sort()) {
+    const v = filtros[k];
+    if (v === '' || v === null || v === undefined) continue;
+    params.set(k, String(v));
+  }
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
 }
 
 export class ApiError extends Error {
@@ -624,6 +638,15 @@ export const invoicesApi = {
     const qs = params.toString();
     return request<InvoiceDto[]>(`/invoices${qs ? `?${qs}` : ''}`);
   },
+  /** Listado paginado en servidor (la API responde `PaginaDto` si hay `page`). */
+  listPaginado: (f: {
+    kind?: string;
+    status?: string;
+    search?: string;
+    projectId?: string;
+    page: number;
+    pageSize: number;
+  }) => request<PaginaDto<InvoiceDto>>(`/invoices${filtrosAQuery(f)}`),
   get: (id: string) => request<InvoiceDto>(`/invoices/${id}`),
   create: (input: InvoiceCreateInput) =>
     request<InvoiceDto>('/invoices', {
@@ -659,6 +682,13 @@ export const invoicesApi = {
 };
 
 export const certificationsApi = {
+  listPaginado: (f: {
+    projectId: string;
+    status?: string;
+    page: number;
+    pageSize: number;
+  }) =>
+    request<PaginaDto<CertificationDto>>(`/certifications${filtrosAQuery(f)}`),
   list: (projectId: string) =>
     request<CertificationDto[]>(`/certifications?projectId=${projectId}`),
   create: (input: CertificationCreateInput) =>
@@ -748,6 +778,14 @@ export const purchaseOrdersApi = {
 };
 
 export const deliveryNotesApi = {
+  listPaginado: (f: {
+    search?: string;
+    status?: string;
+    projectId?: string;
+    page: number;
+    pageSize: number;
+  }) =>
+    request<PaginaDto<DeliveryNoteDto>>(`/delivery-notes${filtrosAQuery(f)}`),
   list: (options: {
     search?: string;
     status?: DeliveryNoteStatus | '';
@@ -1427,6 +1465,14 @@ export const investorsApi = {
 };
 
 export const budgetsApi = {
+  /** Presupuestos de una obra, paginados en servidor. */
+  listPaginadoPorObra: (
+    projectId: string,
+    f: { status?: string; page: number; pageSize: number },
+  ) =>
+    request<PaginaDto<BudgetDto>>(
+      `/projects/${projectId}/budgets${filtrosAQuery(f)}`,
+    ),
   /** Lista los presupuestos de una obra (sin partidas). */
   listByProject: (projectId: string) =>
     request<BudgetDto[]>(`/projects/${projectId}/budgets`),

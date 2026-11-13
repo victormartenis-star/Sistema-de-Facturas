@@ -27,6 +27,9 @@ import {
   BudgetSource,
   BudgetStatus,
   BudgetUpdateInput,
+  PaginaDto,
+  calcularOffset,
+  construirPagina,
   budgetCreateSchema,
   budgetDuplicateSchema,
   budgetEditBlockReason,
@@ -95,10 +98,20 @@ export class BudgetsService {
 
   // ── Presupuestos ─────────────────────────────────────────────────────────────
 
-  async listByProject(projectId: string): Promise<BudgetDto[]> {
+  async listByProject(
+    projectId: string,
+    status?: BudgetStatus,
+    /** Con página, responde `PaginaDto`; sin ella, el array completo. */
+    pagina?: { page: number; pageSize: number },
+  ): Promise<BudgetDto[] | PaginaDto<BudgetDto>> {
     await this.findProject(projectId);
 
-    const rows = await this.dbs.db
+    const filtros = [
+      eq(budgets.projectId, projectId),
+      isNull(budgets.deletedAt),
+    ];
+    if (status) filtros.push(eq(budgets.status, status));
+    const query = this.dbs.db
       .select({
         budget: budgets,
         totalAmount: sql<string>`coalesce(sum(${budgetItems.totalAmount}), 0)`,
@@ -106,12 +119,26 @@ export class BudgetsService {
       })
       .from(budgets)
       .leftJoin(budgetItems, eq(budgetItems.budgetId, budgets.id))
-      .where(and(eq(budgets.projectId, projectId), isNull(budgets.deletedAt)))
+      .where(and(...filtros))
       .groupBy(budgets.id)
-      .orderBy(asc(budgets.createdAt));
+      .orderBy(asc(budgets.createdAt), asc(budgets.id));
+    const aDto = (r: Awaited<typeof query>[number]) =>
+      budgetToDto(r.budget, Number(r.totalAmount), r.itemCount);
 
-    return rows.map((r) =>
-      budgetToDto(r.budget, Number(r.totalAmount), r.itemCount),
+    if (!pagina) return (await query).map(aDto);
+    // El total cuenta presupuestos (sin el join a las partidas).
+    const [c] = await this.dbs.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(budgets)
+      .where(and(...filtros));
+    const rows = await query
+      .limit(pagina.pageSize)
+      .offset(calcularOffset(pagina.page, pagina.pageSize));
+    return construirPagina(
+      rows.map(aDto),
+      c?.n ?? 0,
+      pagina.page,
+      pagina.pageSize,
     );
   }
 

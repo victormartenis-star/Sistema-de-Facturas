@@ -12,41 +12,10 @@ import {
   YAxis,
 } from 'recharts';
 import { costControlApi, formatEur } from '@/lib/api';
-import { ErrorBanner, TableSkeleton } from '@/components/ui';
+import { TableSkeleton } from '@/components/ui';
+import { EstadoError } from '@/components/data-table';
+import { KpiCard } from '@/components/kpi-card';
 import { IconAlertTriangle } from '@/components/icons';
-
-const errText = (e: unknown) =>
-  e instanceof Error ? e.message : 'Error inesperado';
-
-function Kpi({
-  label,
-  value,
-  tone = 'default',
-  hint,
-}: {
-  label: string;
-  value: string;
-  tone?: 'default' | 'good' | 'bad';
-  hint?: string;
-}) {
-  const toneCls =
-    tone === 'good'
-      ? 'text-emerald-700'
-      : tone === 'bad'
-        ? 'text-red-700'
-        : 'text-gray-900';
-  return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4">
-      <p className="text-[11px] font-semibold tracking-wide text-gray-500 uppercase">
-        {label}
-      </p>
-      <p className={`mt-1 text-xl font-bold tabular-nums ${toneCls}`}>
-        {value}
-      </p>
-      {hint && <p className="mt-1 text-[11px] text-gray-500">{hint}</p>}
-    </div>
-  );
-}
 
 /**
  * Analítica de costes en tiempo real de una obra: BAC/AC/EV, margen, CPI,
@@ -60,7 +29,13 @@ export function CostControlDashboard({ projectId }: { projectId: string }) {
   });
 
   if (query.isLoading) return <TableSkeleton rows={3} />;
-  if (query.isError) return <ErrorBanner message={errText(query.error)} />;
+  if (query.isError)
+    return (
+      <EstadoError
+        error={query.error}
+        onReintentar={() => void query.refetch()}
+      />
+    );
   if (!query.data) return null;
 
   const cc = query.data;
@@ -69,30 +44,30 @@ export function CostControlDashboard({ projectId }: { projectId: string }) {
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <Kpi label="Presupuesto (BAC)" value={formatEur(cc.bac)} />
-        <Kpi label="Coste real (AC)" value={formatEur(cc.ac)} />
-        <Kpi label="Producción ganada (EV)" value={formatEur(cc.ev)} />
-        <Kpi
-          label="Margen actual"
-          value={formatEur(cc.currentMargin)}
-          tone={cc.currentMargin >= 0 ? 'good' : 'bad'}
-          hint={
+        <KpiCard etiqueta="Presupuesto (BAC)" valor={formatEur(cc.bac)} />
+        <KpiCard etiqueta="Coste real (AC)" valor={formatEur(cc.ac)} />
+        <KpiCard etiqueta="Producción ganada (EV)" valor={formatEur(cc.ev)} />
+        <KpiCard
+          etiqueta="Margen actual"
+          valor={formatEur(cc.currentMargin)}
+          tono={cc.currentMargin >= 0 ? 'bueno' : 'malo'}
+          detalle={
             cc.currentMarginPct !== null
               ? `${cc.currentMarginPct.toFixed(1)} % de lo ganado`
               : undefined
           }
         />
-        <Kpi
-          label="CPI"
-          value={cc.cpi !== null ? cc.cpi.toFixed(2) : '—'}
-          tone={cc.cpi !== null ? (cc.cpi >= 1 ? 'good' : 'bad') : 'default'}
-          hint="Ganado / gastado — por debajo de 1 es sobrecoste"
+        <KpiCard
+          etiqueta="CPI"
+          valor={cc.cpi !== null ? cc.cpi.toFixed(2) : '—'}
+          tono={cc.cpi !== null ? (cc.cpi >= 1 ? 'bueno' : 'malo') : 'neutro'}
+          detalle="Ganado / gastado — por debajo de 1 es sobrecoste"
         />
-        <Kpi
-          label="Estimación a fin de obra (EAC)"
-          value={formatEur(cc.eac)}
-          tone={cc.varianceAtCompletion >= 0 ? 'good' : 'bad'}
-          hint={`${cc.varianceAtCompletion >= 0 ? 'Ahorro' : 'Sobrecoste'} previsto: ${formatEur(Math.abs(cc.varianceAtCompletion))}`}
+        <KpiCard
+          etiqueta="Estimación a fin de obra (EAC)"
+          valor={formatEur(cc.eac)}
+          tono={cc.varianceAtCompletion >= 0 ? 'bueno' : 'malo'}
+          detalle={`${cc.varianceAtCompletion >= 0 ? 'Ahorro' : 'Sobrecoste'} previsto: ${formatEur(Math.abs(cc.varianceAtCompletion))}`}
         />
       </div>
 

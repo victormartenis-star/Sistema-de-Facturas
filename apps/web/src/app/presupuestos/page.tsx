@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import {
+  BUDGET_STATUSES,
   BUDGET_STATUS_LABELS,
   canDeleteBudget,
   type BudgetDetailDto,
@@ -10,13 +11,21 @@ import {
   type BudgetItemDto,
   type BudgetStatus,
 } from '@erp/shared';
-import { budgetsApi, formatEur, projectsApi } from '@/lib/api';
+import { budgetsApi, formatEur } from '@/lib/api';
+import { useListadoPaginado } from '@/lib/use-listado-paginado';
+import { usePermisos } from '@/lib/permisos';
+import {
+  BarraFiltros,
+  DataTable,
+  EstadoError,
+  FiltroEstado,
+  FiltroObra,
+  type ColumnaDef,
+} from '@/components/data-table';
 import { useToast } from '@/components/toast';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import {
   IconCalculator,
-  IconChevronDown,
-  IconChevronUp,
   IconPlus,
   IconTrash,
   IconUpload,
@@ -26,12 +35,10 @@ import {
   ErrorBanner,
   Modal,
   PageHeader,
-  TableSkeleton,
   btnGhostCls,
   btnPrimaryCls,
   inputCls,
   labelCls,
-  selectCls,
 } from '@/components/ui';
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -163,7 +170,7 @@ function CreateBudgetModal({
     mutationFn: () => budgetsApi.create(projectId, { name: name.trim() }),
     onSuccess: () => {
       toast('Presupuesto creado');
-      qc.invalidateQueries({ queryKey: ['budgets', projectId] });
+      qc.invalidateQueries({ queryKey: ['budgets'] });
       setName('');
       onClose();
     },
@@ -241,7 +248,7 @@ function ImportBc3Modal({
       budgetsApi.importBc3(projectId, file!, name.trim() || undefined),
     onSuccess: (res) => {
       toast(`BC3 importado: ${res.itemsCreated} partidas`);
-      qc.invalidateQueries({ queryKey: ['budgets', projectId] });
+      qc.invalidateQueries({ queryKey: ['budgets'] });
       if (res.warnings.length > 0) {
         setWarnings(res.warnings);
       } else {
@@ -347,31 +354,53 @@ function ImportBc3Modal({
   );
 }
 
-// ─── Tarjeta de presupuesto ───────────────────────────────────────────────────
+// ─── Detalle expandido de un presupuesto ──────────────────────────────────────
 
-function BudgetCard({
-  budget,
-  projectId,
-}: {
-  budget: BudgetDto;
-  projectId: string;
-}) {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const [expanded, setExpanded] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-
+function DetallePresupuesto({ budget }: { budget: BudgetDto }) {
   const detailQuery = useQuery({
     queryKey: ['budget-detail', budget.id],
     queryFn: () => budgetsApi.getDetail(budget.id),
-    enabled: expanded,
   });
+
+  if (detailQuery.isLoading) {
+    return (
+      <div className="space-y-2" aria-busy="true">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="skeleton h-4 w-full" />
+        ))}
+      </div>
+    );
+  }
+  if (detailQuery.isError) {
+    return (
+      <EstadoError
+        compacto
+        error={detailQuery.error}
+        onReintentar={() => void detailQuery.refetch()}
+      />
+    );
+  }
+  return detailQuery.data ? <BudgetTree detail={detailQuery.data} /> : null;
+}
+
+// ─── Acciones de un presupuesto ───────────────────────────────────────────────
+
+function AccionesPresupuesto({ budget }: { budget: BudgetDto }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { can } = usePermisos();
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['budgets'] });
+    qc.invalidateQueries({ queryKey: ['economics'] });
+  };
 
   const activateMutation = useMutation({
     mutationFn: () => budgetsApi.update(budget.id, { status: 'activo' }),
     onSuccess: () => {
       toast('Presupuesto activado — es ahora la línea base de la obra');
-      qc.invalidateQueries({ queryKey: ['budgets', projectId] });
+      invalidate();
     },
     onError: (e) => toast((e as Error).message, 'error'),
   });
@@ -380,7 +409,7 @@ function BudgetCard({
     mutationFn: () => budgetsApi.update(budget.id, { status: 'cerrado' }),
     onSuccess: () => {
       toast('Presupuesto cerrado');
-      qc.invalidateQueries({ queryKey: ['budgets', projectId] });
+      invalidate();
     },
     onError: (e) => toast((e as Error).message, 'error'),
   });
@@ -389,7 +418,7 @@ function BudgetCard({
     mutationFn: () => budgetsApi.duplicate(budget.id),
     onSuccess: () => {
       toast('Nueva versión creada en borrador: edítala y actívala');
-      qc.invalidateQueries({ queryKey: ['budgets', projectId] });
+      invalidate();
     },
     onError: (e) => toast((e as Error).message, 'error'),
   });
@@ -398,7 +427,7 @@ function BudgetCard({
     mutationFn: () => budgetsApi.remove(budget.id),
     onSuccess: () => {
       toast('Presupuesto eliminado');
-      qc.invalidateQueries({ queryKey: ['budgets', projectId] });
+      invalidate();
       setDeleteOpen(false);
     },
     onError: (e) => {
@@ -408,99 +437,44 @@ function BudgetCard({
   });
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
-      {/* Cabecera tarjeta */}
-      <div className="flex items-center gap-3 px-5 py-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-gray-900">{budget.name}</span>
-            <BudgetStatusBadge status={budget.status} />
-            {budget.source === 'bc3' && (
-              <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700">
-                BC3
-              </span>
-            )}
-          </div>
-          <p className="mt-0.5 text-sm text-gray-500">
-            {budget.itemCount} partidas ·{' '}
-            <span className="font-medium text-gray-700">
-              {formatEur(budget.totalAmount)}
-            </span>
-            {budget.importedAt && (
-              <span className="text-gray-400">
-                {' '}
-                · importado{' '}
-                {new Date(budget.importedAt).toLocaleDateString('es-ES')}
-              </span>
-            )}
-          </p>
-        </div>
-
-        {/* Acciones */}
-        <div className="flex shrink-0 items-center gap-1.5">
-          {budget.status === 'borrador' && (
-            <button
-              onClick={() => activateMutation.mutate()}
-              disabled={activateMutation.isPending}
-              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
-            >
-              Activar
-            </button>
-          )}
-          {budget.status === 'activo' && (
-            <button
-              onClick={() => closeMutation.mutate()}
-              disabled={closeMutation.isPending}
-              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-500 hover:bg-gray-100 disabled:opacity-50"
-            >
-              Cerrar
-            </button>
-          )}
-          {/* Corregir un presupuesto activo o cerrado = nueva versión. */}
-          <button
-            onClick={() => duplicateMutation.mutate()}
-            disabled={duplicateMutation.isPending}
-            className="rounded-lg px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
-            title="Crea una copia en borrador (nueva versión) para corregirla"
-          >
-            Duplicar
-          </button>
-          {canDeleteBudget(budget.status) && (
-            <button
-              onClick={() => setDeleteOpen(true)}
-              className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
-              title="Eliminar presupuesto"
-            >
-              <IconTrash size={15} />
-            </button>
-          )}
-          <button
-            onClick={() => setExpanded((v) => !v)}
-            className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-            title={expanded ? 'Ocultar partidas' : 'Ver partidas'}
-          >
-            {expanded ? (
-              <IconChevronUp size={16} />
-            ) : (
-              <IconChevronDown size={16} />
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* Árbol de partidas (expandible) */}
-      {expanded && (
-        <div className="border-t border-gray-100 px-5 pb-5 pt-4">
-          {detailQuery.isLoading && (
-            <div className="py-4 text-center text-sm text-gray-400">
-              Cargando partidas…
-            </div>
-          )}
-          {detailQuery.isError && (
-            <ErrorBanner message={(detailQuery.error as Error).message} />
-          )}
-          {detailQuery.data && <BudgetTree detail={detailQuery.data} />}
-        </div>
+    <>
+      {budget.status === 'borrador' && can('cambiarEstado', 'presupuesto') && (
+        <button
+          onClick={() => activateMutation.mutate()}
+          disabled={activateMutation.isPending}
+          className="rounded-lg px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+        >
+          Activar
+        </button>
+      )}
+      {budget.status === 'activo' && can('cambiarEstado', 'presupuesto') && (
+        <button
+          onClick={() => closeMutation.mutate()}
+          disabled={closeMutation.isPending}
+          className="rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+        >
+          Cerrar
+        </button>
+      )}
+      {/* Corregir un presupuesto activo o cerrado = nueva versión. */}
+      {can('duplicar', 'presupuesto') && (
+        <button
+          onClick={() => duplicateMutation.mutate()}
+          disabled={duplicateMutation.isPending}
+          className="rounded-lg px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+          title="Crea una copia en borrador (nueva versión) para corregirla"
+        >
+          Duplicar
+        </button>
+      )}
+      {canDeleteBudget(budget.status) && can('borrar', 'presupuesto') && (
+        <button
+          onClick={() => setDeleteOpen(true)}
+          className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+          title="Eliminar presupuesto"
+        >
+          <IconTrash size={15} />
+        </button>
       )}
 
       <ConfirmDialog
@@ -511,70 +485,126 @@ function BudgetCard({
         onConfirm={() => deleteMutation.mutate()}
         onCancel={() => setDeleteOpen(false)}
       />
-    </div>
+    </>
   );
 }
 
 // ─── Página principal ─────────────────────────────────────────────────────────
 
+const COLUMNAS: ColumnaDef<BudgetDto>[] = [
+  {
+    id: 'nombre',
+    cabecera: 'Nombre',
+    celda: (b) => (
+      <span className="flex items-center gap-2">
+        <span className="font-semibold text-gray-900">{b.name}</span>
+        {b.source === 'bc3' && (
+          <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700">
+            BC3
+          </span>
+        )}
+      </span>
+    ),
+  },
+  {
+    id: 'estado',
+    cabecera: 'Estado',
+    celda: (b) => <BudgetStatusBadge status={b.status} />,
+  },
+  {
+    id: 'partidas',
+    cabecera: 'Partidas',
+    alineacion: 'derecha',
+    ocultaEnMovil: true,
+    celda: (b) => b.itemCount,
+  },
+  {
+    id: 'importe',
+    cabecera: 'Importe',
+    alineacion: 'derecha',
+    celda: (b) => (
+      <span className="font-medium">{formatEur(b.totalAmount)}</span>
+    ),
+  },
+  {
+    id: 'importado',
+    cabecera: 'Importado',
+    ocultaEnMovil: true,
+    celda: (b) => (
+      <span className="text-gray-500">
+        {b.importedAt
+          ? new Date(b.importedAt).toLocaleDateString('es-ES')
+          : '—'}
+      </span>
+    ),
+  },
+];
+
 export default function PresupuestosPage() {
-  const [projectId, setProjectId] = useState('');
+  const { can } = usePermisos();
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const projectsQuery = useQuery({
-    queryKey: ['projects', '', ''],
-    queryFn: () => projectsApi.list('', ''),
-    staleTime: 60_000,
+  const listado = useListadoPaginado({
+    clave: 'budgets',
+    filtrosIniciales: { projectId: '', status: '' },
+    habilitada: (f) => f.projectId !== '',
+    consulta: (p) =>
+      budgetsApi.listPaginadoPorObra(p.projectId, {
+        status: p.status,
+        page: p.page,
+        pageSize: p.pageSize,
+      }),
   });
+  const { filtros, setFiltro } = listado;
+  const projectId = filtros.projectId;
 
-  const budgetsQuery = useQuery({
-    queryKey: ['budgets', projectId],
-    queryFn: () => budgetsApi.listByProject(projectId),
-    enabled: !!projectId,
-  });
-
-  const projects = projectsQuery.data ?? [];
-  const budgets = budgetsQuery.data ?? [];
+  const botonesCreacion = (
+    <>
+      {can('importar', 'presupuesto') && (
+        <button onClick={() => setImportOpen(true)} className={btnGhostCls}>
+          <IconUpload size={15} />
+          Importar BC3
+        </button>
+      )}
+      {can('crear', 'presupuesto') && (
+        <button onClick={() => setCreateOpen(true)} className={btnPrimaryCls}>
+          <IconPlus size={15} />
+          Nuevo presupuesto
+        </button>
+      )}
+    </>
+  );
 
   return (
     <div className="animate-fade-in-up space-y-6">
-      <PageHeader title="Presupuestos">
-        {projectId && (
-          <>
-            <button onClick={() => setImportOpen(true)} className={btnGhostCls}>
-              <IconUpload size={15} />
-              Importar BC3
-            </button>
-            <button
-              onClick={() => setCreateOpen(true)}
-              className={btnPrimaryCls}
-            >
-              <IconPlus size={15} />
-              Nuevo presupuesto
-            </button>
-          </>
-        )}
+      <PageHeader
+        title="Presupuestos"
+        count={projectId ? listado.total : undefined}
+      >
+        {projectId && botonesCreacion}
       </PageHeader>
 
-      {/* Selector de obra */}
-      <div className="flex items-center gap-3">
-        <label className="text-sm font-medium text-gray-700 shrink-0">
-          Obra
-        </label>
-        <select
-          className={`${selectCls} max-w-sm flex-1`}
+      <BarraFiltros
+        hayFiltros={filtros.status !== ''}
+        onLimpiar={() => setFiltro('status', '')}
+      >
+        <FiltroObra
+          obligatorio
           value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
-        >
-          <option value="">— Selecciona una obra —</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.code} · {p.name}
-            </option>
-          ))}
-        </select>
-      </div>
+          onChange={(v) => {
+            setFiltro('projectId', v);
+            setExpandedId(null);
+          }}
+        />
+        <FiltroEstado<BudgetStatus>
+          value={filtros.status as BudgetStatus | ''}
+          onChange={(v) => setFiltro('status', v)}
+          estados={BUDGET_STATUSES}
+          etiquetas={BUDGET_STATUS_LABELS}
+        />
+      </BarraFiltros>
 
       {/* Sin obra seleccionada */}
       {!projectId && (
@@ -584,43 +614,40 @@ export default function PresupuestosPage() {
         />
       )}
 
-      {/* Cargando presupuestos */}
-      {projectId && budgetsQuery.isLoading && <TableSkeleton rows={3} />}
-
-      {/* Error */}
-      {projectId && budgetsQuery.isError && (
-        <ErrorBanner message={(budgetsQuery.error as Error).message} />
-      )}
-
-      {/* Sin presupuestos */}
-      {projectId && budgetsQuery.isSuccess && budgets.length === 0 && (
-        <EmptyState
-          icon={<IconCalculator size={26} />}
-          title="Esta obra no tiene presupuestos todavía"
-        >
-          <div className="flex gap-2">
-            <button onClick={() => setImportOpen(true)} className={btnGhostCls}>
-              <IconUpload size={15} />
-              Importar BC3
-            </button>
-            <button
-              onClick={() => setCreateOpen(true)}
-              className={btnPrimaryCls}
-            >
-              <IconPlus size={15} />
-              Crear presupuesto
-            </button>
-          </div>
-        </EmptyState>
-      )}
-
-      {/* Lista de presupuestos */}
-      {budgets.length > 0 && (
-        <div className="space-y-4">
-          {budgets.map((b) => (
-            <BudgetCard key={b.id} budget={b} projectId={projectId} />
-          ))}
-        </div>
+      {projectId && (
+        <DataTable
+          etiqueta="Presupuestos"
+          columnas={COLUMNAS}
+          filas={listado.filas}
+          idFila={(b) => b.id}
+          cargando={listado.cargando}
+          actualizando={listado.actualizando}
+          error={listado.error}
+          onReintentar={listado.reintentar}
+          hayFiltros={filtros.status !== ''}
+          paginacion={{
+            page: listado.page,
+            pageSize: listado.pageSize,
+            total: listado.total,
+            onPageChange: listado.setPage,
+            onPageSizeChange: listado.setPageSize,
+          }}
+          vacio={{
+            icono: <IconCalculator size={26} />,
+            titulo: 'Esta obra no tiene presupuestos todavía',
+            accion: (
+              <div className="flex justify-center gap-2">{botonesCreacion}</div>
+            ),
+          }}
+          vacioConFiltros={{
+            titulo: 'Ningún presupuesto coincide con el filtro',
+            onLimpiar: () => setFiltro('status', ''),
+          }}
+          idExpandida={expandedId}
+          onExpandir={setExpandedId}
+          filaExpandida={(b) => <DetallePresupuesto budget={b} />}
+          acciones={(b) => <AccionesPresupuesto budget={b} />}
+        />
       )}
 
       {/* Modales */}

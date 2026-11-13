@@ -10,12 +10,18 @@ import {
   Query,
 } from '@nestjs/common';
 import {
+  CERT_STATUSES,
+  CertStatus,
   CertificationCreateInput,
   CertificationInvoiceInput,
   CertificationRectifyInput,
   certificationCreateSchema,
   certificationInvoiceSchema,
   certificationRectifySchema,
+  esModoPaginado,
+  normalizarPaginacion,
+  paginacionQuerySchema,
+  type PaginacionQuery,
 } from '@erp/shared';
 import { Roles } from '../auth/roles';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
@@ -26,8 +32,20 @@ export class CertificationsController {
   constructor(private readonly service: CertificationsService) {}
 
   @Get()
-  list(@Query('projectId') projectId?: string) {
-    return this.service.list(projectId || undefined);
+  list(
+    @Query('projectId') projectId?: string,
+    @Query('status') status?: string,
+    @Query(new ZodValidationPipe(paginacionQuerySchema))
+    paginacion: PaginacionQuery = {},
+  ) {
+    const validStatus = CERT_STATUSES.includes(status as CertStatus)
+      ? (status as CertStatus)
+      : undefined;
+    return this.service.list(
+      projectId || undefined,
+      validStatus,
+      esModoPaginado(paginacion) ? normalizarPaginacion(paginacion) : undefined,
+    );
   }
 
   @Post()

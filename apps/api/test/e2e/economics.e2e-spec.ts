@@ -168,6 +168,51 @@ describe('Economía de obra (integración) — GET /projects/:id/economics', () 
       { vatPct: 21, baseAmount: 2_000, vatAmount: 420 },
     ]);
     expect(body.iva.totalSoportado).toBe(0); // las compras siguen en borrador
+
+    // Previsto: contrato 100 000 − presupuesto activo 12 000 (coste previsto).
+    expect(body.previsto).toEqual({
+      contrato: 100_000,
+      totalPresupuestado: 12_000,
+      margenPrevisto: 88_000,
+      margenPrevistoPct: 88,
+      // margen actual 94 % (28 200 / 30 000) − 88 %
+      diferenciaPuntos: 6,
+    });
+  });
+
+  it('previsto: sin presupuesto activo usa el presupuesto de las partidas', async () => {
+    const admin = await registerUser(app);
+    const token = admin.accessToken;
+    const project = await createProject(app, token); // contrato 100 000
+    await createPhase(app, token, project.id, { budgetAmount: 60_000 });
+    await createPhase(app, token, project.id, { budgetAmount: 15_000 });
+
+    const { body } = await authed(app, token)
+      .get(`/projects/${project.id}/economics`)
+      .expect(200);
+    expect(body.previsto.totalPresupuestado).toBe(75_000);
+    expect(body.previsto.margenPrevisto).toBe(25_000);
+    expect(body.previsto.margenPrevistoPct).toBe(25);
+    // Nada certificado: margen actual sin porcentaje -> sin diferencia.
+    expect(body.previsto.diferenciaPuntos).toBeNull();
+  });
+
+  it('previsto: obra sin contrato no tiene margen previsto pero sí total presupuestado', async () => {
+    const admin = await registerUser(app);
+    const token = admin.accessToken;
+    const project = await createProject(app, token, { contractAmount: null });
+    await createPhase(app, token, project.id, { budgetAmount: 5_000 });
+
+    const { body } = await authed(app, token)
+      .get(`/projects/${project.id}/economics`)
+      .expect(200);
+    expect(body.previsto).toEqual({
+      contrato: null,
+      totalPresupuestado: 5_000,
+      margenPrevisto: null,
+      margenPrevistoPct: null,
+      diferenciaPuntos: null,
+    });
   });
 
   /** Venta aprobada de 100,07 + 100,07 al 21 % repartida en dos obras, retención 5 %. */

@@ -24,11 +24,13 @@ import {
   phasesApi,
   projectsApi,
 } from '@/lib/api';
+import { Autorizado } from '@/components/autorizado';
 import { StatusBadge } from '@/components/status-badge';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { CostControlDashboard } from '@/components/cost-control-dashboard';
 import { useToast } from '@/components/toast';
 import {
+  IconChart,
   IconCube,
   IconPencil,
   IconPlus,
@@ -524,6 +526,7 @@ export default function ObraDetallePage() {
     qc.invalidateQueries({ queryKey: ['phases', id] });
     qc.invalidateQueries({ queryKey: ['deviation', id] });
     qc.invalidateQueries({ queryKey: ['certifications', id] });
+    qc.invalidateQueries({ queryKey: ['economics'] });
   };
 
   const savePhase = useMutation({
@@ -633,8 +636,14 @@ export default function ObraDetallePage() {
           <h1 className="text-2xl font-bold tracking-tight">{project.name}</h1>
           <StatusBadge status={project.status} />
           <Link
-            href={`/obras/${project.id}/bim`}
+            href={`/obras/${project.id}/dashboard`}
             className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-100"
+          >
+            <IconChart size={14} /> Dashboard ejecutivo
+          </Link>
+          <Link
+            href={`/obras/${project.id}/bim`}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-100"
           >
             <IconCube size={14} /> Visor BIM
           </Link>
@@ -653,17 +662,19 @@ export default function ObraDetallePage() {
           <h2 className="text-sm font-semibold">
             Partidas y desvío presupuestario
           </h2>
-          <button
-            onClick={() => {
-              setEditingPhase(null);
-              savePhase.reset();
-              setPhaseModalOpen(true);
-            }}
-            className={btnPrimaryCls}
-          >
-            <IconPlus size={14} />
-            Nueva partida
-          </button>
+          <Autorizado accion="crear" recurso="partida">
+            <button
+              onClick={() => {
+                setEditingPhase(null);
+                savePhase.reset();
+                setPhaseModalOpen(true);
+              }}
+              className={btnPrimaryCls}
+            >
+              <IconPlus size={14} />
+              Nueva partida
+            </button>
+          </Autorizado>
         </div>
 
         {/* Gráfico de desvío (solo si hay filas con presupuesto) */}
@@ -829,24 +840,28 @@ export default function ObraDetallePage() {
                       <td className="px-3 py-2.5">
                         {phase && (
                           <div className="flex items-center justify-end gap-1">
-                            <button
-                              onClick={() => {
-                                setEditingPhase(phase);
-                                savePhase.reset();
-                                setPhaseModalOpen(true);
-                              }}
-                              title="Editar"
-                              className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-                            >
-                              <IconPencil size={14} />
-                            </button>
-                            <button
-                              onClick={() => setDeletePhase(phase)}
-                              title="Eliminar"
-                              className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                            >
-                              <IconTrash size={14} />
-                            </button>
+                            <Autorizado accion="editar" recurso="partida">
+                              <button
+                                onClick={() => {
+                                  setEditingPhase(phase);
+                                  savePhase.reset();
+                                  setPhaseModalOpen(true);
+                                }}
+                                title="Editar"
+                                className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                              >
+                                <IconPencil size={14} />
+                              </button>
+                            </Autorizado>
+                            <Autorizado accion="borrar" recurso="partida">
+                              <button
+                                onClick={() => setDeletePhase(phase)}
+                                title="Eliminar"
+                                className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                              >
+                                <IconTrash size={14} />
+                              </button>
+                            </Autorizado>
                           </div>
                         )}
                       </td>
@@ -890,16 +905,18 @@ export default function ObraDetallePage() {
           <h2 className="text-sm font-semibold">
             Certificaciones (facturación a origen)
           </h2>
-          <button
-            onClick={() => {
-              createCert.reset();
-              setCertModalOpen(true);
-            }}
-            className={btnPrimaryCls}
-          >
-            <IconPlus size={14} />
-            Nueva certificación
-          </button>
+          <Autorizado accion="crear" recurso="certificacion">
+            <button
+              onClick={() => {
+                createCert.reset();
+                setCertModalOpen(true);
+              }}
+              className={btnPrimaryCls}
+            >
+              <IconPlus size={14} />
+              Nueva certificación
+            </button>
+          </Autorizado>
         </div>
 
         {certs.length === 0 ? (
@@ -965,23 +982,30 @@ export default function ObraDetallePage() {
                       <div className="flex items-center justify-end gap-1 whitespace-nowrap">
                         {c.status === 'borrador' && (
                           <>
-                            <button
-                              onClick={() => {
-                                invoiceCert.reset();
-                                setInvoicingCert(c);
-                              }}
-                              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-amber-600 hover:bg-amber-50"
+                            <Autorizado
+                              accion="cambiarEstado"
+                              recurso="certificacion"
                             >
-                              <IconReceipt size={13} />
-                              Facturar
-                            </button>
-                            <button
-                              onClick={() => setDeleteCert(c)}
-                              title="Eliminar"
-                              className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                            >
-                              <IconTrash size={14} />
-                            </button>
+                              <button
+                                onClick={() => {
+                                  invoiceCert.reset();
+                                  setInvoicingCert(c);
+                                }}
+                                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-amber-600 hover:bg-amber-50"
+                              >
+                                <IconReceipt size={13} />
+                                Facturar
+                              </button>
+                            </Autorizado>
+                            <Autorizado accion="borrar" recurso="certificacion">
+                              <button
+                                onClick={() => setDeleteCert(c)}
+                                title="Eliminar"
+                                className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                              >
+                                <IconTrash size={14} />
+                              </button>
+                            </Autorizado>
                           </>
                         )}
                       </div>

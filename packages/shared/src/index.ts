@@ -46,3 +46,5 @@ export * from './verifactu';
 export * from './xades';
 export * from './search';
 export * from './informes';
+export * from './paginacion';
+export * from './capacidades';

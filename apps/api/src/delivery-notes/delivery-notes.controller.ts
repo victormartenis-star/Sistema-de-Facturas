@@ -19,6 +19,10 @@ import {
   deliveryNoteCreateSchema,
   deliveryNoteReturnSchema,
   deliveryNoteUpdateSchema,
+  esModoPaginado,
+  normalizarPaginacion,
+  paginacionQuerySchema,
+  type PaginacionQuery,
 } from '@erp/shared';
 import { Roles } from '../auth/roles';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
@@ -34,6 +38,9 @@ export class DeliveryNotesController {
     @Query('status') status?: string,
     @Query('contactId') contactId?: string,
     @Query('availableForContact') availableForContact?: string,
+    @Query('projectId') projectId?: string,
+    @Query(new ZodValidationPipe(paginacionQuerySchema))
+    paginacion: PaginacionQuery = {},
   ) {
     const validStatus = DELIVERY_NOTE_STATUSES.includes(
       status as DeliveryNoteStatus,
@@ -45,6 +52,10 @@ export class DeliveryNotesController {
       status: validStatus,
       contactId: contactId || undefined,
       availableForContact: availableForContact || undefined,
+      projectId: projectId || undefined,
+      pagina: esModoPaginado(paginacion)
+        ? normalizarPaginacion(paginacion)
+        : undefined,
     });
   }
 

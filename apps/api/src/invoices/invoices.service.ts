@@ -40,6 +40,9 @@ import {
   InvoiceLineDto,
   InvoiceRectifyInput,
   InvoiceStatus,
+  PaginaDto,
+  calcularOffset,
+  construirPagina,
   RectificationKind,
   amountsMatch,
   buildRectificationLines,
@@ -92,20 +95,32 @@ export class InvoicesService {
     status?: InvoiceStatus,
     search?: string,
     soloRectificativas = false,
-  ): Promise<InvoiceDto[]> {
+    projectId?: string,
+    /** Con página, responde `PaginaDto`; sin ella, el array completo. */
+    pagina?: { page: number; pageSize: number },
+  ): Promise<InvoiceDto[] | PaginaDto<InvoiceDto>> {
     const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     const filters: SQL[] = [
       eq(invoices.companyId, companyId),
       isNull(invoices.deletedAt),
     ];
-    if (allowed !== null) {
-      // Rol obra: solo facturas con alguna línea imputada a sus obras. Las
-      // facturas sin ninguna línea de obra (gasto general de empresa) quedan
-      // fuera, igual que en `hasAllowedProject`.
-      if (allowed.length === 0) return [];
-      const invoiceIds = await this.invoiceIdsForProjects(allowed);
-      if (invoiceIds.length === 0) return [];
+    const vacio = () =>
+      pagina ? construirPagina([], 0, pagina.page, pagina.pageSize) : [];
+    // Obras por las que filtrar las líneas: la pedida, acotada a las
+    // accesibles. Rol obra: solo facturas con alguna línea imputada a sus
+    // obras; las facturas sin ninguna línea de obra (gasto general de
+    // empresa) quedan fuera, igual que en `hasAllowedProject`. Una factura con
+    // líneas en varias obras aparece al filtrar por cualquiera de ellas.
+    let obrasFiltro: string[] | null = allowed;
+    if (projectId) {
+      obrasFiltro =
+        allowed === null || allowed.includes(projectId) ? [projectId] : [];
+    }
+    if (obrasFiltro !== null) {
+      if (obrasFiltro.length === 0) return vacio();
+      const invoiceIds = await this.invoiceIdsForProjects(obrasFiltro);
+      if (invoiceIds.length === 0) return vacio();
       filters.push(inArray(invoices.id, invoiceIds));
     }
     if (kind) filters.push(eq(invoices.kind, kind));
@@ -121,13 +136,31 @@ export class InvoicesService {
         ) as SQL,
       );
     }
-    const rows = await this.dbs.db
+    const query = this.dbs.db
       .select({ invoice: invoices, contactName: contacts.legalName })
       .from(invoices)
       .innerJoin(contacts, eq(invoices.contactId, contacts.id))
       .where(and(...filters))
-      .orderBy(desc(invoices.issueDate), desc(invoices.createdAt));
-    return this.toDtos(rows);
+      .orderBy(
+        desc(invoices.issueDate),
+        desc(invoices.createdAt),
+        desc(invoices.id),
+      );
+    if (!pagina) return this.toDtos(await query);
+    const [c] = await this.dbs.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(invoices)
+      .innerJoin(contacts, eq(invoices.contactId, contacts.id))
+      .where(and(...filters));
+    const rows = await query
+      .limit(pagina.pageSize)
+      .offset(calcularOffset(pagina.page, pagina.pageSize));
+    return construirPagina(
+      await this.toDtos(rows),
+      c?.n ?? 0,
+      pagina.page,
+      pagina.pageSize,
+    );
   }
 
   async get(id: string): Promise<InvoiceDto> {

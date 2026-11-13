@@ -9,6 +9,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -22,8 +23,16 @@ import {
   BudgetItemCreateInput,
   BudgetItemDto,
   BudgetItemUpdateInput,
+  BudgetStatus,
   BudgetUpdateInput,
+  BUDGET_STATUSES,
+  PaginaDto,
+  esModoPaginado,
+  normalizarPaginacion,
+  paginacionQuerySchema,
+  type PaginacionQuery,
 } from '@erp/shared';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { BudgetsService } from './budgets.service';
 
 @Controller()
@@ -36,8 +45,18 @@ export class BudgetsController {
   @Get('projects/:projectId/budgets')
   listByProject(
     @Param('projectId', ParseUUIDPipe) projectId: string,
-  ): Promise<BudgetDto[]> {
-    return this.svc.listByProject(projectId);
+    @Query('status') status?: string,
+    @Query(new ZodValidationPipe(paginacionQuerySchema))
+    paginacion: PaginacionQuery = {},
+  ): Promise<BudgetDto[] | PaginaDto<BudgetDto>> {
+    const validStatus = BUDGET_STATUSES.includes(status as BudgetStatus)
+      ? (status as BudgetStatus)
+      : undefined;
+    return this.svc.listByProject(
+      projectId,
+      validStatus,
+      esModoPaginado(paginacion) ? normalizarPaginacion(paginacion) : undefined,
+    );
   }
 
   /** POST /projects/:projectId/budgets — crear presupuesto manual */

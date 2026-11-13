@@ -25,6 +25,10 @@ import {
   invoiceCreateSchema,
   invoiceRectifySchema,
   invoiceUpdateSchema,
+  esModoPaginado,
+  normalizarPaginacion,
+  paginacionQuerySchema,
+  type PaginacionQuery,
 } from '@erp/shared';
 import { Roles } from '../auth/roles';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
@@ -46,6 +50,9 @@ export class InvoicesController {
     @Query('status') status?: string,
     @Query('search') search?: string,
     @Query('rectificativas') rectificativas?: string,
+    @Query('projectId') projectId?: string,
+    @Query(new ZodValidationPipe(paginacionQuerySchema))
+    paginacion: PaginacionQuery = {},
   ) {
     const validKind = INVOICE_KINDS.includes(kind as InvoiceKind)
       ? (kind as InvoiceKind)
@@ -58,6 +65,8 @@ export class InvoicesController {
       validStatus,
       search,
       rectificativas === 'true',
+      projectId || undefined,
+      esModoPaginado(paginacion) ? normalizarPaginacion(paginacion) : undefined,
     );
   }
 

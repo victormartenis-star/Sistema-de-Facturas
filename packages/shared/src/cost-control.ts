@@ -343,6 +343,48 @@ export function computeMargenBrutoObra(
   };
 }
 
+export interface MargenPrevistoObraInput {
+  /** Importe de contrato de la obra; `null` si no lo tiene. */
+  contrato: number | string | null;
+  /** Total presupuestado (coste previsto): Σ presupuesto de las partidas. */
+  totalPresupuestado: number | string;
+  /** `margenSobreCertificadoPct` del margen bruto actual. */
+  margenActualPct: number | null;
+}
+
+export interface MargenPrevistoObraDto {
+  contrato: number | null;
+  /** Presupuesto activo (o, sin él, presupuesto de las partidas), tratado como coste previsto. */
+  totalPresupuestado: number;
+  /** contrato − totalPresupuestado; `null` si falta contrato o presupuesto. */
+  margenPrevisto: number | null;
+  /** Sobre el contrato. */
+  margenPrevistoPct: number | null;
+  /** margen actual % − margen previsto %, en puntos; `null` si falta alguno. */
+  diferenciaPuntos: number | null;
+}
+
+export function computeMargenPrevistoObra(
+  input: MargenPrevistoObraInput,
+): MargenPrevistoObraDto {
+  const presupuesto = toCents(input.totalPresupuestado);
+  const contrato = input.contrato === null ? null : toCents(input.contrato);
+  const calculable = contrato !== null && presupuesto !== 0n;
+  const margen = calculable ? contrato - presupuesto : null;
+  const pct =
+    margen !== null && contrato !== null ? pctOf(margen, contrato) : null;
+  return {
+    contrato: contrato === null ? null : fromCents(contrato),
+    totalPresupuestado: fromCents(presupuesto),
+    margenPrevisto: margen === null ? null : fromCents(margen),
+    margenPrevistoPct: pct,
+    diferenciaPuntos:
+      pct !== null && input.margenActualPct !== null
+        ? round2(input.margenActualPct - pct)
+        : null,
+  };
+}
+
 export interface DesviacionPartidaInput {
   /** `null` = coste/presupuesto sin partida. */
   phaseId: string | null;
@@ -417,6 +459,68 @@ export function computeDesviacionPorPartida(
   });
   if (agregada.budget === 0 && agregada.actual === 0) return conPartida;
   return [...conPartida, agregada];
+}
+
+export interface DesviacionCapituloDto {
+  /** Prefijo del código de partida, o `SIN_PARTIDA_NOMBRE`. */
+  capitulo: string;
+  budget: number;
+  actual: number;
+  deviation: number;
+  deviationPct: number | null;
+  overBudget: boolean;
+  partidas: DesviacionPartidaDto[];
+}
+
+/** Capítulo de un código `capítulo.partida` (texto antes del primer punto); `null` si no sigue esa forma. */
+export function capituloDeCodigo(code: string): string | null {
+  const limpio = code.trim();
+  const i = limpio.indexOf('.');
+  if (i <= 0) return null;
+  return limpio.slice(0, i).trim() || null;
+}
+
+/**
+ * Agrupa la desviación por capítulo derivado del código. Devuelve `null` si
+ * no hay partidas o alguna no sigue la convención `capítulo.partida` (en ese
+ * caso la interfaz muestra la desviación por partida).
+ */
+export function agruparDesviacionPorCapitulo(
+  filas: DesviacionPartidaDto[],
+): DesviacionCapituloDto[] | null {
+  const conPartida = filas.filter((f) => f.phaseId !== null);
+  if (conPartida.length === 0) return null;
+  const grupos = new Map<string, DesviacionPartidaDto[]>();
+  for (const f of conPartida) {
+    const cap = capituloDeCodigo(f.code);
+    if (cap === null) return null;
+    grupos.set(cap, [...(grupos.get(cap) ?? []), f]);
+  }
+  const sinPartida = filas.filter((f) => f.phaseId === null);
+  if (sinPartida.length > 0) grupos.set(SIN_PARTIDA_NOMBRE, sinPartida);
+
+  const resultado: DesviacionCapituloDto[] = [];
+  for (const [capitulo, partidas] of grupos) {
+    const budget = sumCents(partidas.map((p) => toCents(p.budget)));
+    const actual = sumCents(partidas.map((p) => toCents(p.actual)));
+    const deviation = actual - budget;
+    resultado.push({
+      capitulo,
+      budget: fromCents(budget),
+      actual: fromCents(actual),
+      deviation: fromCents(deviation),
+      deviationPct: budget > 0n ? pctOf(deviation, budget) : null,
+      overBudget: deviation > 0n,
+      partidas,
+    });
+  }
+  return resultado.sort((a, b) =>
+    a.capitulo === SIN_PARTIDA_NOMBRE
+      ? 1
+      : b.capitulo === SIN_PARTIDA_NOMBRE
+        ? -1
+        : a.capitulo.localeCompare(b.capitulo, 'es', { numeric: true }),
+  );
 }
 
 export interface RetencionMovimiento {
@@ -707,4 +811,6 @@ export interface ObraEconomicsDto {
   desviaciones: DesviacionPartidaDto[];
   retenciones: RetencionesObraDto;
   iva: IvaObraDto;
+  /** Margen previsto frente al actual (contrato − presupuesto). */
+  previsto: MargenPrevistoObraDto;
 }

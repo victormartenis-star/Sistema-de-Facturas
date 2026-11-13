@@ -70,6 +70,7 @@ function PersonalQuickForm({ projectId }: { projectId: string }) {
       setTrabajadorId('');
       setWorkerName('');
       qc.invalidateQueries({ queryKey: ['partes-personal'] });
+      qc.invalidateQueries({ queryKey: ['economics'] });
     },
     onError: (e) => toast(errText(e), 'error'),
   });
@@ -181,6 +182,7 @@ function MaquinariaQuickForm({ projectId }: { projectId: string }) {
       setMachineName('');
       setFuelLiters('');
       qc.invalidateQueries({ queryKey: ['partes-maquinaria'] });
+      qc.invalidateQueries({ queryKey: ['economics'] });
     },
     onError: (e) => toast(errText(e), 'error'),
   });
@@ -279,6 +281,7 @@ export default function PartesDiariosPage() {
     onSuccess: () => {
       toast('Parte aprobado');
       qc.invalidateQueries({ queryKey: ['partes-personal'] });
+      qc.invalidateQueries({ queryKey: ['economics'] });
     },
     onError: (e) => toast(errText(e), 'error'),
   });
@@ -287,6 +290,7 @@ export default function PartesDiariosPage() {
     onSuccess: () => {
       toast('Parte aprobado');
       qc.invalidateQueries({ queryKey: ['partes-maquinaria'] });
+      qc.invalidateQueries({ queryKey: ['economics'] });
     },
     onError: (e) => toast(errText(e), 'error'),
   });

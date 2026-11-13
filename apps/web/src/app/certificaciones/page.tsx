@@ -10,6 +10,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import {
+  CERT_STATUSES,
   CERT_STATUS_LABELS,
   type CertStatus,
   type CertificationDto,
@@ -28,14 +29,22 @@ import {
   exportsApi,
   formatDate,
   formatEur,
-  projectsApi,
 } from '@/lib/api';
 import { useToast } from '@/components/toast';
+import { useListadoPaginado } from '@/lib/use-listado-paginado';
+import { usePermisos } from '@/lib/permisos';
+import {
+  BarraFiltros,
+  DataTable,
+  FiltroEstado,
+  FiltroObra,
+  type ColumnaDef,
+} from '@/components/data-table';
+import { KpiCard } from '@/components/kpi-card';
+import { Autorizado } from '@/components/autorizado';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { MOTIVO_MAX, MOTIVO_MIN } from '@/components/reason-dialog';
 import {
-  IconChevronDown,
-  IconChevronUp,
   IconClipboard,
   IconPlus,
   IconReceipt,
@@ -43,10 +52,8 @@ import {
 } from '@/components/icons';
 import {
   EmptyState,
-  ErrorBanner,
   Modal,
   PageHeader,
-  TableSkeleton,
   btnGhostCls,
   btnPrimaryCls,
   fieldCls,
@@ -644,30 +651,6 @@ function LinesPanel({
   );
 }
 
-// ─── KPI card ─────────────────────────────────────────────────────────────────
-
-function KpiCard({
-  label,
-  value,
-  sub,
-  accent = 'text-gray-900',
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  accent?: string;
-}) {
-  return (
-    <div className="rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
-      <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-        {label}
-      </p>
-      <p className={`mt-1 text-2xl font-bold ${accent}`}>{value}</p>
-      {sub && <p className="mt-0.5 text-xs text-gray-400">{sub}</p>}
-    </div>
-  );
-}
-
 // ─── Modal rectificar certificación ───────────────────────────────────────────
 
 function RectificarCertModal({
@@ -806,148 +789,15 @@ function RectificarCertModal({
   );
 }
 
-// ─── Tabla de certificaciones ──────────────────────────────────────────────────
-
-interface CertTableProps {
-  certs: CertificationDto[];
-  onFacturar: (c: CertificationDto) => void;
-  onRectify: (c: CertificationDto) => void;
-  onDelete: (c: CertificationDto) => void;
-}
-
-function CertTable({ certs, onFacturar, onRectify, onDelete }: CertTableProps) {
-  const seqDe = (id: string | null) =>
-    certs.find((c) => c.id === id)?.seq ?? null;
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-
-  return (
-    <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
-      <table className="w-full text-left text-sm">
-        <thead>
-          <tr className="border-b border-gray-100 text-xs font-semibold uppercase tracking-wider text-gray-500">
-            <th className="px-4 py-3 text-center">Nº</th>
-            <th className="px-4 py-3">Fecha</th>
-            <th className="px-4 py-3 text-right">% Acumulado</th>
-            <th className="px-4 py-3 text-right">Importe periodo</th>
-            <th className="px-4 py-3 text-right">Retención</th>
-            <th className="px-4 py-3 text-right">Neto</th>
-            <th className="px-4 py-3">Estado</th>
-            <th className="px-4 py-3" />
-          </tr>
-        </thead>
-        <tbody>
-          {certs.map((cert) => (
-            <>
-              <tr
-                key={cert.id}
-                className="border-b border-gray-50 hover:bg-gray-50/50"
-              >
-                <td className="px-4 py-3 text-center font-semibold text-amber-600">
-                  {cert.seq}
-                  {cert.rectifiesCertificationId && (
-                    <div
-                      className="text-[10px] font-medium text-amber-700"
-                      title={cert.rectificationReason ?? undefined}
-                    >
-                      rectifica nº {seqDe(cert.rectifiesCertificationId) ?? '?'}
-                    </div>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-gray-600">
-                  {formatDate(cert.certDate)}
-                </td>
-                <td className="px-4 py-3 text-right font-mono font-medium">
-                  {pct(cert.cumulativePct)}
-                </td>
-                <td className="px-4 py-3 text-right font-mono">
-                  <div>{formatEur(cert.periodAmount)}</div>
-                  <div className="text-xs text-gray-400">
-                    acum. {formatEur(cert.cumulativeAmount)}
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-right font-mono text-amber-600">
-                  {formatEur(cert.retentionAmount)}
-                  <div className="text-xs text-gray-400">
-                    {cert.retentionPct.toFixed(1)} %
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-right font-mono font-semibold text-emerald-600">
-                  {formatEur(cert.periodAmount - cert.retentionAmount)}
-                </td>
-                <td className="px-4 py-3">
-                  <CertBadge status={cert.status} />
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center justify-end gap-2">
-                    <button
-                      onClick={() =>
-                        setExpandedId(expandedId === cert.id ? null : cert.id)
-                      }
-                      className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-                      title="Ver líneas"
-                    >
-                      {expandedId === cert.id ? (
-                        <IconChevronUp size={14} />
-                      ) : (
-                        <IconChevronDown size={14} />
-                      )}
-                    </button>
-                    {cert.status === 'borrador' && (
-                      <button
-                        onClick={() => onFacturar(cert)}
-                        className={btnGhostCls + ' gap-1.5 text-xs'}
-                      >
-                        <IconReceipt size={14} />
-                        Facturar
-                      </button>
-                    )}
-                    {cert.status === 'facturada' && (
-                      <button
-                        onClick={() => onRectify(cert)}
-                        className={btnGhostCls + ' gap-1.5 text-xs'}
-                        title="Nueva certificación que fija el acumulado correcto (puede bajar)"
-                      >
-                        Rectificar
-                      </button>
-                    )}
-                    {cert.status === 'borrador' && (
-                      <button
-                        onClick={() => onDelete(cert)}
-                        className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-500"
-                        title="Eliminar"
-                      >
-                        <IconTrash size={14} />
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-              {expandedId === cert.id && (
-                <tr key={`${cert.id}-lines`}>
-                  <td colSpan={8} className="p-0">
-                    <LinesPanel
-                      certId={cert.id}
-                      editable={canEditCertification(cert.status)}
-                    />
-                  </td>
-                </tr>
-              )}
-            </>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 export default function CertificacionesPage() {
   const qc = useQueryClient();
   const toast = useToast();
+  const { can } = usePermisos();
 
-  const [projectId, setProjectId] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [facturarTarget, setFacturarTarget] = useState<CertificationDto | null>(
     null,
   );
@@ -958,12 +808,18 @@ export default function CertificacionesPage() {
     null,
   );
 
-  const projectsQuery = useQuery({
-    queryKey: ['projects', '', ''],
-    queryFn: () => projectsApi.list('', ''),
-    staleTime: 5 * 60_000,
+  // Tabla: paginada en servidor (la obra es obligatoria).
+  const listado = useListadoPaginado({
+    clave: 'certifications',
+    filtrosIniciales: { projectId: '', status: '' },
+    habilitada: (f) => f.projectId !== '',
+    consulta: (p) => certificationsApi.listPaginado(p),
   });
+  const { filtros, setFiltro } = listado;
+  const projectId = filtros.projectId;
 
+  // Lista completa de la obra (decisión D7): KPIs, `lastPct` del modal y
+  // "rectifica nº" no pueden salir de la página visible.
   const certsQuery = useQuery({
     queryKey: ['certifications', projectId],
     queryFn: () => certificationsApi.list(projectId),
@@ -978,8 +834,9 @@ export default function CertificacionesPage() {
   });
 
   const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ['certifications', projectId] });
+    qc.invalidateQueries({ queryKey: ['certifications'] });
     qc.invalidateQueries({ queryKey: ['invoices'] });
+    qc.invalidateQueries({ queryKey: ['economics'] });
   };
 
   const deleteMutation = useMutation({
@@ -997,12 +854,93 @@ export default function CertificacionesPage() {
   const lastPct = lastCert?.cumulativePct ?? 0;
   const totalCertificado = certs.reduce((s, c) => s + c.periodAmount, 0);
   const totalRetencion = certs.reduce((s, c) => s + c.retentionAmount, 0);
+  const seqDe = (id: string | null) =>
+    certs.find((c) => c.id === id)?.seq ?? null;
+
+  const columnas: ColumnaDef<CertificationDto>[] = [
+    {
+      id: 'seq',
+      cabecera: 'Nº',
+      alineacion: 'centro',
+      celda: (cert) => (
+        <span className="font-semibold text-amber-600">
+          {cert.seq}
+          {cert.rectifiesCertificationId && (
+            <div
+              className="text-[10px] font-medium text-amber-700"
+              title={cert.rectificationReason ?? undefined}
+            >
+              rectifica nº {seqDe(cert.rectifiesCertificationId) ?? '?'}
+            </div>
+          )}
+        </span>
+      ),
+    },
+    {
+      id: 'fecha',
+      cabecera: 'Fecha',
+      celda: (cert) => (
+        <span className="text-gray-600">{formatDate(cert.certDate)}</span>
+      ),
+    },
+    {
+      id: 'pct',
+      cabecera: '% Acumulado',
+      alineacion: 'derecha',
+      celda: (cert) => (
+        <span className="font-mono font-medium">{pct(cert.cumulativePct)}</span>
+      ),
+    },
+    {
+      id: 'periodo',
+      cabecera: 'Importe periodo',
+      alineacion: 'derecha',
+      celda: (cert) => (
+        <span className="font-mono">
+          <div>{formatEur(cert.periodAmount)}</div>
+          <div className="text-xs text-gray-400">
+            acum. {formatEur(cert.cumulativeAmount)}
+          </div>
+        </span>
+      ),
+    },
+    {
+      id: 'retencion',
+      cabecera: 'Retención',
+      alineacion: 'derecha',
+      ocultaEnMovil: true,
+      celda: (cert) => (
+        <span className="font-mono text-amber-600">
+          {formatEur(cert.retentionAmount)}
+          <div className="text-xs text-gray-400">
+            {cert.retentionPct.toFixed(1)} %
+          </div>
+        </span>
+      ),
+    },
+    {
+      id: 'neto',
+      cabecera: 'Neto',
+      alineacion: 'derecha',
+      celda: (cert) => (
+        <span className="font-mono font-semibold text-emerald-600">
+          {formatEur(cert.periodAmount - cert.retentionAmount)}
+        </span>
+      ),
+    },
+    {
+      id: 'estado',
+      cabecera: 'Estado',
+      celda: (cert) => <CertBadge status={cert.status} />,
+    },
+  ];
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6">
       <PageHeader
         title="Certificaciones"
         subtitle="Avance a origen por obra con facturación automática"
+        count={projectId ? listado.total : undefined}
       >
         {projectId && (
           <button
@@ -1017,34 +955,37 @@ export default function CertificacionesPage() {
           </button>
         )}
         {projectId && (
-          <button
-            onClick={() => setCreateOpen(true)}
-            className={btnPrimaryCls + ' gap-1.5'}
-          >
-            <IconPlus size={16} />
-            Nueva certificación
-          </button>
+          <Autorizado accion="crear" recurso="certificacion">
+            <button
+              onClick={() => setCreateOpen(true)}
+              className={btnPrimaryCls + ' gap-1.5'}
+            >
+              <IconPlus size={16} />
+              Nueva certificación
+            </button>
+          </Autorizado>
         )}
       </PageHeader>
 
-      {/* Selector de obra */}
-      <div className="max-w-sm">
-        <label className="mb-1.5 block text-sm font-medium text-gray-700">
-          Obra
-        </label>
-        <select
+      <BarraFiltros
+        hayFiltros={filtros.status !== ''}
+        onLimpiar={() => setFiltro('status', '')}
+      >
+        <FiltroObra
+          obligatorio
           value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
-          className={selectCls}
-        >
-          <option value="">Selecciona una obra…</option>
-          {projectsQuery.data?.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.code} — {p.name}
-            </option>
-          ))}
-        </select>
-      </div>
+          onChange={(v) => {
+            setFiltro('projectId', v);
+            setExpandedId(null);
+          }}
+        />
+        <FiltroEstado<CertStatus>
+          value={filtros.status as CertStatus | ''}
+          onChange={(v) => setFiltro('status', v)}
+          estados={CERT_STATUSES}
+          etiquetas={CERT_STATUS_LABELS}
+        />
+      </BarraFiltros>
 
       {/* Sin obra seleccionada */}
       {!projectId && (
@@ -1065,55 +1006,103 @@ export default function CertificacionesPage() {
           {certs.length > 0 && (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
               <KpiCard
-                label="Neto certificado"
-                value={formatEur(totalCertificado - totalRetencion)}
-                sub="sin retención"
-                accent="text-emerald-600"
+                etiqueta="Neto certificado"
+                valor={formatEur(totalCertificado - totalRetencion)}
+                detalle="sin retención"
+                tono="bueno"
               />
               <KpiCard
-                label="Retención acumulada"
-                value={formatEur(totalRetencion)}
-                sub="pendiente de liberar"
-                accent="text-amber-600"
+                etiqueta="Retención acumulada"
+                valor={formatEur(totalRetencion)}
+                detalle="pendiente de liberar"
+                tono="aviso"
               />
               <KpiCard
-                label="% ejecutado"
-                value={pct(lastPct)}
-                sub={`Cert. nº ${lastCert?.seq ?? 0}`}
+                etiqueta="% ejecutado"
+                valor={pct(lastPct)}
+                detalle={`Cert. nº ${lastCert?.seq ?? 0}`}
               />
               <KpiCard
-                label="Certificaciones"
-                value={String(certs.length)}
-                sub={`${certs.filter((c) => c.status === 'facturada').length} facturadas`}
+                etiqueta="Certificaciones"
+                valor={String(certs.length)}
+                detalle={`${certs.filter((c) => c.status === 'facturada').length} facturadas`}
               />
             </div>
           )}
 
-          {certsQuery.isLoading && <TableSkeleton rows={4} />}
-          {certsQuery.error && (
-            <ErrorBanner message={errText(certsQuery.error)} />
-          )}
-
-          {!certsQuery.isLoading && !certsQuery.error && certs.length === 0 && (
-            <EmptyState
-              icon={<IconClipboard size={40} />}
-              title="Sin certificaciones"
-            >
-              <p className="text-sm text-gray-500">
-                Crea la primera certificación para registrar el avance de la
-                obra
-              </p>
-            </EmptyState>
-          )}
-
-          {certs.length > 0 && (
-            <CertTable
-              certs={certs}
-              onFacturar={setFacturarTarget}
-              onRectify={setRectifyTarget}
-              onDelete={setDeleteTarget}
-            />
-          )}
+          <DataTable
+            etiqueta="Certificaciones"
+            columnas={columnas}
+            filas={listado.filas}
+            idFila={(c) => c.id}
+            cargando={listado.cargando}
+            actualizando={listado.actualizando}
+            error={listado.error}
+            onReintentar={listado.reintentar}
+            hayFiltros={filtros.status !== ''}
+            paginacion={{
+              page: listado.page,
+              pageSize: listado.pageSize,
+              total: listado.total,
+              onPageChange: listado.setPage,
+              onPageSizeChange: listado.setPageSize,
+            }}
+            vacio={{
+              icono: <IconClipboard size={40} />,
+              titulo: 'Sin certificaciones',
+            }}
+            vacioConFiltros={{
+              titulo: 'Ninguna certificación coincide con el filtro',
+              onLimpiar: () => setFiltro('status', ''),
+            }}
+            idExpandida={expandedId}
+            onExpandir={setExpandedId}
+            filaExpandida={(cert) => (
+              <div className="-mx-6 -my-4">
+                <LinesPanel
+                  certId={cert.id}
+                  editable={
+                    canEditCertification(cert.status) &&
+                    can('editar', 'certificacion')
+                  }
+                />
+              </div>
+            )}
+            acciones={(cert) => (
+              <>
+                {cert.status === 'borrador' &&
+                  can('cambiarEstado', 'certificacion') && (
+                    <button
+                      onClick={() => setFacturarTarget(cert)}
+                      className={btnGhostCls + ' gap-1.5 text-xs'}
+                    >
+                      <IconReceipt size={14} />
+                      Facturar
+                    </button>
+                  )}
+                {cert.status === 'facturada' &&
+                  can('rectificar', 'certificacion') && (
+                    <button
+                      onClick={() => setRectifyTarget(cert)}
+                      className={btnGhostCls + ' gap-1.5 text-xs'}
+                      title="Nueva certificación que fija el acumulado correcto (puede bajar)"
+                    >
+                      Rectificar
+                    </button>
+                  )}
+                {cert.status === 'borrador' &&
+                  can('borrar', 'certificacion') && (
+                    <button
+                      onClick={() => setDeleteTarget(cert)}
+                      className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-500"
+                      title="Eliminar"
+                    >
+                      <IconTrash size={14} />
+                    </button>
+                  )}
+              </>
+            )}
+          />
         </>
       )}
 
