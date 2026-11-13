@@ -1,5 +1,6 @@
 'use client';
 
+import { Autorizado } from '@/components/autorizado';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import {
@@ -102,14 +103,16 @@ export default function PromocionPage() {
             </option>
           ))}
         </select>
-        <button
-          className={btnPrimaryCls}
-          disabled={!projectId}
-          title={!projectId ? 'Elige primero una obra' : undefined}
-          onClick={() => setNewUnitOpen(true)}
-        >
-          <IconPlus size={14} /> Unidad
-        </button>
+        <Autorizado accion="crear">
+          <button
+            className={btnPrimaryCls}
+            disabled={!projectId}
+            title={!projectId ? 'Elige primero una obra' : undefined}
+            onClick={() => setNewUnitOpen(true)}
+          >
+            <IconPlus size={14} /> Unidad
+          </button>
+        </Autorizado>
       </PageHeader>
 
       {commercializationQuery.data && (

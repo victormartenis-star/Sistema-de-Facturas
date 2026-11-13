@@ -1,5 +1,7 @@
 'use client';
 
+import { usePermisos } from '@/lib/permisos';
+import { Autorizado } from '@/components/autorizado';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import {
@@ -54,6 +56,7 @@ function formatBytes(bytes: number): string {
 }
 
 export default function DocumentosPage() {
+  const { can: puede } = usePermisos();
   const qc = useQueryClient();
   const toast = useToast();
   const [search, setSearch] = useState('');
@@ -187,56 +190,60 @@ export default function DocumentosPage() {
       </PageHeader>
 
       {/* Zona de subida */}
-      <div
-        onClick={() => !uploading && inputRef.current?.click()}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragOver(false);
-          handleFiles(e.dataTransfer.files);
-        }}
-        className={`mb-6 cursor-pointer rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-all ${
-          dragOver
-            ? 'scale-[1.01] border-amber-500 bg-amber-50 shadow-lg shadow-amber-100'
-            : 'border-gray-300 bg-white hover:border-amber-400 hover:bg-amber-50/40'
-        }`}
-      >
-        <span
-          className={`mx-auto flex h-14 w-14 items-center justify-center rounded-2xl transition ${
-            dragOver ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-500'
+      <Autorizado accion="crear">
+        <div
+          onClick={() => !uploading && inputRef.current?.click()}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            handleFiles(e.dataTransfer.files);
+          }}
+          className={`mb-6 cursor-pointer rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-all ${
+            dragOver
+              ? 'scale-[1.01] border-amber-500 bg-amber-50 shadow-lg shadow-amber-100'
+              : 'border-gray-300 bg-white hover:border-amber-400 hover:bg-amber-50/40'
           }`}
         >
-          {uploading ? (
-            <IconLoader size={26} className="animate-spin" />
-          ) : (
-            <IconUpload size={26} />
-          )}
-        </span>
-        <p className="mt-4 font-medium text-gray-700">
-          {uploading
-            ? 'Subiendo archivos…'
-            : 'Arrastra aquí facturas, albaranes o tickets, o haz clic para elegir archivos'}
-        </p>
-        <p className="mt-1 text-xs text-gray-500">
-          PDF, JPG, PNG o WEBP · máximo {DOCUMENT_MAX_SIZE_MB} MB por archivo ·
-          los duplicados se detectan automáticamente
-        </p>
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          accept={DOCUMENT_ACCEPTED_MIME_TYPES.join(',')}
-          className="hidden"
-          onChange={(e) => {
-            handleFiles(e.target.files);
-            e.target.value = '';
-          }}
-        />
-      </div>
+          <span
+            className={`mx-auto flex h-14 w-14 items-center justify-center rounded-2xl transition ${
+              dragOver
+                ? 'bg-amber-500 text-white'
+                : 'bg-amber-50 text-amber-500'
+            }`}
+          >
+            {uploading ? (
+              <IconLoader size={26} className="animate-spin" />
+            ) : (
+              <IconUpload size={26} />
+            )}
+          </span>
+          <p className="mt-4 font-medium text-gray-700">
+            {uploading
+              ? 'Subiendo archivos…'
+              : 'Arrastra aquí facturas, albaranes o tickets, o haz clic para elegir archivos'}
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            PDF, JPG, PNG o WEBP · máximo {DOCUMENT_MAX_SIZE_MB} MB por archivo
+            · los duplicados se detectan automáticamente
+          </p>
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            accept={DOCUMENT_ACCEPTED_MIME_TYPES.join(',')}
+            className="hidden"
+            onChange={(e) => {
+              handleFiles(e.target.files);
+              e.target.value = '';
+            }}
+          />
+        </div>
+      </Autorizado>
 
       {results.length > 0 && (
         <div className="animate-fade-in-up mb-6 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm shadow-sm">
@@ -334,6 +341,7 @@ export default function DocumentosPage() {
                     <select
                       className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs transition focus:border-amber-500 focus:outline-none"
                       value={d.docType ?? ''}
+                      disabled={!puede('editar')}
                       onChange={(e) =>
                         updateMutation.mutate({
                           id: d.id,
@@ -361,6 +369,7 @@ export default function DocumentosPage() {
                     <select
                       className="max-w-40 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs transition focus:border-amber-500 focus:outline-none"
                       value={d.projectId ?? ''}
+                      disabled={!puede('editar')}
                       onChange={(e) =>
                         updateMutation.mutate({
                           id: d.id,
@@ -393,13 +402,15 @@ export default function DocumentosPage() {
                       >
                         <IconEye size={15} />
                       </a>
-                      <button
-                        onClick={() => setDeleteTarget(d)}
-                        title="Eliminar"
-                        className="rounded-md p-1.5 text-gray-400 transition hover:bg-red-50 hover:text-red-600"
-                      >
-                        <IconTrash size={15} />
-                      </button>
+                      <Autorizado accion="borrar">
+                        <button
+                          onClick={() => setDeleteTarget(d)}
+                          title="Eliminar"
+                          className="rounded-md p-1.5 text-gray-400 transition hover:bg-red-50 hover:text-red-600"
+                        >
+                          <IconTrash size={15} />
+                        </button>
+                      </Autorizado>
                     </div>
                   </td>
                 </tr>

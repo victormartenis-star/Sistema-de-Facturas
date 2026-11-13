@@ -1,5 +1,6 @@
 'use client';
 
+import { Autorizado } from '@/components/autorizado';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import {
@@ -331,17 +332,19 @@ export default function CumplimientoPage() {
                   <p className="text-sm text-gray-500">
                     Este contacto no está sujeto a control documental.
                   </p>
-                  <button
-                    onClick={() =>
-                      requireMutation.mutate({
-                        id: selected.contactId,
-                        required: true,
-                      })
-                    }
-                    className={`${btnPrimaryCls} mt-3`}
-                  >
-                    Exigir homologación
-                  </button>
+                  <Autorizado accion="cambiarEstado">
+                    <button
+                      onClick={() =>
+                        requireMutation.mutate({
+                          id: selected.contactId,
+                          required: true,
+                        })
+                      }
+                      className={`${btnPrimaryCls} mt-3`}
+                    >
+                      Exigir homologación
+                    </button>
+                  </Autorizado>
                 </div>
               ) : (
                 <>
@@ -349,13 +352,15 @@ export default function CumplimientoPage() {
                     <h3 className="text-xs font-semibold tracking-wide text-gray-500 uppercase">
                       Documentación
                     </h3>
-                    <button
-                      onClick={() => setDocModal(true)}
-                      className={`${btnGhostCls} ml-auto`}
-                    >
-                      <IconPlus size={14} />
-                      Añadir
-                    </button>
+                    <Autorizado accion="crear">
+                      <button
+                        onClick={() => setDocModal(true)}
+                        className={`${btnGhostCls} ml-auto`}
+                      >
+                        <IconPlus size={14} />
+                        Añadir
+                      </button>
+                    </Autorizado>
                   </div>
 
                   {selected.docs.length === 0 ? (
@@ -395,71 +400,75 @@ export default function CumplimientoPage() {
                           >
                             {COMPLIANCE_DOC_STATUS_LABELS[doc.status]}
                           </span>
-                          <button
-                            onClick={() => setRemoveDocId(doc.id)}
-                            title="Eliminar documento"
-                            className="shrink-0 rounded-md p-1.5 text-gray-400 transition hover:bg-red-50 hover:text-red-600"
-                          >
-                            <IconTrash size={14} />
-                          </button>
+                          <Autorizado accion="borrar">
+                            <button
+                              onClick={() => setRemoveDocId(doc.id)}
+                              title="Eliminar documento"
+                              className="shrink-0 rounded-md p-1.5 text-gray-400 transition hover:bg-red-50 hover:text-red-600"
+                            >
+                              <IconTrash size={14} />
+                            </button>
+                          </Autorizado>
                         </li>
                       ))}
                     </ul>
                   )}
 
-                  <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-4">
-                    {selected.status === 'bloqueado_manual' ? (
-                      <button
-                        onClick={() =>
-                          unblockMutation.mutate(selected.contactId)
-                        }
-                        className={btnPrimaryCls}
-                      >
-                        <IconCheck size={15} />
-                        Retirar bloqueo
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => setBlockModal(true)}
-                        className={btnGhostCls}
-                      >
-                        <IconLock size={15} />
-                        Bloquear
-                      </button>
-                    )}
-
-                    {selected.waiver ? (
-                      <button
-                        onClick={() =>
-                          revokeWaiverMutation.mutate(selected.contactId)
-                        }
-                        className={btnGhostCls}
-                      >
-                        Revocar exención
-                      </button>
-                    ) : (
-                      selected.blocked && (
+                  <Autorizado accion="cambiarEstado">
+                    <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-4">
+                      {selected.status === 'bloqueado_manual' ? (
                         <button
-                          onClick={() => setWaiverModal(true)}
+                          onClick={() =>
+                            unblockMutation.mutate(selected.contactId)
+                          }
+                          className={btnPrimaryCls}
+                        >
+                          <IconCheck size={15} />
+                          Retirar bloqueo
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setBlockModal(true)}
                           className={btnGhostCls}
                         >
-                          Conceder exención
+                          <IconLock size={15} />
+                          Bloquear
                         </button>
-                      )
-                    )}
+                      )}
 
-                    <button
-                      onClick={() =>
-                        requireMutation.mutate({
-                          id: selected.contactId,
-                          required: false,
-                        })
-                      }
-                      className={`${btnGhostCls} ml-auto text-gray-400`}
-                    >
-                      No exigir homologación
-                    </button>
-                  </div>
+                      {selected.waiver ? (
+                        <button
+                          onClick={() =>
+                            revokeWaiverMutation.mutate(selected.contactId)
+                          }
+                          className={btnGhostCls}
+                        >
+                          Revocar exención
+                        </button>
+                      ) : (
+                        selected.blocked && (
+                          <button
+                            onClick={() => setWaiverModal(true)}
+                            className={btnGhostCls}
+                          >
+                            Conceder exención
+                          </button>
+                        )
+                      )}
+
+                      <button
+                        onClick={() =>
+                          requireMutation.mutate({
+                            id: selected.contactId,
+                            required: false,
+                          })
+                        }
+                        className={`${btnGhostCls} ml-auto text-gray-400`}
+                      >
+                        No exigir homologación
+                      </button>
+                    </div>
+                  </Autorizado>
                 </>
               )}
             </div>

@@ -1,5 +1,7 @@
 'use client';
 
+import { usePermisos } from '@/lib/permisos';
+import { Autorizado } from '@/components/autorizado';
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -146,6 +148,7 @@ function NewActaModal({
 }
 
 function RepasosPanel({ actaId }: { actaId: string }) {
+  const { can: puede } = usePermisos();
   const qc = useQueryClient();
   const toast = useToast();
   const [descripcion, setDescripcion] = useState('');
@@ -209,6 +212,7 @@ function RepasosPanel({ actaId }: { actaId: string }) {
             <input
               type="checkbox"
               checked={r.estado === 'subsanado'}
+              disabled={!puede('editar')}
               onChange={(e) =>
                 toggleMutation.mutate({ id: r.id, subsanado: e.target.checked })
               }
@@ -240,28 +244,30 @@ function RepasosPanel({ actaId }: { actaId: string }) {
         )}
       </ul>
 
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!descripcion.trim()) return;
-          addMutation.mutate({ descripcion });
-        }}
-      >
-        <input
-          className={fieldCls + ' flex-1'}
-          placeholder="Añadir repaso (defecto a subsanar)…"
-          value={descripcion}
-          onChange={(e) => setDescripcion(e.target.value)}
-        />
-        <button
-          type="submit"
-          className={btnGhostCls}
-          disabled={addMutation.isPending}
+      <Autorizado accion="crear">
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!descripcion.trim()) return;
+            addMutation.mutate({ descripcion });
+          }}
         >
-          Añadir
-        </button>
-      </form>
+          <input
+            className={fieldCls + ' flex-1'}
+            placeholder="Añadir repaso (defecto a subsanar)…"
+            value={descripcion}
+            onChange={(e) => setDescripcion(e.target.value)}
+          />
+          <button
+            type="submit"
+            className={btnGhostCls}
+            disabled={addMutation.isPending}
+          >
+            Añadir
+          </button>
+        </form>
+      </Autorizado>
 
       <div className="flex items-center justify-between pt-1">
         <p className="text-xs text-gray-500">
@@ -269,14 +275,16 @@ function RepasosPanel({ actaId }: { actaId: string }) {
             ? 'Todos los repasos están subsanados.'
             : `${pendientes} repaso${pendientes !== 1 ? 's' : ''} pendiente${pendientes !== 1 ? 's' : ''}.`}
         </p>
-        <button
-          className={btnPrimaryCls}
-          disabled={firmarMutation.isPending}
-          onClick={() => firmarMutation.mutate()}
-        >
-          <IconCheck size={14} />
-          Firmar acta
-        </button>
+        <Autorizado accion="cambiarEstado">
+          <button
+            className={btnPrimaryCls}
+            disabled={firmarMutation.isPending}
+            onClick={() => firmarMutation.mutate()}
+          >
+            <IconCheck size={14} />
+            Firmar acta
+          </button>
+        </Autorizado>
       </div>
     </div>
   );
@@ -332,9 +340,11 @@ export default function ActasRecepcionPage() {
             </option>
           ))}
         </select>
-        <button className={btnPrimaryCls} onClick={() => setFormOpen(true)}>
-          Nueva acta
-        </button>
+        <Autorizado accion="crear">
+          <button className={btnPrimaryCls} onClick={() => setFormOpen(true)}>
+            Nueva acta
+          </button>
+        </Autorizado>
       </PageHeader>
 
       {query.isError && <ErrorBanner message={errText(query.error)} />}

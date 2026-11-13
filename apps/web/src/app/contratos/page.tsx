@@ -1,5 +1,6 @@
 'use client';
 
+import { Autorizado } from '@/components/autorizado';
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -288,48 +289,50 @@ function ContratoRow({ contrato }: { contrato: ContratoObraDto }) {
         <EstadoBadge estado={contrato.estadoFirma} />
       </td>
       <td className="px-4 py-3 text-right">
-        <div className="flex items-center justify-end gap-2">
-          <input
-            ref={fileRef}
-            type="file"
-            accept="application/pdf"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleUpload(file);
-              e.target.value = '';
-            }}
-          />
-          <button
-            className={btnGhostCls + ' gap-1 text-xs'}
-            disabled={uploading}
-            onClick={() => fileRef.current?.click()}
-          >
-            <IconUpload size={12} />
-            {uploading ? 'Subiendo…' : 'PDF'}
-          </button>
-          {puedeFirmar && (
+        <Autorizado accion="editar">
+          <div className="flex items-center justify-end gap-2">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/pdf"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleUpload(file);
+                e.target.value = '';
+              }}
+            />
             <button
-              className={btnGhostCls + ' text-xs text-emerald-600'}
-              disabled={updateMutation.isPending}
-              onClick={() =>
-                updateMutation.mutate(
-                  {
-                    estadoFirma: 'firmado',
-                    fechaFirma:
-                      contrato.fechaFirma ??
-                      new Date().toISOString().slice(0, 10),
-                  },
-                  {
-                    onSuccess: () => toast('Contrato firmado'),
-                  },
-                )
-              }
+              className={btnGhostCls + ' gap-1 text-xs'}
+              disabled={uploading}
+              onClick={() => fileRef.current?.click()}
             >
-              Firmar
+              <IconUpload size={12} />
+              {uploading ? 'Subiendo…' : 'PDF'}
             </button>
-          )}
-        </div>
+            {puedeFirmar && (
+              <button
+                className={btnGhostCls + ' text-xs text-emerald-600'}
+                disabled={updateMutation.isPending}
+                onClick={() =>
+                  updateMutation.mutate(
+                    {
+                      estadoFirma: 'firmado',
+                      fechaFirma:
+                        contrato.fechaFirma ??
+                        new Date().toISOString().slice(0, 10),
+                    },
+                    {
+                      onSuccess: () => toast('Contrato firmado'),
+                    },
+                  )
+                }
+              >
+                Firmar
+              </button>
+            )}
+          </div>
+        </Autorizado>
       </td>
     </tr>
   );
@@ -384,9 +387,11 @@ export default function ContratosObraPage() {
             </option>
           ))}
         </select>
-        <button className={btnPrimaryCls} onClick={() => setFormOpen(true)}>
-          Nuevo contrato
-        </button>
+        <Autorizado accion="crear">
+          <button className={btnPrimaryCls} onClick={() => setFormOpen(true)}>
+            Nuevo contrato
+          </button>
+        </Autorizado>
       </PageHeader>
 
       {query.isError && <ErrorBanner message={errText(query.error)} />}

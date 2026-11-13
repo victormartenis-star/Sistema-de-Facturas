@@ -1,5 +1,6 @@
 'use client';
 
+import { Autorizado } from '@/components/autorizado';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import {
@@ -120,20 +121,22 @@ export default function EsgPage() {
               <h2 className="flex items-center gap-1.5 text-sm font-semibold">
                 <IconLeaf size={14} /> Huella de carbono
               </h2>
-              <div className="flex gap-2">
-                <button
-                  className={btnGhostCls}
-                  onClick={() => setFactorOpen(true)}
-                >
-                  <IconPlus size={13} /> Factor
-                </button>
-                <button
-                  className={btnPrimaryCls}
-                  onClick={() => setRegistroOpen(true)}
-                >
-                  <IconPlus size={13} /> Consumo
-                </button>
-              </div>
+              <Autorizado accion="crear">
+                <div className="flex gap-2">
+                  <button
+                    className={btnGhostCls}
+                    onClick={() => setFactorOpen(true)}
+                  >
+                    <IconPlus size={13} /> Factor
+                  </button>
+                  <button
+                    className={btnPrimaryCls}
+                    onClick={() => setRegistroOpen(true)}
+                  >
+                    <IconPlus size={13} /> Consumo
+                  </button>
+                </div>
+              </Autorizado>
             </div>
 
             {informeQuery.data && (
@@ -173,12 +176,14 @@ export default function EsgPage() {
                       {r.cantidad} {r.unidad} → {r.emisionesKgCo2e.toFixed(2)}{' '}
                       kg CO₂e
                     </span>
-                    <button
-                      className="text-gray-400 hover:text-red-600"
-                      onClick={() => removeRegistroMutation.mutate(r.id)}
-                    >
-                      <IconTrash size={13} />
-                    </button>
+                    <Autorizado accion="borrar">
+                      <button
+                        className="text-gray-400 hover:text-red-600"
+                        onClick={() => removeRegistroMutation.mutate(r.id)}
+                      >
+                        <IconTrash size={13} />
+                      </button>
+                    </Autorizado>
                   </div>
                 </div>
               ))}
@@ -196,12 +201,14 @@ export default function EsgPage() {
               <h2 className="text-sm font-semibold">
                 Trazabilidad de residuos (RCD)
               </h2>
-              <button
-                className={btnPrimaryCls}
-                onClick={() => setValeOpen(true)}
-              >
-                <IconPlus size={13} /> Vale
-              </button>
+              <Autorizado accion="crear">
+                <button
+                  className={btnPrimaryCls}
+                  onClick={() => setValeOpen(true)}
+                >
+                  <IconPlus size={13} /> Vale
+                </button>
+              </Autorizado>
             </div>
 
             {informeRcdQuery.data && (
@@ -258,12 +265,14 @@ export default function EsgPage() {
                     >
                       {RCD_TREATMENT_LABELS[v.treatment]}
                     </span>
-                    <button
-                      className="text-gray-400 hover:text-red-600"
-                      onClick={() => removeValeMutation.mutate(v.id)}
-                    >
-                      <IconTrash size={13} />
-                    </button>
+                    <Autorizado accion="borrar">
+                      <button
+                        className="text-gray-400 hover:text-red-600"
+                        onClick={() => removeValeMutation.mutate(v.id)}
+                      >
+                        <IconTrash size={13} />
+                      </button>
+                    </Autorizado>
                   </div>
                 </div>
               ))}

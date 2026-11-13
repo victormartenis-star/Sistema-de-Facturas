@@ -1,5 +1,6 @@
 'use client';
 
+import { Autorizado } from '@/components/autorizado';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { REAL_ESTATE_RESERVATION_STATUS_LABELS } from '@erp/shared';
@@ -114,12 +115,14 @@ export function UnitDetailPanel({ unitId }: { unitId: string }) {
             <p className="text-sm text-gray-500">{formatEur(unit.salePrice)}</p>
           </div>
           {unit.status === 'disponible' && (
-            <button
-              className={btnPrimaryCls}
-              onClick={() => setReserveOpen(true)}
-            >
-              <IconPlus size={14} /> Reservar
-            </button>
+            <Autorizado accion="crear">
+              <button
+                className={btnPrimaryCls}
+                onClick={() => setReserveOpen(true)}
+              >
+                <IconPlus size={14} /> Reservar
+              </button>
+            </Autorizado>
           )}
         </div>
       </div>
@@ -154,54 +157,56 @@ export function UnitDetailPanel({ unitId }: { unitId: string }) {
             />
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            {reservation.status === 'reservada' && (
-              <>
+          <Autorizado accion="cambiarEstado">
+            <div className="mt-4 flex flex-wrap gap-2">
+              {reservation.status === 'reservada' && (
+                <>
+                  <button
+                    className={btnGhostCls}
+                    onClick={() => {
+                      const date = prompt(
+                        'Fecha del contrato privado (AAAA-MM-DD)',
+                      );
+                      if (date) contractMutation.mutate(date);
+                    }}
+                  >
+                    Firmar contrato privado
+                  </button>
+                  <button
+                    className="rounded-lg px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                    onClick={() => cancelMutation.mutate()}
+                  >
+                    Cancelar reserva
+                  </button>
+                </>
+              )}
+              {reservation.status === 'contrato_firmado' && (
                 <button
-                  className={btnGhostCls}
+                  className={btnPrimaryCls}
                   onClick={() => {
-                    const date = prompt(
-                      'Fecha del contrato privado (AAAA-MM-DD)',
-                    );
-                    if (date) contractMutation.mutate(date);
+                    const date = prompt('Fecha de escritura (AAAA-MM-DD)');
+                    if (date) deedMutation.mutate(date);
                   }}
                 >
-                  Firmar contrato privado
+                  Escriturar
                 </button>
+              )}
+              {reservation.status === 'escriturada' && !handoverQuery.data && (
                 <button
-                  className="rounded-lg px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
-                  onClick={() => cancelMutation.mutate()}
+                  className={btnPrimaryCls}
+                  onClick={() => setHandoverOpen(true)}
                 >
-                  Cancelar reserva
+                  <IconKey size={14} /> Entregar llaves
                 </button>
-              </>
-            )}
-            {reservation.status === 'contrato_firmado' && (
-              <button
-                className={btnPrimaryCls}
-                onClick={() => {
-                  const date = prompt('Fecha de escritura (AAAA-MM-DD)');
-                  if (date) deedMutation.mutate(date);
-                }}
-              >
-                Escriturar
-              </button>
-            )}
-            {reservation.status === 'escriturada' && !handoverQuery.data && (
-              <button
-                className={btnPrimaryCls}
-                onClick={() => setHandoverOpen(true)}
-              >
-                <IconKey size={14} /> Entregar llaves
-              </button>
-            )}
-            {handoverQuery.data && (
-              <p className="flex items-center gap-1.5 text-xs text-emerald-600">
-                <IconCheck size={13} /> Llaves entregadas el{' '}
-                {formatDate(handoverQuery.data.handoverDate)}
-              </p>
-            )}
-          </div>
+              )}
+              {handoverQuery.data && (
+                <p className="flex items-center gap-1.5 text-xs text-emerald-600">
+                  <IconCheck size={13} /> Llaves entregadas el{' '}
+                  {formatDate(handoverQuery.data.handoverDate)}
+                </p>
+              )}
+            </div>
+          </Autorizado>
 
           {/* Plan de cobros */}
           <div className="mt-5">
@@ -209,12 +214,14 @@ export function UnitDetailPanel({ unitId }: { unitId: string }) {
               <h4 className="text-xs font-semibold tracking-wide text-gray-500 uppercase">
                 Plan de cobros
               </h4>
-              <button
-                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-amber-600 hover:bg-amber-50"
-                onClick={() => setPaymentOpen(true)}
-              >
-                <IconPlus size={12} /> Hito
-              </button>
+              <Autorizado accion="crear">
+                <button
+                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-amber-600 hover:bg-amber-50"
+                  onClick={() => setPaymentOpen(true)}
+                >
+                  <IconPlus size={12} /> Hito
+                </button>
+              </Autorizado>
             </div>
             <div className="divide-y divide-gray-100">
               {(paymentsQuery.data ?? []).map((p) => (
@@ -231,12 +238,14 @@ export function UnitDetailPanel({ unitId }: { unitId: string }) {
                   <div className="flex items-center gap-2">
                     <span className="tabular-nums">{formatEur(p.amount)}</span>
                     {p.status === 'previsto' ? (
-                      <button
-                        className="rounded-md px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50"
-                        onClick={() => payMutation.mutate(p.id)}
-                      >
-                        Cobrar
-                      </button>
+                      <Autorizado accion="cambiarEstado">
+                        <button
+                          className="rounded-md px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50"
+                          onClick={() => payMutation.mutate(p.id)}
+                        >
+                          Cobrar
+                        </button>
+                      </Autorizado>
                     ) : (
                       <span className="text-xs text-emerald-600">Cobrado</span>
                     )}

@@ -1,5 +1,6 @@
 'use client';
 
+import { Autorizado } from '@/components/autorizado';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import {
@@ -59,18 +60,20 @@ export function PostventaPanel({ unitId }: { unitId: string | null }) {
         <h3 className="flex items-center gap-1.5 text-sm font-semibold">
           <IconWrench size={14} /> Postventa
         </h3>
-        <button
-          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-amber-600 hover:bg-amber-50 disabled:opacity-40"
-          disabled={!unitId}
-          title={
-            !unitId
-              ? 'Elige una unidad para reportar una incidencia'
-              : undefined
-          }
-          onClick={() => setOpen(true)}
-        >
-          <IconPlus size={12} /> Incidencia
-        </button>
+        <Autorizado accion="crear">
+          <button
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-amber-600 hover:bg-amber-50 disabled:opacity-40"
+            disabled={!unitId}
+            title={
+              !unitId
+                ? 'Elige una unidad para reportar una incidencia'
+                : undefined
+            }
+            onClick={() => setOpen(true)}
+          >
+            <IconPlus size={12} /> Incidencia
+          </button>
+        </Autorizado>
       </div>
       <div className="divide-y divide-gray-100">
         {(incidentsQuery.data ?? []).map((i) => (
@@ -96,29 +99,31 @@ export function PostventaPanel({ unitId }: { unitId: string | null }) {
                 )}
               </span>
               {i.status !== 'cerrada' && (
-                <div className="flex gap-2">
-                  {i.status === 'abierta' && (
+                <Autorizado accion="cambiarEstado">
+                  <div className="flex gap-2">
+                    {i.status === 'abierta' && (
+                      <button
+                        className="text-amber-600 hover:underline"
+                        onClick={() =>
+                          statusMutation.mutate({
+                            id: i.id,
+                            status: 'en_reparacion',
+                          })
+                        }
+                      >
+                        En reparación
+                      </button>
+                    )}
                     <button
-                      className="text-amber-600 hover:underline"
+                      className="text-emerald-600 hover:underline"
                       onClick={() =>
-                        statusMutation.mutate({
-                          id: i.id,
-                          status: 'en_reparacion',
-                        })
+                        statusMutation.mutate({ id: i.id, status: 'cerrada' })
                       }
                     >
-                      En reparación
+                      Cerrar
                     </button>
-                  )}
-                  <button
-                    className="text-emerald-600 hover:underline"
-                    onClick={() =>
-                      statusMutation.mutate({ id: i.id, status: 'cerrada' })
-                    }
-                  >
-                    Cerrar
-                  </button>
-                </div>
+                  </div>
+                </Autorizado>
               )}
             </div>
           </div>

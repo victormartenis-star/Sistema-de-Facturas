@@ -1,5 +1,6 @@
 'use client';
 
+import { Autorizado } from '@/components/autorizado';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -322,12 +323,14 @@ export default function ComparativoDetailPage() {
           ← Comparativos
         </Link>
         {abierto && (
-          <button
-            className={btnPrimaryCls}
-            onClick={() => setOfertaModalOpen(true)}
-          >
-            Añadir oferta
-          </button>
+          <Autorizado accion="crear">
+            <button
+              className={btnPrimaryCls}
+              onClick={() => setOfertaModalOpen(true)}
+            >
+              Añadir oferta
+            </button>
+          </Autorizado>
         )}
       </PageHeader>
 
@@ -474,19 +477,23 @@ export default function ComparativoDetailPage() {
                   <td className="px-4 py-3" />
                   {matriz.ofertas.map((o) => (
                     <td key={o.ofertaId} className="px-4 py-3 text-right">
-                      <button
-                        className="mr-2 inline-flex items-center gap-1 rounded-lg bg-emerald-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-600"
-                        onClick={() => setAdjudicando(o)}
-                      >
-                        <IconCheck size={12} /> Adjudicar
-                      </button>
-                      <button
-                        className="text-xs text-gray-400 hover:text-red-600"
-                        onClick={() => removeOfertaMutation.mutate(o.ofertaId)}
-                        title="Quitar oferta"
-                      >
-                        <IconTrash size={13} />
-                      </button>
+                      <Autorizado accion="cambiarEstado">
+                        <button
+                          className="mr-2 inline-flex items-center gap-1 rounded-lg bg-emerald-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-600"
+                          onClick={() => setAdjudicando(o)}
+                        >
+                          <IconCheck size={12} /> Adjudicar
+                        </button>
+                        <button
+                          className="text-xs text-gray-400 hover:text-red-600"
+                          onClick={() =>
+                            removeOfertaMutation.mutate(o.ofertaId)
+                          }
+                          title="Quitar oferta"
+                        >
+                          <IconTrash size={13} />
+                        </button>
+                      </Autorizado>
                     </td>
                   ))}
                 </tr>

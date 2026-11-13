@@ -1,5 +1,6 @@
 'use client';
 
+import { Autorizado } from '@/components/autorizado';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
@@ -445,13 +446,15 @@ function InformeMensualPanel({ rows }: { rows: ObrasKpiRow[] }) {
             ))}
           </select>
         </label>
-        <button
-          onClick={generar}
-          disabled={loading || !mes}
-          className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-40"
-        >
-          {loading ? 'Generando…' : 'Generar informe'}
-        </button>
+        <Autorizado accion="crear">
+          <button
+            onClick={generar}
+            disabled={loading || !mes}
+            className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-40"
+          >
+            {loading ? 'Generando…' : 'Generar informe'}
+          </button>
+        </Autorizado>
       </div>
 
       {error && <ErrorBanner message={error} />}
@@ -462,34 +465,36 @@ function InformeMensualPanel({ rows }: { rows: ObrasKpiRow[] }) {
             {markdown}
           </p>
 
-          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-gray-200 pt-3">
-            <input
-              value={emailTo}
-              onChange={(e) => setEmailTo(e.target.value)}
-              placeholder="Enviar por email a… (separa varios con coma)"
-              className="min-w-[220px] flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
-            />
-            <button
-              onClick={enviar}
-              disabled={emailStatus === 'sending' || !emailTo.trim()}
-              className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-40"
-            >
-              {emailStatus === 'sending' ? 'Enviando…' : 'Enviar por email'}
-            </button>
-            {emailStatus === 'sent' && (
-              <span className="text-xs text-emerald-600">Enviado.</span>
-            )}
-            {emailStatus === 'no-smtp' && (
-              <span className="text-xs text-amber-600">
-                No hay email configurado en el servidor (SMTP).
-              </span>
-            )}
-            {emailStatus === 'error' && (
-              <span className="text-xs text-red-600">
-                No se ha podido enviar.
-              </span>
-            )}
-          </div>
+          <Autorizado accion="crear">
+            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-gray-200 pt-3">
+              <input
+                value={emailTo}
+                onChange={(e) => setEmailTo(e.target.value)}
+                placeholder="Enviar por email a… (separa varios con coma)"
+                className="min-w-[220px] flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
+              />
+              <button
+                onClick={enviar}
+                disabled={emailStatus === 'sending' || !emailTo.trim()}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-40"
+              >
+                {emailStatus === 'sending' ? 'Enviando…' : 'Enviar por email'}
+              </button>
+              {emailStatus === 'sent' && (
+                <span className="text-xs text-emerald-600">Enviado.</span>
+              )}
+              {emailStatus === 'no-smtp' && (
+                <span className="text-xs text-amber-600">
+                  No hay email configurado en el servidor (SMTP).
+                </span>
+              )}
+              {emailStatus === 'error' && (
+                <span className="text-xs text-red-600">
+                  No se ha podido enviar.
+                </span>
+              )}
+            </div>
+          </Autorizado>
         </div>
       )}
     </section>

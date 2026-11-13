@@ -1,5 +1,6 @@
 'use client';
 
+import { Autorizado } from '@/components/autorizado';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Fragment, useState } from 'react';
 import {
@@ -216,7 +217,9 @@ function MantenimientosPanel({ equipoId }: { equipoId: string }) {
 
   return (
     <div className="space-y-3 border-t border-gray-100 bg-gray-50/60 p-4">
-      <MantenimientoQuickForm equipoId={equipoId} />
+      <Autorizado accion="crear">
+        <MantenimientoQuickForm equipoId={equipoId} />
+      </Autorizado>
       {query.isLoading && <TableSkeleton rows={2} />}
       {mantenimientos.length > 0 && (
         <ul className="space-y-1 text-xs text-gray-600">
@@ -271,10 +274,12 @@ export default function EquiposPage() {
       </PageHeader>
 
       <div className="space-y-8">
-        <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-          <h2 className="mb-3 text-sm font-semibold">Nuevo equipo</h2>
-          <EquipoQuickForm />
-        </section>
+        <Autorizado accion="crear">
+          <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+            <h2 className="mb-3 text-sm font-semibold">Nuevo equipo</h2>
+            <EquipoQuickForm />
+          </section>
+        </Autorizado>
 
         <section>
           <h2 className="mb-2 text-sm font-semibold">Equipos dados de alta</h2>

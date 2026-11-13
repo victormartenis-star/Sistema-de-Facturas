@@ -1,5 +1,6 @@
 'use client';
 
+import { Autorizado } from '@/components/autorizado';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import {
@@ -52,18 +53,20 @@ export default function InversoresPage() {
         title="Inversores"
         subtitle="Cuentas en participación, aportaciones, reparto de dividendos y TIR/VAN"
       >
-        <button
-          className={btnGhostCls}
-          onClick={() => setNewInvestorOpen(true)}
-        >
-          <IconPlus size={14} /> Inversor
-        </button>
-        <button
-          className={btnPrimaryCls}
-          onClick={() => setNewAccountOpen(true)}
-        >
-          <IconPlus size={14} /> Cuenta
-        </button>
+        <Autorizado accion="crear">
+          <button
+            className={btnGhostCls}
+            onClick={() => setNewInvestorOpen(true)}
+          >
+            <IconPlus size={14} /> Inversor
+          </button>
+          <button
+            className={btnPrimaryCls}
+            onClick={() => setNewAccountOpen(true)}
+          >
+            <IconPlus size={14} /> Cuenta
+          </button>
+        </Autorizado>
       </PageHeader>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[280px_1fr]">
@@ -414,12 +417,14 @@ function AccountDetail({
       <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-semibold">Participaciones</h3>
-          <button
-            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-amber-600 hover:bg-amber-50"
-            onClick={() => setParticipationOpen(true)}
-          >
-            <IconPlus size={13} /> Añadir inversor
-          </button>
+          <Autorizado accion="crear">
+            <button
+              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-amber-600 hover:bg-amber-50"
+              onClick={() => setParticipationOpen(true)}
+            >
+              <IconPlus size={13} /> Añadir inversor
+            </button>
+          </Autorizado>
         </div>
         <div className="divide-y divide-gray-100">
           {participations.map((p) => (
@@ -440,20 +445,22 @@ function AccountDetail({
       <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-semibold">Movimientos</h3>
-          <div className="flex gap-2">
-            <button
-              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100"
-              onClick={() => setCashflowOpen(true)}
-            >
-              <IconPlus size={13} /> Movimiento
-            </button>
-            <button
-              className="inline-flex items-center gap-1 rounded-lg bg-amber-500 px-2 py-1 text-xs font-medium text-white hover:bg-amber-600"
-              onClick={() => setDistributeOpen(true)}
-            >
-              Repartir dividendo
-            </button>
-          </div>
+          <Autorizado accion="crear">
+            <div className="flex gap-2">
+              <button
+                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100"
+                onClick={() => setCashflowOpen(true)}
+              >
+                <IconPlus size={13} /> Movimiento
+              </button>
+              <button
+                className="inline-flex items-center gap-1 rounded-lg bg-amber-500 px-2 py-1 text-xs font-medium text-white hover:bg-amber-600"
+                onClick={() => setDistributeOpen(true)}
+              >
+                Repartir dividendo
+              </button>
+            </div>
+          </Autorizado>
         </div>
         <div className="divide-y divide-gray-100">
           {(cashflowsQuery.data ?? []).map((c) => (

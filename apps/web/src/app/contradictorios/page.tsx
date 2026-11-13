@@ -1,5 +1,6 @@
 'use client';
 
+import { Autorizado } from '@/components/autorizado';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import {
@@ -85,14 +86,16 @@ export default function ContradictoriosPage() {
             </option>
           ))}
         </select>
-        <button
-          className={btnPrimaryCls}
-          disabled={!projectId}
-          title={!projectId ? 'Elige primero una obra' : undefined}
-          onClick={() => setNewOpen(true)}
-        >
-          <IconPlus size={14} /> Nuevo
-        </button>
+        <Autorizado accion="crear">
+          <button
+            className={btnPrimaryCls}
+            disabled={!projectId}
+            title={!projectId ? 'Elige primero una obra' : undefined}
+            onClick={() => setNewOpen(true)}
+          >
+            <IconPlus size={14} /> Nuevo
+          </button>
+        </Autorizado>
       </PageHeader>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[340px_1fr]">
@@ -234,32 +237,34 @@ function ChangeOrderDetail({
           </p>
         )}
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          {changeOrder.estado === 'borrador' && (
-            <>
+        <Autorizado accion="cambiarEstado">
+          <div className="mt-4 flex flex-wrap gap-2">
+            {changeOrder.estado === 'borrador' && (
+              <>
+                <button
+                  className={btnPrimaryCls}
+                  onClick={() => setEnviarOpen(true)}
+                >
+                  Enviar a Dirección Facultativa
+                </button>
+                <button
+                  className="rounded-lg px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                  onClick={() => cancelMutation.mutate()}
+                >
+                  <IconTrash size={13} className="mr-1 inline" /> Eliminar
+                </button>
+              </>
+            )}
+            {changeOrder.estado === 'enviado_df' && (
               <button
                 className={btnPrimaryCls}
-                onClick={() => setEnviarOpen(true)}
+                onClick={() => setResolverOpen(true)}
               >
-                Enviar a Dirección Facultativa
+                Registrar resolución de la DF
               </button>
-              <button
-                className="rounded-lg px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
-                onClick={() => cancelMutation.mutate()}
-              >
-                <IconTrash size={13} className="mr-1 inline" /> Eliminar
-              </button>
-            </>
-          )}
-          {changeOrder.estado === 'enviado_df' && (
-            <button
-              className={btnPrimaryCls}
-              onClick={() => setResolverOpen(true)}
-            >
-              Registrar resolución de la DF
-            </button>
-          )}
-        </div>
+            )}
+          </div>
+        </Autorizado>
       </div>
 
       <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">

@@ -1,5 +1,6 @@
 'use client';
 
+import { Autorizado } from '@/components/autorizado';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
@@ -237,9 +238,11 @@ export default function ComparativosPage() {
         >
           Recomendaciones de ahorro
         </Link>
-        <button className={btnPrimaryCls} onClick={() => setFormOpen(true)}>
-          Nuevo comparativo
-        </button>
+        <Autorizado accion="crear">
+          <button className={btnPrimaryCls} onClick={() => setFormOpen(true)}>
+            Nuevo comparativo
+          </button>
+        </Autorizado>
       </PageHeader>
 
       {query.isError && <ErrorBanner message={errText(query.error)} />}

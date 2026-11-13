@@ -11,6 +11,7 @@
  * esperar al cron, útil para comprobar un umbral recién cambiado.
  */
 
+import { usePermisos } from '@/lib/permisos';
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -177,7 +178,9 @@ function RuleRow({ rule, canEdit }: { rule: AlertRuleDto; canEdit: boolean }) {
 export default function AlertasConfigPage() {
   const { user } = useAuth();
   const toast = useToast();
-  const canEdit = Boolean(user?.role && MANAGE_ROLES.includes(user.role));
+  const { can: puede } = usePermisos();
+  const canEdit =
+    Boolean(user?.role && MANAGE_ROLES.includes(user.role)) && puede('editar');
 
   const query = useQuery({
     queryKey: ['alerts-rules'],

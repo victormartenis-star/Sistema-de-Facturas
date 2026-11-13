@@ -1,5 +1,7 @@
 'use client';
 
+import { usePermisos } from '@/lib/permisos';
+import { Autorizado } from '@/components/autorizado';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import {
@@ -343,6 +345,7 @@ function AccesoObrasModal({
 
 // ── Página principal ────────────────────────────────────────────────────────
 export default function UsuariosPage() {
+  const { can: puede } = usePermisos();
   const qc = useQueryClient();
   const toast = useToast();
   const [createOpen, setCreateOpen] = useState(false);
@@ -386,10 +389,12 @@ export default function UsuariosPage() {
         subtitle="Gestión de accesos y roles del equipo"
         count={userList.length}
       >
-        <button className={btnPrimaryCls} onClick={() => setCreateOpen(true)}>
-          <IconPlus size={16} />
-          Nuevo usuario
-        </button>
+        <Autorizado accion="crear">
+          <button className={btnPrimaryCls} onClick={() => setCreateOpen(true)}>
+            <IconPlus size={16} />
+            Nuevo usuario
+          </button>
+        </Autorizado>
       </PageHeader>
 
       {query.isError && (
@@ -446,7 +451,9 @@ export default function UsuariosPage() {
                   <td className="px-4 py-3">
                     <button
                       onClick={() => toggleActiveMutation.mutate(u)}
-                      disabled={toggleActiveMutation.isPending}
+                      disabled={
+                        toggleActiveMutation.isPending || !puede('editar')
+                      }
                       className={`flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium transition ${
                         u.isActive
                           ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
@@ -466,29 +473,31 @@ export default function UsuariosPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-2">
-                      {u.role === 'obra' && (
+                      <Autorizado accion="editar">
+                        {u.role === 'obra' && (
+                          <button
+                            onClick={() => setAccessUser(u)}
+                            className="rounded px-2 py-1 text-xs text-sky-600 hover:bg-sky-50"
+                            title="Gestionar acceso a obras"
+                          >
+                            Obras
+                          </button>
+                        )}
                         <button
-                          onClick={() => setAccessUser(u)}
-                          className="rounded px-2 py-1 text-xs text-sky-600 hover:bg-sky-50"
-                          title="Gestionar acceso a obras"
+                          onClick={() => setEditing(u)}
+                          className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                          title="Editar"
                         >
-                          Obras
+                          <IconPencil size={15} />
                         </button>
-                      )}
-                      <button
-                        onClick={() => setEditing(u)}
-                        className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                        title="Editar"
-                      >
-                        <IconPencil size={15} />
-                      </button>
-                      <button
-                        onClick={() => setDeleteTarget(u)}
-                        className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                        title="Eliminar"
-                      >
-                        <IconTrash size={15} />
-                      </button>
+                        <button
+                          onClick={() => setDeleteTarget(u)}
+                          className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                          title="Eliminar"
+                        >
+                          <IconTrash size={15} />
+                        </button>
+                      </Autorizado>
                     </div>
                   </td>
                 </tr>

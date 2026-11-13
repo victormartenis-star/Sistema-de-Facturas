@@ -1,5 +1,6 @@
 'use client';
 
+import { Autorizado } from '@/components/autorizado';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -255,11 +256,13 @@ export default function IncidenciasPRLPage() {
         </select>
       </PageHeader>
 
-      <AltaRapidaForm
-        onSave={(v) => createMutation.mutate(v)}
-        saving={createMutation.isPending}
-        error={(createMutation.error as ApiError | null) ?? null}
-      />
+      <Autorizado accion="crear">
+        <AltaRapidaForm
+          onSave={(v) => createMutation.mutate(v)}
+          saving={createMutation.isPending}
+          error={(createMutation.error as ApiError | null) ?? null}
+        />
+      </Autorizado>
 
       {query.isError && <ErrorBanner message={errText(query.error)} />}
       {query.isLoading && <TableSkeleton />}
@@ -331,32 +334,36 @@ export default function IncidenciasPRLPage() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     {i.estado !== 'cerrada' && (
-                      <div className="flex justify-end gap-2">
-                        {i.estado === 'abierta' && (
+                      <Autorizado accion="cambiarEstado">
+                        <div className="flex justify-end gap-2">
+                          {i.estado === 'abierta' && (
+                            <button
+                              className={btnGhostCls + ' text-xs'}
+                              onClick={() =>
+                                updateMutation.mutate({
+                                  id: i.id,
+                                  input: { estado: 'en_subsanacion' },
+                                })
+                              }
+                            >
+                              En subsanación
+                            </button>
+                          )}
                           <button
-                            className={btnGhostCls + ' text-xs'}
+                            className={
+                              btnGhostCls + ' text-xs text-emerald-600'
+                            }
                             onClick={() =>
                               updateMutation.mutate({
                                 id: i.id,
-                                input: { estado: 'en_subsanacion' },
+                                input: { estado: 'cerrada' },
                               })
                             }
                           >
-                            En subsanación
+                            Cerrar
                           </button>
-                        )}
-                        <button
-                          className={btnGhostCls + ' text-xs text-emerald-600'}
-                          onClick={() =>
-                            updateMutation.mutate({
-                              id: i.id,
-                              input: { estado: 'cerrada' },
-                            })
-                          }
-                        >
-                          Cerrar
-                        </button>
-                      </div>
+                        </div>
+                      </Autorizado>
                     )}
                   </td>
                 </tr>

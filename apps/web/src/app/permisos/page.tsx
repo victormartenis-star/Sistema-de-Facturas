@@ -1,5 +1,6 @@
 'use client';
 
+import { Autorizado } from '@/components/autorizado';
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -304,9 +305,11 @@ export default function PermisosPage() {
             </option>
           ))}
         </select>
-        <button className={btnPrimaryCls} onClick={() => setFormOpen(true)}>
-          Nuevo trámite
-        </button>
+        <Autorizado accion="crear">
+          <button className={btnPrimaryCls} onClick={() => setFormOpen(true)}>
+            Nuevo trámite
+          </button>
+        </Autorizado>
       </PageHeader>
 
       {alertas.length > 0 && (

@@ -1,5 +1,6 @@
 'use client';
 
+import { Autorizado } from '@/components/autorizado';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import {
@@ -190,14 +191,16 @@ export default function AuditoriaContratosPage() {
             </div>
           </div>
 
-          <button
-            className={`${btnPrimaryCls} mt-4 w-full justify-center`}
-            disabled={!canSubmit || auditMutation.isPending}
-            onClick={() => auditMutation.mutate()}
-          >
-            <IconSparkles size={15} />
-            {auditMutation.isPending ? 'Auditando…' : 'Auditar'}
-          </button>
+          <Autorizado accion="crear">
+            <button
+              className={`${btnPrimaryCls} mt-4 w-full justify-center`}
+              disabled={!canSubmit || auditMutation.isPending}
+              onClick={() => auditMutation.mutate()}
+            >
+              <IconSparkles size={15} />
+              {auditMutation.isPending ? 'Auditando…' : 'Auditar'}
+            </button>
+          </Autorizado>
         </div>
 
         {/* Resultado de la última auditoría */}

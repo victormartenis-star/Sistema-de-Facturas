@@ -1,5 +1,6 @@
 'use client';
 
+import { Autorizado } from '@/components/autorizado';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
@@ -90,14 +91,16 @@ export default function AhorroPage() {
           </div>
 
           <div className="mt-6 flex items-center gap-3">
-            <button
-              onClick={generarResumen}
-              disabled={resumenLoading}
-              className="flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-40"
-            >
-              <IconSparkles size={14} />
-              {resumenLoading ? 'Redactando…' : 'Resumir con IA'}
-            </button>
+            <Autorizado accion="crear">
+              <button
+                onClick={generarResumen}
+                disabled={resumenLoading}
+                className="flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-40"
+              >
+                <IconSparkles size={14} />
+                {resumenLoading ? 'Redactando…' : 'Resumir con IA'}
+              </button>
+            </Autorizado>
           </div>
           {resumenError && <ErrorBanner message={resumenError} />}
           {resumen && (

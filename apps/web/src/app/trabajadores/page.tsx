@@ -1,5 +1,6 @@
 'use client';
 
+import { Autorizado } from '@/components/autorizado';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import {
@@ -158,10 +159,12 @@ export default function TrabajadoresPage() {
       </PageHeader>
 
       <div className="space-y-8">
-        <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-          <h2 className="mb-3 text-sm font-semibold">Nuevo trabajador</h2>
-          <TrabajadorQuickForm />
-        </section>
+        <Autorizado accion="crear">
+          <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+            <h2 className="mb-3 text-sm font-semibold">Nuevo trabajador</h2>
+            <TrabajadorQuickForm />
+          </section>
+        </Autorizado>
 
         <section>
           <h2 className="mb-2 text-sm font-semibold">
@@ -225,14 +228,16 @@ export default function TrabajadoresPage() {
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         {t.activo && (
-                          <button
-                            type="button"
-                            onClick={() => bajaMutation.mutate(t.id)}
-                            className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-red-600"
-                          >
-                            <IconTrash size={12} />
-                            Dar de baja
-                          </button>
+                          <Autorizado accion="borrar">
+                            <button
+                              type="button"
+                              onClick={() => bajaMutation.mutate(t.id)}
+                              className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-red-600"
+                            >
+                              <IconTrash size={12} />
+                              Dar de baja
+                            </button>
+                          </Autorizado>
                         )}
                       </td>
                     </tr>
