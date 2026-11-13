@@ -155,7 +155,13 @@ export function parseBc3(raw: string): Bc3ParseResult {
     }
 
     const unitPrice = concept.price;
-    const totalAmount = parseFloat((unitPrice * quantity).toFixed(2));
+    // Un concepto con hijos es un contenedor (capítulo): su precio es el
+    // agregado de sus partidas y sumarlo además de ellas inflaría el
+    // presupuesto. Solo las hojas aportan importe.
+    const esContenedor = (children.get(code)?.length ?? 0) > 0;
+    const totalAmount = esContenedor
+      ? 0
+      : parseFloat((unitPrice * quantity).toFixed(2));
 
     items.push({
       code: concept.code,

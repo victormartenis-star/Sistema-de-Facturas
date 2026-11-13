@@ -1,11 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { and, eq, isNull, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import {
   budgetItems,
   budgets,
   certifications,
   invoiceLines,
   invoices,
+  paymentMilestones,
   partesMaquinaria,
   partesPersonal,
   projectPhases,
@@ -13,12 +14,24 @@ import {
 } from '@erp/db';
 import {
   CostControlDto,
+  DesviacionPartidaInput,
+  FacturaIvaInput,
+  ObraEconomicsDto,
+  RetencionMovimiento,
   FasePlanificadaInput,
   SobrecostePartidaInput,
   buildCurvaS,
   buildPlannedByPeriod,
   computeCostControl,
+  computeDesviacionPorPartida,
+  computeIvaObra,
+  computeMargenBrutoObra,
+  computeRetencionesObra,
   computeSobrecostePorPartida,
+  fromCents,
+  sumCents,
+  toCents,
+  todayIso,
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
 
@@ -77,50 +90,8 @@ export class CostControlService {
     }
 
     // AC: facturas de compra no anuladas + partes de personal + partes de maquinaria.
-    const invoiceRows = await this.dbs.db
-      .select({
-        phaseId: invoiceLines.phaseId,
-        total: sql<string>`coalesce(sum(${invoiceLines.baseAmount}), 0)`,
-      })
-      .from(invoiceLines)
-      .innerJoin(invoices, eq(invoiceLines.invoiceId, invoices.id))
-      .where(
-        and(
-          eq(invoiceLines.projectId, projectId),
-          eq(invoices.kind, 'compra'),
-          ne(invoices.status, 'anulada'),
-          isNull(invoices.deletedAt),
-        ),
-      )
-      .groupBy(invoiceLines.phaseId);
-
-    const personalRows = await this.dbs.db
-      .select({
-        phaseId: partesPersonal.phaseId,
-        total: sql<string>`coalesce(sum(${partesPersonal.totalCost}), 0)`,
-      })
-      .from(partesPersonal)
-      .where(
-        and(
-          eq(partesPersonal.projectId, projectId),
-          isNull(partesPersonal.deletedAt),
-        ),
-      )
-      .groupBy(partesPersonal.phaseId);
-
-    const maquinariaRows = await this.dbs.db
-      .select({
-        phaseId: partesMaquinaria.phaseId,
-        total: sql<string>`coalesce(sum(${partesMaquinaria.totalCost}), 0)`,
-      })
-      .from(partesMaquinaria)
-      .where(
-        and(
-          eq(partesMaquinaria.projectId, projectId),
-          isNull(partesMaquinaria.deletedAt),
-        ),
-      )
-      .groupBy(partesMaquinaria.phaseId);
+    const { invoiceRows, personalRows, maquinariaRows } =
+      await this.loadCostRows(projectId);
 
     const facturasCompra = invoiceRows.reduce((s, r) => s + Number(r.total), 0);
     const partesPersonalTotal = personalRows.reduce(
@@ -195,6 +166,273 @@ export class CostControlService {
       sobrecostePorPartida,
       curvaS,
       curvaPlanificadaPartidasSinFechas,
+    };
+  }
+
+  /** Coste real agrupado por partida y origen (`phaseId` nulo = sin partida). */
+  private async loadCostRows(projectId: string, soloBorrador = false) {
+    const invoiceRows = await this.dbs.db
+      .select({
+        phaseId: invoiceLines.phaseId,
+        total: sql<string>`coalesce(sum(${invoiceLines.baseAmount}), 0)`,
+      })
+      .from(invoiceLines)
+      .innerJoin(invoices, eq(invoiceLines.invoiceId, invoices.id))
+      .where(
+        and(
+          eq(invoiceLines.projectId, projectId),
+          eq(invoices.kind, 'compra'),
+          soloBorrador
+            ? eq(invoices.status, 'borrador')
+            : ne(invoices.status, 'anulada'),
+          isNull(invoices.deletedAt),
+        ),
+      )
+      .groupBy(invoiceLines.phaseId);
+
+    const personalRows = await this.dbs.db
+      .select({
+        phaseId: partesPersonal.phaseId,
+        total: sql<string>`coalesce(sum(${partesPersonal.totalCost}), 0)`,
+      })
+      .from(partesPersonal)
+      .where(
+        and(
+          eq(partesPersonal.projectId, projectId),
+          isNull(partesPersonal.deletedAt),
+        ),
+      )
+      .groupBy(partesPersonal.phaseId);
+
+    const maquinariaRows = await this.dbs.db
+      .select({
+        phaseId: partesMaquinaria.phaseId,
+        total: sql<string>`coalesce(sum(${partesMaquinaria.totalCost}), 0)`,
+      })
+      .from(partesMaquinaria)
+      .where(
+        and(
+          eq(partesMaquinaria.projectId, projectId),
+          isNull(partesMaquinaria.deletedAt),
+        ),
+      )
+      .groupBy(partesMaquinaria.phaseId);
+
+    return { invoiceRows, personalRows, maquinariaRows };
+  }
+
+  /**
+   * Economía de la obra en tiempo real: margen bruto, desviación por partida
+   * (con la fila "Sin partida"), retenciones e IVA. Sin caché: agregados SQL
+   * y reglas puras de `@erp/shared`.
+   */
+  async getEconomics(projectId: string): Promise<ObraEconomicsDto> {
+    const project = await this.findProject(projectId);
+
+    const phases = await this.dbs.db
+      .select()
+      .from(projectPhases)
+      .where(
+        and(
+          eq(projectPhases.projectId, projectId),
+          isNull(projectPhases.deletedAt),
+        ),
+      );
+
+    // Presupuesto por partida: el del presupuesto activo; sin él, el de cada partida.
+    const [activeBudget] = await this.dbs.db
+      .select({ id: budgets.id })
+      .from(budgets)
+      .where(
+        and(
+          eq(budgets.projectId, projectId),
+          eq(budgets.status, 'activo'),
+          isNull(budgets.deletedAt),
+        ),
+      )
+      .limit(1);
+    const budgetByPhase = new Map<string | null, bigint>();
+    if (activeBudget) {
+      const rows = await this.dbs.db
+        .select({
+          phaseId: budgetItems.phaseId,
+          total: sql<string>`coalesce(sum(${budgetItems.totalAmount}), 0)`,
+        })
+        .from(budgetItems)
+        .where(eq(budgetItems.budgetId, activeBudget.id))
+        .groupBy(budgetItems.phaseId);
+      for (const r of rows) budgetByPhase.set(r.phaseId, toCents(r.total));
+    } else {
+      for (const ph of phases) {
+        budgetByPhase.set(ph.id, toCents(ph.budgetAmount ?? 0));
+      }
+    }
+
+    // Costes por partida y origen.
+    const { invoiceRows, personalRows, maquinariaRows } =
+      await this.loadCostRows(projectId);
+    const { invoiceRows: borradorRows } = await this.loadCostRows(
+      projectId,
+      true,
+    );
+    type Origen = 'facturasCompra' | 'partesPersonal' | 'partesMaquinaria';
+    const costes = new Map<string | null, Record<Origen, bigint>>();
+    const imputa = (
+      rows: { phaseId: string | null; total: string }[],
+      origen: Origen,
+    ) => {
+      for (const r of rows) {
+        const fila = costes.get(r.phaseId) ?? {
+          facturasCompra: 0n,
+          partesPersonal: 0n,
+          partesMaquinaria: 0n,
+        };
+        fila[origen] += toCents(r.total);
+        costes.set(r.phaseId, fila);
+      }
+    };
+    imputa(invoiceRows, 'facturasCompra');
+    imputa(personalRows, 'partesPersonal');
+    imputa(maquinariaRows, 'partesMaquinaria');
+
+    const cero = {
+      facturasCompra: 0n,
+      partesPersonal: 0n,
+      partesMaquinaria: 0n,
+    };
+    const filaDe = (
+      phaseId: string | null,
+      key: string | null,
+      code: string,
+      name: string,
+    ): DesviacionPartidaInput => {
+      const c = costes.get(key) ?? cero;
+      return {
+        phaseId,
+        code,
+        name,
+        budget: fromCents(budgetByPhase.get(key) ?? 0n),
+        facturasCompra: fromCents(c.facturasCompra),
+        partesPersonal: fromCents(c.partesPersonal),
+        partesMaquinaria: fromCents(c.partesMaquinaria),
+      };
+    };
+    const desviacionRows = phases.map((ph) =>
+      filaDe(ph.id, ph.id, ph.code, ph.name),
+    );
+    // Sin partida (o de una partida ya borrada): todo cae en "Sin partida".
+    const idsPartidas = new Set(phases.map((ph) => ph.id));
+    for (const key of new Set([...budgetByPhase.keys(), ...costes.keys()])) {
+      if (key !== null && idsPartidas.has(key)) continue;
+      desviacionRows.push(filaDe(null, key, '', ''));
+    }
+
+    const totalOrigen = (o: Origen) =>
+      fromCents(sumCents([...costes.values()].map((c) => c[o])));
+
+    // EV: última certificación (mayor seq) de la obra.
+    const [lastCert] = await this.dbs.db
+      .select({ cumulativeAmount: certifications.cumulativeAmount })
+      .from(certifications)
+      .where(
+        and(
+          eq(certifications.projectId, projectId),
+          isNull(certifications.deletedAt),
+        ),
+      )
+      .orderBy(sql`${certifications.seq} desc`)
+      .limit(1);
+
+    // Facturación emitida (aprobada, pagada o rectificada); las rectificativas
+    // entran con su signo, así original y rectificativa netean.
+    const lineasEmitidas = await this.dbs.db
+      .select({
+        invoiceId: invoiceLines.invoiceId,
+        kind: invoices.kind,
+        isp: invoices.isp,
+        baseAmount: invoiceLines.baseAmount,
+        vatPct: invoiceLines.vatPct,
+      })
+      .from(invoiceLines)
+      .innerJoin(invoices, eq(invoiceLines.invoiceId, invoices.id))
+      .where(
+        and(
+          eq(invoiceLines.projectId, projectId),
+          inArray(invoices.status, ['aprobada', 'pagada', 'rectificada']),
+          isNull(invoices.deletedAt),
+        ),
+      );
+    const facturadoVenta = sumCents(
+      lineasEmitidas
+        .filter((l) => l.kind === 'venta')
+        .map((l) => toCents(l.baseAmount)),
+    );
+    const porFactura = new Map<string, FacturaIvaInput>();
+    for (const l of lineasEmitidas) {
+      const f = porFactura.get(l.invoiceId) ?? {
+        kind: l.kind,
+        isp: l.isp,
+        lines: [],
+      };
+      f.lines.push({
+        baseAmount: Number(l.baseAmount),
+        vatPct: Number(l.vatPct),
+      });
+      porFactura.set(l.invoiceId, f);
+    }
+
+    // Retenciones: vencimientos de retención de las facturas (no anuladas)
+    // con líneas en la obra. Una factura repartida entre obras cuenta entera
+    // en cada una: limitación conocida.
+    const idsFacturas = (
+      await this.dbs.db
+        .selectDistinct({ id: invoices.id })
+        .from(invoiceLines)
+        .innerJoin(invoices, eq(invoiceLines.invoiceId, invoices.id))
+        .where(
+          and(
+            eq(invoiceLines.projectId, projectId),
+            ne(invoices.status, 'anulada'),
+            isNull(invoices.deletedAt),
+          ),
+        )
+    ).map((r) => r.id);
+    const movimientos: RetencionMovimiento[] =
+      idsFacturas.length === 0
+        ? []
+        : await this.dbs.db
+            .select({
+              direction: paymentMilestones.direction,
+              amount: paymentMilestones.amount,
+              dueDate: paymentMilestones.dueDate,
+              status: paymentMilestones.status,
+            })
+            .from(paymentMilestones)
+            .where(
+              and(
+                inArray(paymentMilestones.invoiceId, idsFacturas),
+                eq(paymentMilestones.kind, 'retencion'),
+              ),
+            );
+
+    return {
+      projectId: project.id,
+      generadoEn: new Date().toISOString(),
+      margen: computeMargenBrutoObra({
+        certificado: lastCert?.cumulativeAmount ?? 0,
+        facturadoVenta: fromCents(facturadoVenta),
+        costes: {
+          facturasCompra: totalOrigen('facturasCompra'),
+          partesPersonal: totalOrigen('partesPersonal'),
+          partesMaquinaria: totalOrigen('partesMaquinaria'),
+        },
+        facturasCompraEnBorrador: fromCents(
+          sumCents(borradorRows.map((r) => toCents(r.total))),
+        ),
+      }),
+      desviaciones: computeDesviacionPorPartida(desviacionRows),
+      retenciones: computeRetencionesObra(movimientos, todayIso()),
+      iva: computeIvaObra([...porFactura.values()]),
     };
   }
 

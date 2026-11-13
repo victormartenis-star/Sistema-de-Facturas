@@ -15,6 +15,8 @@ import {
   type CertificationDto,
   type CertificationCreateInput,
   type CertificationInvoiceInput,
+  type CertificationRectifyInput,
+  canEditCertification,
   type CertificationLineDto,
   type CertificationLineCreateInput,
 } from '@erp/shared';
@@ -23,12 +25,14 @@ import {
   certificationsApi,
   certificationLinesApi,
   contactsApi,
+  exportsApi,
   formatDate,
   formatEur,
   projectsApi,
 } from '@/lib/api';
 import { useToast } from '@/components/toast';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { MOTIVO_MAX, MOTIVO_MIN } from '@/components/reason-dialog';
 import {
   IconChevronDown,
   IconChevronUp,
@@ -530,7 +534,13 @@ function NuevaLineaModal({
 
 // ─── Panel de líneas ──────────────────────────────────────────────────────────
 
-function LinesPanel({ certId }: { certId: string }) {
+function LinesPanel({
+  certId,
+  editable,
+}: {
+  certId: string;
+  editable: boolean;
+}) {
   const toast = useToast();
   const qc = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
@@ -558,13 +568,15 @@ function LinesPanel({ certId }: { certId: string }) {
         <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
           Líneas de certificación ({lines.length})
         </p>
-        <button
-          onClick={() => setAddOpen(true)}
-          className={btnGhostCls + ' gap-1 text-xs'}
-        >
-          <IconPlus size={12} />
-          Añadir línea
-        </button>
+        {editable && (
+          <button
+            onClick={() => setAddOpen(true)}
+            className={btnGhostCls + ' gap-1 text-xs'}
+          >
+            <IconPlus size={12} />
+            Añadir línea
+          </button>
+        )}
       </div>
 
       {linesQuery.isLoading && (
@@ -604,13 +616,15 @@ function LinesPanel({ certId }: { certId: string }) {
                   {formatEur(ln.cumulativeAmount)}
                 </td>
                 <td className="py-1">
-                  <button
-                    onClick={() => removeLine.mutate(ln.id)}
-                    className="rounded p-0.5 text-gray-300 hover:text-red-500"
-                    title="Eliminar línea"
-                  >
-                    <IconTrash size={12} />
-                  </button>
+                  {editable && (
+                    <button
+                      onClick={() => removeLine.mutate(ln.id)}
+                      className="rounded p-0.5 text-gray-300 hover:text-red-500"
+                      title="Eliminar línea"
+                    >
+                      <IconTrash size={12} />
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -654,15 +668,156 @@ function KpiCard({
   );
 }
 
+// ─── Modal rectificar certificación ───────────────────────────────────────────
+
+function RectificarCertModal({
+  open,
+  cert,
+  onSuccess,
+  onClose,
+}: {
+  open: boolean;
+  cert: CertificationDto | null;
+  onSuccess: () => void;
+  onClose: () => void;
+}) {
+  const toast = useToast();
+  const [certDate, setCertDate] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
+  const [cumulativePct, setCumulativePct] = useState('');
+  const [motivo, setMotivo] = useState('');
+  const [notes, setNotes] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: (input: CertificationRectifyInput) =>
+      certificationsApi.rectify(cert!.id, input),
+    onSuccess: () => {
+      toast('Certificación rectificativa creada en borrador');
+      setCumulativePct('');
+      setMotivo('');
+      setNotes('');
+      onSuccess();
+      onClose();
+    },
+    onError: (e) => toast(errText(e), 'error'),
+  });
+
+  const pctVal = parseFloat(cumulativePct);
+  const pctOk = Number.isFinite(pctVal) && pctVal >= 0 && pctVal <= 100;
+  const motivoOk = motivo.trim().length >= MOTIVO_MIN;
+
+  if (!cert) return null;
+
+  return (
+    <Modal
+      open={open}
+      title={`Rectificar la certificación nº ${cert.seq}`}
+      onClose={onClose}
+    >
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          mutation.mutate({
+            certDate,
+            cumulativePct: pctVal,
+            motivo: motivo.trim(),
+            notes: notes.trim() || null,
+          });
+        }}
+      >
+        <p className="text-sm text-gray-500">
+          Indica el % acumulado correcto a origen (actual:{' '}
+          {cert.cumulativePct.toFixed(2)} %). Puede ser menor: el periodo sale
+          negativo y, al facturarla, se genera una factura rectificativa por
+          diferencias.
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className={labelCls} htmlFor="rc-fecha">
+              Fecha
+            </label>
+            <input
+              id="rc-fecha"
+              type="date"
+              value={certDate}
+              onChange={(e) => setCertDate(e.target.value)}
+              className={fieldCls}
+              required
+            />
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="rc-pct">
+              % acumulado correcto
+            </label>
+            <input
+              id="rc-pct"
+              type="number"
+              step="0.01"
+              min="0"
+              max="100"
+              value={cumulativePct}
+              onChange={(e) => setCumulativePct(e.target.value)}
+              className={fieldCls}
+              required
+            />
+          </div>
+        </div>
+        <div>
+          <label className={labelCls} htmlFor="rc-motivo">
+            Motivo
+          </label>
+          <textarea
+            id="rc-motivo"
+            rows={2}
+            maxLength={MOTIVO_MAX}
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            className={fieldCls}
+            placeholder={`Mínimo ${MOTIVO_MIN} caracteres`}
+          />
+        </div>
+        <div>
+          <label className={labelCls} htmlFor="rc-notas">
+            Notas (opcional)
+          </label>
+          <input
+            id="rc-notas"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className={fieldCls}
+          />
+        </div>
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className={btnGhostCls}>
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            disabled={mutation.isPending || !pctOk || !motivoOk}
+            className={btnPrimaryCls + ' disabled:opacity-60'}
+          >
+            Crear rectificativa
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 // ─── Tabla de certificaciones ──────────────────────────────────────────────────
 
 interface CertTableProps {
   certs: CertificationDto[];
   onFacturar: (c: CertificationDto) => void;
+  onRectify: (c: CertificationDto) => void;
   onDelete: (c: CertificationDto) => void;
 }
 
-function CertTable({ certs, onFacturar, onDelete }: CertTableProps) {
+function CertTable({ certs, onFacturar, onRectify, onDelete }: CertTableProps) {
+  const seqDe = (id: string | null) =>
+    certs.find((c) => c.id === id)?.seq ?? null;
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   return (
@@ -689,6 +844,14 @@ function CertTable({ certs, onFacturar, onDelete }: CertTableProps) {
               >
                 <td className="px-4 py-3 text-center font-semibold text-amber-600">
                   {cert.seq}
+                  {cert.rectifiesCertificationId && (
+                    <div
+                      className="text-[10px] font-medium text-amber-700"
+                      title={cert.rectificationReason ?? undefined}
+                    >
+                      rectifica nº {seqDe(cert.rectifiesCertificationId) ?? '?'}
+                    </div>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-gray-600">
                   {formatDate(cert.certDate)}
@@ -738,6 +901,15 @@ function CertTable({ certs, onFacturar, onDelete }: CertTableProps) {
                         Facturar
                       </button>
                     )}
+                    {cert.status === 'facturada' && (
+                      <button
+                        onClick={() => onRectify(cert)}
+                        className={btnGhostCls + ' gap-1.5 text-xs'}
+                        title="Nueva certificación que fija el acumulado correcto (puede bajar)"
+                      >
+                        Rectificar
+                      </button>
+                    )}
                     {cert.status === 'borrador' && (
                       <button
                         onClick={() => onDelete(cert)}
@@ -753,7 +925,10 @@ function CertTable({ certs, onFacturar, onDelete }: CertTableProps) {
               {expandedId === cert.id && (
                 <tr key={`${cert.id}-lines`}>
                   <td colSpan={8} className="p-0">
-                    <LinesPanel certId={cert.id} />
+                    <LinesPanel
+                      certId={cert.id}
+                      editable={canEditCertification(cert.status)}
+                    />
                   </td>
                 </tr>
               )}
@@ -774,6 +949,9 @@ export default function CertificacionesPage() {
   const [projectId, setProjectId] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [facturarTarget, setFacturarTarget] = useState<CertificationDto | null>(
+    null,
+  );
+  const [rectifyTarget, setRectifyTarget] = useState<CertificationDto | null>(
     null,
   );
   const [deleteTarget, setDeleteTarget] = useState<CertificationDto | null>(
@@ -826,6 +1004,18 @@ export default function CertificacionesPage() {
         title="Certificaciones"
         subtitle="Avance a origen por obra con facturación automática"
       >
+        {projectId && (
+          <button
+            onClick={() =>
+              exportsApi
+                .download('certificaciones', { projectId })
+                .catch((e) => toast(errText(e), 'error'))
+            }
+            className={btnGhostCls}
+          >
+            Exportar CSV
+          </button>
+        )}
         {projectId && (
           <button
             onClick={() => setCreateOpen(true)}
@@ -920,6 +1110,7 @@ export default function CertificacionesPage() {
             <CertTable
               certs={certs}
               onFacturar={setFacturarTarget}
+              onRectify={setRectifyTarget}
               onDelete={setDeleteTarget}
             />
           )}
@@ -941,6 +1132,13 @@ export default function CertificacionesPage() {
         contacts={contactsQuery.data ?? []}
         onSuccess={invalidate}
         onClose={() => setFacturarTarget(null)}
+      />
+
+      <RectificarCertModal
+        open={!!rectifyTarget}
+        cert={rectifyTarget}
+        onSuccess={invalidate}
+        onClose={() => setRectifyTarget(null)}
       />
 
       <ConfirmDialog

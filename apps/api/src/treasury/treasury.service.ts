@@ -33,7 +33,9 @@ import {
   addMonths,
   bankAccountCreateSchema,
   bankAccountUpdateSchema,
+  InvoiceStatus,
   hasAllowedProject,
+  invoiceStatusFromMilestones,
   round2,
   setPaymentInstrumentSchema,
   startOfMonth,
@@ -387,7 +389,14 @@ export class TreasuryService {
         })
         .where(eq(paymentMilestones.id, id));
 
-      // La factura queda pagada cuando no le quedan vencimientos previstos
+      // La factura queda pagada cuando no le quedan vencimientos previstos.
+      // Se bloquea la fila y el estado lo decide la regla pura: una factura
+      // en borrador o anulada no se toca.
+      const [invoice] = await tx
+        .select({ status: invoices.status })
+        .from(invoices)
+        .where(eq(invoices.id, row.invoiceId))
+        .for('update');
       const [pending] = await tx
         .select({ id: paymentMilestones.id })
         .from(paymentMilestones)
@@ -398,15 +407,18 @@ export class TreasuryService {
           ),
         )
         .limit(1);
-      await tx
-        .update(invoices)
-        .set({
-          status: pending ? 'aprobada' : 'pagada',
-          updatedAt: new Date(),
-        })
-        .where(
-          and(eq(invoices.id, row.invoiceId), ne(invoices.status, 'anulada')),
-        );
+      const next = invoice
+        ? invoiceStatusFromMilestones(
+            invoice.status as InvoiceStatus,
+            Boolean(pending),
+          )
+        : null;
+      if (next && next !== invoice.status) {
+        await tx
+          .update(invoices)
+          .set({ status: next, updatedAt: new Date() })
+          .where(eq(invoices.id, row.invoiceId));
+      }
     });
   }
 

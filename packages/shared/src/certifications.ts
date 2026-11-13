@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { type Transiciones, puedeTransitar } from './maquina-estados';
 
 /**
  * Certificaciones de obra con facturación a origen:
@@ -13,6 +14,49 @@ export const CERT_STATUS_LABELS: Record<CertStatus, string> = {
   borrador: 'Borrador',
   facturada: 'Facturada',
 };
+
+/**
+ * Transiciones de la certificación: borrador → facturada (`facturar`) y
+ * facturada → borrador solo por sistema, cuando su factura se rectifica.
+ */
+export const CERT_TRANSITIONS: Transiciones<CertStatus> = {
+  borrador: ['facturada'],
+  facturada: ['borrador'],
+};
+
+export function canTransitionCertification(
+  from: CertStatus,
+  to: CertStatus,
+): boolean {
+  return puedeTransitar(CERT_TRANSITIONS, from, to);
+}
+
+/** Crear/editar/borrar líneas y borrar la certificación: solo en borrador. */
+export function canEditCertification(status: CertStatus): boolean {
+  return status === 'borrador';
+}
+
+/**
+ * Motivo de rechazo del % a origen, o `null`. Una certificación normal debe
+ * superar el % anterior; una rectificativa puede bajar o igualarlo (nunca
+ * superarlo: para subir se certifica normalmente).
+ */
+export function certificationPctBlockReason(i: {
+  cumulativePct: number;
+  previousPct: number;
+  isRectification: boolean;
+}): string | null {
+  if (i.isRectification) {
+    if (i.cumulativePct > i.previousPct) {
+      return `Una certificación rectificativa no puede superar el ${i.previousPct.toFixed(2)} % ya certificado`;
+    }
+    return null;
+  }
+  if (i.cumulativePct <= i.previousPct) {
+    return `El % a origen debe superar el ${i.previousPct.toFixed(2)} % ya certificado`;
+  }
+  return null;
+}
 
 const isoDate = z
   .string()
@@ -32,6 +76,20 @@ export const certificationCreateSchema = z.object({
     .nullish(), // si no se indica, se usa la retención de la obra
   notes: z.string().trim().max(1000).nullish(),
 });
+
+/** Certificación rectificativa: fija el nuevo acumulado a origen (puede bajar). */
+export const certificationRectifySchema = z.object({
+  certDate: isoDate,
+  cumulativePct: z
+    .number({ invalid_type_error: 'Debe ser un número' })
+    .min(0, 'Entre 0 y 100')
+    .max(100, 'No puede superar el 100 %'),
+  motivo: z.string().trim().min(5).max(500),
+  notes: z.string().trim().max(1000).nullish(),
+});
+export type CertificationRectifyInput = z.input<
+  typeof certificationRectifySchema
+>;
 
 export type CertificationCreateInput = z.input<
   typeof certificationCreateSchema
@@ -74,6 +132,8 @@ export interface CertificationDto {
   retentionAmount: number;
   status: CertStatus;
   invoiceId: string | null;
+  rectifiesCertificationId: string | null;
+  rectificationReason: string | null;
   notes: string | null;
   createdAt: string;
   updatedAt: string;

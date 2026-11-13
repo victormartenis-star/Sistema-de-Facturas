@@ -34,16 +34,19 @@ const ACTION_STYLES: Record<AuditAction, string> = {
   create: 'bg-emerald-100 text-emerald-700',
   update: 'bg-sky-100 text-sky-700',
   delete: 'bg-red-100 text-red-600',
+  export: 'bg-violet-100 text-violet-700',
 };
 
 const ACTION_LABELS: Record<AuditAction, string> = {
   create: 'Crear',
   update: 'Actualizar',
   delete: 'Eliminar',
+  export: 'Exportar',
 };
 
 const ENTITY_LABELS: Record<string, string> = {
   project: 'Obra',
+  export: 'Exportación',
   budget: 'Presupuesto',
   certification: 'Certificación',
   certification_line: 'Línea cert.',

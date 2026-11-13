@@ -13,11 +13,14 @@ import {
 import {
   DELIVERY_NOTE_STATUSES,
   DeliveryNoteCreateInput,
+  DeliveryNoteReturnInput,
   DeliveryNoteStatus,
   DeliveryNoteUpdateInput,
   deliveryNoteCreateSchema,
+  deliveryNoteReturnSchema,
   deliveryNoteUpdateSchema,
 } from '@erp/shared';
+import { Roles } from '../auth/roles';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { DeliveryNotesService } from './delivery-notes.service';
 
@@ -66,6 +69,17 @@ export class DeliveryNotesController {
   @Post(':id/validar')
   validate(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.validate(id);
+  }
+
+  /** Devuelve un albarán validado (sin factura) a pendiente, con motivo. */
+  @Post(':id/devolver')
+  @Roles('admin', 'gerente', 'administracion')
+  returnToPending(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(deliveryNoteReturnSchema))
+    body: DeliveryNoteReturnInput,
+  ) {
+    return this.service.returnToPending(id, body);
   }
 
   @Delete(':id')

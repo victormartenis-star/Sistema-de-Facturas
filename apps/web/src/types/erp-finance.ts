@@ -6,6 +6,16 @@
  * Los tipos se basan en los esquemas Drizzle ORM y DTOs definidos en @erp/shared.
  */
 
+import type {
+  CertStatus,
+  InvoiceStatus,
+  ObraEconomicsDto,
+  RectificationKind,
+} from '@erp/shared';
+
+/** Estados de factura: se reexportan de @erp/shared (incluye 'rectificada'), no se duplican a mano. */
+export type { InvoiceStatus, ObraEconomicsDto, RectificationKind };
+
 /**
  * Interfaces para Certificaciones de Obra
  * Basadas en CertificationDto del shared package y el esquema Drizzle.
@@ -20,8 +30,12 @@ export interface CertTableRow {
   periodAmount: number;
   retentionPct: number;
   retentionAmount: number;
-  status: 'borrador' | 'facturada';
+  status: CertStatus;
   invoiceId: string | null;
+  /** Certificación a la que rectifica (null si no es rectificativa). */
+  rectifiesCertificationId: string | null;
+  rectificationReason: string | null;
+  previousAmount: number;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
@@ -133,7 +147,7 @@ export interface CertPresupuestoInfo {
 
 export interface CertFilters {
   projectId?: string;
-  status?: 'borrador' | 'facturada';
+  status?: CertStatus;
   search?: string;
 }
 

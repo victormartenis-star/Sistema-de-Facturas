@@ -1,4 +1,5 @@
 import { DOCUMENT_MAX_SIZE_MB } from '@erp/shared';
+import type { ExportRecurso } from '@erp/shared';
 import type { AuditLogDto, AuditQuery, ComplianceAlertDto } from '@erp/shared';
 import type {
   BimElementLinkDto,
@@ -113,6 +114,7 @@ import type {
   BudgetCreateInput,
   BudgetDetailDto,
   BudgetDto,
+  BudgetDuplicateInput,
   BudgetItemCreateInput,
   BudgetItemDto,
   BudgetItemUpdateInput,
@@ -130,6 +132,7 @@ import type {
   ComplianceWaiverInput,
   CertificationDto,
   CertificationInvoiceInput,
+  CertificationRectifyInput,
   CertificationLineDto,
   CertificationLineCreateInput,
   ComparativoAdjudicarInput,
@@ -145,9 +148,11 @@ import type {
   ContactDto,
   ContactUpdateInput,
   CostControlDto,
+  ObraEconomicsDto,
   DeliveryNoteCreateInput,
   DeliveryNoteDto,
   DeliveryNoteStatus,
+  DeliveryNoteReturnInput,
   DeliveryNoteUpdateInput,
   DeviationReportDto,
   DocumentDto,
@@ -157,6 +162,7 @@ import type {
   EquipoUpdateInput,
   ExtractionValidateInput,
   InvoiceCreateInput,
+  InvoiceRectifyInput,
   InvoiceDto,
   InvoiceUpdateInput,
   LoginInput,
@@ -604,6 +610,9 @@ export const trabajadoresApi = {
 export const costControlApi = {
   get: (projectId: string) =>
     request<CostControlDto>(`/projects/${projectId}/cost-control`),
+  /** Margen bruto, desviación por partida, retenciones e IVA de la obra. */
+  economics: (projectId: string) =>
+    request<ObraEconomicsDto>(`/projects/${projectId}/economics`),
 };
 
 export const invoicesApi = {
@@ -630,8 +639,21 @@ export const invoicesApi = {
     request<InvoiceDto>(`/invoices/${id}/aprobar`, { method: 'POST' }),
   markPaid: (id: string) =>
     request<InvoiceDto>(`/invoices/${id}/pagar`, { method: 'POST' }),
-  cancel: (id: string) =>
-    request<InvoiceDto>(`/invoices/${id}/anular`, { method: 'POST' }),
+  /**
+   * Anula la factura. Fuera de borrador la API exige `motivo` (5-500
+   * caracteres); siempre se envía un cuerpo JSON, aunque sea `{}`.
+   */
+  cancel: (id: string, motivo?: string) =>
+    request<InvoiceDto>(`/invoices/${id}/anular`, {
+      method: 'POST',
+      body: JSON.stringify(motivo ? { motivo } : {}),
+    }),
+  /** Crea la factura rectificativa (total o por diferencias) en borrador. */
+  rectify: (id: string, input: InvoiceRectifyInput) =>
+    request<InvoiceDto>(`/invoices/${id}/rectificar`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
   remove: (id: string) =>
     request<void>(`/invoices/${id}`, { method: 'DELETE' }),
 };
@@ -646,6 +668,12 @@ export const certificationsApi = {
     }),
   invoice: (id: string, input: CertificationInvoiceInput) =>
     request<CertificationDto>(`/certifications/${id}/facturar`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  /** Certificación rectificativa: fija un nuevo acumulado a origen (puede bajar). */
+  rectify: (id: string, input: CertificationRectifyInput) =>
+    request<CertificationDto>(`/certifications/${id}/rectificar`, {
       method: 'POST',
       body: JSON.stringify(input),
     }),
@@ -749,6 +777,12 @@ export const deliveryNotesApi = {
   validate: (id: string) =>
     request<DeliveryNoteDto>(`/delivery-notes/${id}/validar`, {
       method: 'POST',
+    }),
+  /** Devuelve un albarán validado (sin factura) a pendiente, con motivo. */
+  returnToPending: (id: string, input: DeliveryNoteReturnInput) =>
+    request<DeliveryNoteDto>(`/delivery-notes/${id}/devolver`, {
+      method: 'POST',
+      body: JSON.stringify(input),
     }),
   remove: (id: string) =>
     request<void>(`/delivery-notes/${id}`, { method: 'DELETE' }),
@@ -1414,6 +1448,13 @@ export const budgetsApi = {
       body: JSON.stringify(input),
     }),
 
+  /** Nueva versión (borrador) con las mismas partidas: así se corrige un presupuesto activo o cerrado. */
+  duplicate: (id: string, input: BudgetDuplicateInput = {}) =>
+    request<BudgetDto>(`/budgets/${id}/duplicar`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
   /** Borrado lógico del presupuesto. */
   remove: (id: string) => request<void>(`/budgets/${id}`, { method: 'DELETE' }),
 
@@ -1668,3 +1709,44 @@ export function formatDate(iso: string | null): string {
   const [y, m, d] = iso.split('-');
   return `${d}/${m}/${y}`;
 }
+
+/**
+ * Exportaciones (CSV con `;` y BOM para Excel, o JSON). Descarga con el token
+ * de la sesión y dispara el guardado en el navegador.
+ */
+export const exportsApi = {
+  download: async (
+    recurso: ExportRecurso,
+    params: Record<string, string | undefined> = {},
+    format: 'csv' | 'json' = 'csv',
+  ): Promise<void> => {
+    const qs = new URLSearchParams({ format });
+    for (const [k, v] of Object.entries(params)) if (v) qs.set(k, v);
+    const session = readStoredSession();
+    const res = await fetch(`${API_URL}/exports/${recurso}?${qs.toString()}`, {
+      headers: session?.accessToken
+        ? { Authorization: `Bearer ${session.accessToken}` }
+        : {},
+    });
+    if (!res.ok) {
+      let message = `Error ${res.status}`;
+      try {
+        const body = await res.json();
+        message = body.message ?? message;
+      } catch {
+        // sin cuerpo JSON
+      }
+      throw new ApiError(message, res.status, []);
+    }
+    const nombre =
+      /filename="([^"]+)"/.exec(
+        res.headers.get('Content-Disposition') ?? '',
+      )?.[1] ?? `${recurso}.${format}`;
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = nombre;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+};

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -10,9 +11,13 @@ import {
   eq,
   ilike,
   inArray,
+  isNotNull,
   isNull,
+  ne,
+  like,
   or,
   SQL,
+  sql,
 } from 'drizzle-orm';
 import {
   Contact,
@@ -28,21 +33,34 @@ import {
   Tx,
 } from '@erp/db';
 import {
+  InvoiceCancelInput,
   InvoiceCreateInput,
   InvoiceDto,
   InvoiceKind,
   InvoiceLineDto,
+  InvoiceRectifyInput,
   InvoiceStatus,
+  RectificationKind,
   amountsMatch,
+  buildRectificationLines,
+  canTransitionInvoice,
   computeInvoiceAmounts,
+  fromCents,
   hasAllowedProject,
+  invoiceCancelBlockReason,
+  invoiceCancelSchema,
   invoiceCreateSchema,
+  invoiceRectifyBlockReason,
+  invoiceRectifySchema,
   invoiceUpdateSchema,
   InvoiceUpdateInput,
   payableAmount,
   planMilestones,
+  planRectificationMilestones,
   round2,
+  sumCents,
   todayIso,
+  toCents,
 } from '@erp/shared';
 import { ComplianceService } from '../compliance/compliance.service';
 import { ProveedoresService } from '../modules/proveedores/proveedores.service';
@@ -51,6 +69,12 @@ import { DbService } from '../db/db.service';
 
 type InvoiceCreateData = ReturnType<typeof invoiceCreateSchema.parse>;
 type InvoiceAmounts = ReturnType<typeof computeInvoiceAmounts>;
+
+interface RectificacionEnlace {
+  invoiceId: string;
+  kind: RectificationKind;
+  reason: string;
+}
 
 const UNIQUE_VIOLATION = '23505';
 
@@ -67,6 +91,7 @@ export class InvoicesService {
     kind?: InvoiceKind,
     status?: InvoiceStatus,
     search?: string,
+    soloRectificativas = false,
   ): Promise<InvoiceDto[]> {
     const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
@@ -85,6 +110,8 @@ export class InvoicesService {
     }
     if (kind) filters.push(eq(invoices.kind, kind));
     if (status) filters.push(eq(invoices.status, status));
+    if (soloRectificativas)
+      filters.push(isNotNull(invoices.rectifiesInvoiceId));
     if (search?.trim()) {
       const term = `%${search.trim()}%`;
       filters.push(
@@ -171,6 +198,7 @@ export class InvoicesService {
     companyId: string,
     data: InvoiceCreateData,
     amounts: InvoiceAmounts,
+    rectificacion?: RectificacionEnlace,
   ): Promise<Invoice> {
     let row: Invoice;
     try {
@@ -191,6 +219,11 @@ export class InvoicesService {
           retentionAmount: amounts.retentionAmount.toFixed(2),
           retentionReleaseDate: data.retentionReleaseDate ?? null,
           notes: data.notes ?? null,
+          ...(rectificacion && {
+            rectifiesInvoiceId: rectificacion.invoiceId,
+            rectificationKind: rectificacion.kind,
+            rectificationReason: rectificacion.reason,
+          }),
         })
         .returning();
     } catch (err) {
@@ -329,7 +362,7 @@ export class InvoicesService {
 
     // Homologación PRL: no se aprueba gasto a una subcontrata sin la
     // documentación al día (responsabilidad solidaria del contratista).
-    if (invoice.kind === 'compra') {
+    if (invoice.kind === 'compra' && !invoice.rectifiesInvoiceId) {
       await this.compliance.assertCanTransact(
         invoice.contactId,
         'aprobar la factura',
@@ -365,6 +398,26 @@ export class InvoicesService {
    */
   async aprobarEnTx(tx: Tx, invoice: Invoice, contact: Contact): Promise<void> {
     const id = invoice.id;
+    // Se relee con bloqueo: dos aprobaciones simultáneas se serializan y la
+    // segunda ve que ya no es borrador.
+    const [locked] = await tx
+      .select({ status: invoices.status })
+      .from(invoices)
+      .where(and(eq(invoices.id, id), isNull(invoices.deletedAt)))
+      .for('update');
+    if (
+      !locked ||
+      !canTransitionInvoice(locked.status as InvoiceStatus, 'aprobada') ||
+      locked.status !== 'borrador'
+    ) {
+      throw new ConflictException('Solo se aprueban facturas en borrador');
+    }
+
+    if (invoice.rectifiesInvoiceId) {
+      await this.aprobarRectificativaEnTx(tx, invoice, contact);
+      return;
+    }
+
     if (invoice.kind === 'compra') {
       const notes = await tx
         .select()
@@ -400,6 +453,312 @@ export class InvoicesService {
     await this.insertMilestones(tx, invoice, contact);
   }
 
+  /**
+   * Aprobación de una rectificativa: aplica sus efectos sobre la original
+   * dentro de la misma transacción.
+   * - total: la original pasa a `rectificada`, se eliminan sus vencimientos
+   *   previstos, sus albaranes vuelven a `validado` sin factura y la
+   *   certificación de la que procede vuelve a `borrador`. Solo se genera
+   *   devolución por lo ya liquidado.
+   * - diferencias: la original no cambia; el delta genera sus vencimientos.
+   */
+  private async aprobarRectificativaEnTx(
+    tx: Tx,
+    invoice: Invoice,
+    contact: Contact,
+  ): Promise<void> {
+    const kind = invoice.rectificationKind as RectificationKind;
+    const [orig] = await tx
+      .select()
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.id, invoice.rectifiesInvoiceId as string),
+          isNull(invoices.deletedAt),
+        ),
+      )
+      .for('update');
+    if (!orig) {
+      throw new NotFoundException('Factura original no encontrada');
+    }
+    const bloqueo = invoiceRectifyBlockReason(
+      {
+        status: orig.status as InvoiceStatus,
+        isRectification: orig.rectifiesInvoiceId !== null,
+      },
+      kind,
+    );
+    if (bloqueo) throw new ConflictException(bloqueo);
+
+    let originalPaid = { ordinario: 0, retencion: 0 };
+    if (kind === 'total') {
+      const paid = await tx
+        .select({
+          kind: paymentMilestones.kind,
+          amount: paymentMilestones.amount,
+        })
+        .from(paymentMilestones)
+        .where(
+          and(
+            eq(paymentMilestones.invoiceId, orig.id),
+            eq(paymentMilestones.status, 'pagado'),
+          ),
+        );
+      const suma = (k: string) =>
+        fromCents(
+          sumCents(
+            paid.filter((m) => m.kind === k).map((m) => toCents(m.amount)),
+          ),
+        );
+      originalPaid = {
+        ordinario: suma('ordinario'),
+        retencion: suma('retencion'),
+      };
+
+      await tx
+        .delete(paymentMilestones)
+        .where(
+          and(
+            eq(paymentMilestones.invoiceId, orig.id),
+            eq(paymentMilestones.status, 'previsto'),
+          ),
+        );
+      await tx
+        .update(invoices)
+        .set({ status: 'rectificada', updatedAt: new Date() })
+        .where(eq(invoices.id, orig.id));
+      await tx
+        .update(deliveryNotes)
+        .set({ invoiceId: null, status: 'validado', updatedAt: new Date() })
+        .where(eq(deliveryNotes.invoiceId, orig.id));
+      await tx
+        .update(certifications)
+        .set({ status: 'borrador', invoiceId: null, updatedAt: new Date() })
+        .where(eq(certifications.invoiceId, orig.id));
+    }
+
+    const plan = planRectificationMilestones({
+      kind: invoice.kind as 'compra' | 'venta',
+      issueDate: invoice.issueDate,
+      dueDate: invoice.dueDate,
+      totalAmount: Number(invoice.totalAmount),
+      retentionAmount: Number(invoice.retentionAmount),
+      retentionReleaseDate: invoice.retentionReleaseDate,
+      paymentTermsDays: contact.paymentTermsDays,
+      rectificationKind: kind,
+      originalPaid,
+    });
+    // Sin nada pendiente de liquidar, la rectificativa nace liquidada (misma
+    // regla que `invoiceStatusFromMilestones`).
+    await tx
+      .update(invoices)
+      .set({
+        status: plan.length > 0 ? 'aprobada' : 'pagada',
+        updatedAt: new Date(),
+      })
+      .where(eq(invoices.id, invoice.id));
+    if (plan.length > 0) {
+      await tx.insert(paymentMilestones).values(
+        plan.map((m) => ({
+          companyId: invoice.companyId,
+          invoiceId: invoice.id,
+          direction: m.direction,
+          kind: m.kind,
+          dueDate: m.dueDate,
+          amount: m.amount.toFixed(2),
+        })),
+      );
+    }
+  }
+
+  /**
+   * Crea una factura rectificativa en borrador a partir de una aprobada o
+   * pagada. Total: líneas derivadas con el signo cambiado. Por diferencias:
+   * las líneas del delta que se reciben. Serie automática `R-AAAA-NNNN`.
+   */
+  async rectify(id: string, input: InvoiceRectifyInput): Promise<InvoiceDto> {
+    const data = invoiceRectifySchema.parse(input);
+    const { invoice } = await this.findWithContact(id);
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (
+      data.lines &&
+      allowed !== null &&
+      !hasAllowedProject(
+        allowed,
+        data.lines.map((l) => l.projectId ?? null),
+      )
+    ) {
+      throw new NotFoundException('Obra no encontrada');
+    }
+    const newId = await this.dbs.db.transaction(
+      async (tx) =>
+        (
+          await this.crearRectificativaEnTx(tx, invoice.id, {
+            clase: data.clase,
+            issueDate: data.issueDate,
+            motivo: data.motivo,
+            lines: data.lines,
+          })
+        ).row.id,
+    );
+    void this.audit.log({
+      entityType: 'invoice',
+      entityId: newId,
+      action: 'create',
+      newData: {
+        invoiceId: newId,
+        rectifies: id,
+        clase: data.clase,
+        status: 'borrador',
+      },
+    });
+    return this.get(newId);
+  }
+
+  /**
+   * Inserta la rectificativa (borrador) dentro de la transacción recibida.
+   * Bloquea la original, comprueba que se puede rectificar y reserva el
+   * siguiente número de la serie. Devuelve la fila y el contacto de la
+   * original (lo usa `CertificationsService` para aprobarla acto seguido).
+   */
+  async crearRectificativaEnTx(
+    tx: Tx,
+    originalId: string,
+    p: {
+      clase: RectificationKind;
+      issueDate: string;
+      motivo: string;
+      lines?: InvoiceCreateInput['lines'];
+    },
+  ): Promise<{ row: Invoice; contact: Contact }> {
+    const [orig] = await tx
+      .select()
+      .from(invoices)
+      .where(and(eq(invoices.id, originalId), isNull(invoices.deletedAt)))
+      .for('update');
+    if (!orig) throw new NotFoundException('Factura no encontrada');
+    const bloqueo = invoiceRectifyBlockReason(
+      {
+        status: orig.status as InvoiceStatus,
+        isRectification: orig.rectifiesInvoiceId !== null,
+      },
+      p.clase,
+    );
+    if (bloqueo) throw new ConflictException(bloqueo);
+
+    const existentes = await tx
+      .select({
+        id: invoices.id,
+        status: invoices.status,
+        rectificationKind: invoices.rectificationKind,
+      })
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.rectifiesInvoiceId, orig.id),
+          isNull(invoices.deletedAt),
+          ne(invoices.status, 'anulada'),
+        ),
+      );
+    if (p.clase === 'total') {
+      if (existentes.some((e) => e.rectificationKind === 'total')) {
+        throw new ConflictException(
+          'La factura ya tiene una rectificativa total',
+        );
+      }
+      if (existentes.length > 0) {
+        throw new ConflictException(
+          'La factura ya tiene rectificativas por diferencias: no se puede rectificar en total',
+        );
+      }
+    }
+
+    const origLines = await tx
+      .select()
+      .from(invoiceLines)
+      .where(eq(invoiceLines.invoiceId, orig.id))
+      .orderBy(asc(invoiceLines.sortOrder));
+    const lines =
+      p.clase === 'total'
+        ? buildRectificationLines(
+            origLines.map((l) => ({
+              description: l.description,
+              baseAmount: Number(l.baseAmount),
+              vatPct: Number(l.vatPct),
+              projectId: l.projectId,
+              phaseId: l.phaseId,
+              categoryId: l.categoryId,
+            })),
+          )
+        : (p.lines ?? []);
+
+    const invoiceNumber = await this.siguienteNumeroRectificativa(
+      tx,
+      orig.companyId,
+      p.issueDate.slice(0, 4),
+    );
+    const data = invoiceCreateSchema.parse({
+      kind: orig.kind,
+      contactId: orig.contactId,
+      invoiceNumber,
+      issueDate: p.issueDate,
+      dueDate: null,
+      isp: orig.isp,
+      retentionPct: Number(orig.retentionPct),
+      retentionReleaseDate: orig.retentionReleaseDate,
+      notes:
+        `Rectificativa ${p.clase === 'total' ? 'total' : 'por diferencias'} de la factura ${orig.invoiceNumber}: ${p.motivo}`.slice(
+          0,
+          1000,
+        ),
+      lines,
+      deliveryNoteIds: [],
+    });
+    const amounts = computeInvoiceAmounts(
+      data.lines,
+      data.isp,
+      data.retentionPct,
+    );
+    const row = await this.crearEnTx(tx, orig.companyId, data, amounts, {
+      invoiceId: orig.id,
+      kind: p.clase,
+      reason: p.motivo,
+    });
+    const [contact] = await tx
+      .select()
+      .from(contacts)
+      .where(eq(contacts.id, orig.contactId))
+      .limit(1);
+    return { row, contact };
+  }
+
+  /** Siguiente número libre de la serie `R-AAAA-NNNN` de la empresa. */
+  private async siguienteNumeroRectificativa(
+    tx: Tx,
+    companyId: string,
+    year: string,
+  ): Promise<string> {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${'rectificativa:' + companyId}))`,
+    );
+    const prefijo = `R-${year}-`;
+    const rows = await tx
+      .select({ n: invoices.invoiceNumber })
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.companyId, companyId),
+          like(invoices.invoiceNumber, `${prefijo}%`),
+        ),
+      );
+    let max = 0;
+    for (const r of rows) {
+      const n = Number(r.n.slice(prefijo.length));
+      if (Number.isInteger(n) && n > max) max = n;
+    }
+    return `${prefijo}${String(max + 1).padStart(4, '0')}`;
+  }
+
   /** Marca la factura como pagada/cobrada y liquida sus vencimientos. */
   async markPaid(id: string): Promise<InvoiceDto> {
     const { invoice } = await this.findWithContact(id);
@@ -424,11 +783,24 @@ export class InvoicesService {
     return this.get(id);
   }
 
-  /** Anula la factura: libera albaranes y elimina vencimientos previstos. */
-  async cancel(id: string): Promise<InvoiceDto> {
+  /**
+   * Anula la factura: libera albaranes y elimina vencimientos previstos.
+   * Fuera de borrador exige motivo. Una venta aprobada no se anula (se
+   * rectifica); una compra aprobada sin pagos sí, con motivo.
+   */
+  async cancel(
+    id: string,
+    input: InvoiceCancelInput = {},
+  ): Promise<InvoiceDto> {
+    const data = invoiceCancelSchema.parse(input ?? {});
     const { invoice } = await this.findWithContact(id);
     if (invoice.status === 'anulada') {
       return this.get(id);
+    }
+    if (invoice.rectifiesInvoiceId && invoice.status !== 'borrador') {
+      throw new ConflictException(
+        'Una factura rectificativa aprobada no se anula: emite otra rectificativa por diferencias',
+      );
     }
     const paid = await this.dbs.db
       .select({ id: paymentMilestones.id })
@@ -440,12 +812,28 @@ export class InvoicesService {
         ),
       )
       .limit(1);
-    if (paid.length > 0) {
-      throw new ConflictException(
-        'No se puede anular: tiene vencimientos ya liquidados',
+    const bloqueo = invoiceCancelBlockReason({
+      kind: invoice.kind as InvoiceKind,
+      status: invoice.status as InvoiceStatus,
+      hasPaidMilestones: paid.length > 0,
+    });
+    if (bloqueo) throw new ConflictException(bloqueo);
+    if (invoice.status !== 'borrador' && !data.motivo) {
+      throw new BadRequestException(
+        'El motivo de anulación es obligatorio fuera de borrador',
       );
     }
     await this.dbs.db.transaction(async (tx) => {
+      const [locked] = await tx
+        .select({ status: invoices.status })
+        .from(invoices)
+        .where(eq(invoices.id, id))
+        .for('update');
+      if (!locked || locked.status !== invoice.status) {
+        throw new ConflictException(
+          'La factura ha cambiado de estado: recarga e inténtalo de nuevo',
+        );
+      }
       await tx
         .delete(paymentMilestones)
         .where(eq(paymentMilestones.invoiceId, id));
@@ -455,8 +843,18 @@ export class InvoicesService {
         .where(eq(deliveryNotes.invoiceId, id));
       await tx
         .update(invoices)
-        .set({ status: 'anulada', updatedAt: new Date() })
+        .set({
+          status: 'anulada',
+          cancelReason: data.motivo ?? null,
+          updatedAt: new Date(),
+        })
         .where(eq(invoices.id, id));
+    });
+    void this.audit.log({
+      entityType: 'invoice',
+      entityId: id,
+      action: 'update',
+      newData: { status: 'anulada', motivo: data.motivo ?? null },
     });
     return this.get(id);
   }
@@ -617,6 +1015,40 @@ export class InvoicesService {
             );
     const certByInvoice = new Map(certRows.map((c) => [c.invoiceId, c.id]));
 
+    const rectifiedByRows =
+      ids.length === 0
+        ? []
+        : await this.dbs.db
+            .select({
+              id: invoices.id,
+              rectifiesInvoiceId: invoices.rectifiesInvoiceId,
+            })
+            .from(invoices)
+            .where(
+              and(
+                inArray(invoices.rectifiesInvoiceId, ids),
+                isNull(invoices.deletedAt),
+                ne(invoices.status, 'anulada'),
+              ),
+            );
+    const originalIds = [
+      ...new Set(
+        rows
+          .map((r) => r.invoice.rectifiesInvoiceId)
+          .filter((x): x is string => x !== null),
+      ),
+    ];
+    const originalRows =
+      originalIds.length === 0
+        ? []
+        : await this.dbs.db
+            .select({ id: invoices.id, invoiceNumber: invoices.invoiceNumber })
+            .from(invoices)
+            .where(inArray(invoices.id, originalIds));
+    const numberById = new Map(
+      originalRows.map((o) => [o.id, o.invoiceNumber]),
+    );
+
     return rows.map(({ invoice, contactName }) => {
       const total = Number(invoice.totalAmount);
       const retention = Number(invoice.retentionAmount);
@@ -638,6 +1070,17 @@ export class InvoicesService {
         payableAmount: payableAmount(total, retention),
         retentionReleaseDate: invoice.retentionReleaseDate,
         certificationId: certByInvoice.get(invoice.id) ?? null,
+        rectifiesInvoiceId: invoice.rectifiesInvoiceId,
+        rectifiesInvoiceNumber: invoice.rectifiesInvoiceId
+          ? (numberById.get(invoice.rectifiesInvoiceId) ?? null)
+          : null,
+        rectificationKind:
+          invoice.rectificationKind as InvoiceDto['rectificationKind'],
+        rectificationReason: invoice.rectificationReason,
+        rectifiedByInvoiceIds: rectifiedByRows
+          .filter((r) => r.rectifiesInvoiceId === invoice.id)
+          .map((r) => r.id),
+        cancelReason: invoice.cancelReason,
         notes: invoice.notes,
         lines: lines
           .filter((l) => l.invoiceId === invoice.id)
@@ -723,6 +1166,16 @@ export class InvoicesService {
   }
 
   private rethrowDuplicateNumber(err: unknown, num: string): never {
+    if (
+      err instanceof Error &&
+      'constraint' in err &&
+      (err as { constraint?: string }).constraint ===
+        'invoices_rectifies_total_unique'
+    ) {
+      throw new ConflictException(
+        'La factura ya tiene una rectificativa total',
+      );
+    }
     if (
       err instanceof Error &&
       'code' in err &&

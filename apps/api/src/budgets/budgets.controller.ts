@@ -18,6 +18,7 @@ import {
   BudgetCreateInput,
   BudgetDetailDto,
   BudgetDto,
+  BudgetDuplicateInput,
   BudgetItemCreateInput,
   BudgetItemDto,
   BudgetItemUpdateInput,
@@ -84,6 +85,18 @@ export class BudgetsController {
     @Body() body: BudgetUpdateInput,
   ): Promise<BudgetDto> {
     return this.svc.update(id, body);
+  }
+
+  /**
+   * POST /budgets/:id/duplicar — nueva versión (borrador) con las mismas
+   * partidas. Es la forma de corregir un presupuesto activo o cerrado.
+   */
+  @Post('budgets/:id/duplicar')
+  duplicate(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: BudgetDuplicateInput,
+  ): Promise<BudgetDto> {
+    return this.svc.duplicate(id, body ?? {});
   }
 
   /** DELETE /budgets/:id → 204 */

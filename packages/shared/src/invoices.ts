@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { type Transiciones, puedeTransitar } from './maquina-estados';
 import type { VerifactuStatus } from './verifactu';
 
 /**
@@ -21,6 +22,7 @@ export const INVOICE_STATUSES = [
   'borrador',
   'aprobada',
   'pagada',
+  'rectificada',
   'anulada',
 ] as const;
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
@@ -29,8 +31,115 @@ export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
   borrador: 'Borrador',
   aprobada: 'Aprobada',
   pagada: 'Pagada',
+  rectificada: 'Rectificada',
   anulada: 'Anulada',
 };
+
+/**
+ * Transiciones de la factura.
+ * - borrador → aprobada (`aprobar`) | anulada (`anular`).
+ * - aprobada → pagada (último vencimiento liquidado) | rectificada (al aprobar
+ *   una rectificativa total) | anulada (ver `invoiceCancelBlockReason`).
+ * - pagada → aprobada: solo sistema, cuando tesorería reabre un vencimiento;
+ *   pagada → rectificada: al aprobar una rectificativa total.
+ * - rectificada y anulada son terminales.
+ */
+export const INVOICE_TRANSITIONS: Transiciones<InvoiceStatus> = {
+  borrador: ['aprobada', 'anulada'],
+  aprobada: ['pagada', 'rectificada', 'anulada'],
+  pagada: ['aprobada', 'rectificada'],
+  rectificada: [],
+  anulada: [],
+};
+
+export const RECTIFICATION_KINDS = ['total', 'diferencias'] as const;
+export type RectificationKind = (typeof RECTIFICATION_KINDS)[number];
+
+export const RECTIFICATION_KIND_LABELS: Record<RectificationKind, string> = {
+  total: 'Total',
+  diferencias: 'Por diferencias',
+};
+
+/**
+ * ¿Se puede rectificar? `null` si sí; si no, el motivo para el 409.
+ * Solo se rectifica una factura aprobada o pagada. Una rectificativa no se
+ * rectifica en total (se emitiría otra por diferencias).
+ */
+export function invoiceRectifyBlockReason(
+  i: { status: InvoiceStatus; isRectification: boolean },
+  clase: RectificationKind,
+): string | null {
+  if (i.status === 'rectificada') {
+    return 'La factura ya está rectificada';
+  }
+  if (i.status !== 'aprobada' && i.status !== 'pagada') {
+    return 'Solo se rectifican facturas aprobadas o pagadas';
+  }
+  if (i.isRectification && clase === 'total') {
+    return 'Una factura rectificativa no se rectifica en total: emite otra rectificativa por diferencias';
+  }
+  return null;
+}
+
+export function canTransitionInvoice(
+  from: InvoiceStatus,
+  to: InvoiceStatus,
+): boolean {
+  return puedeTransitar(INVOICE_TRANSITIONS, from, to);
+}
+
+/** Editar y borrar: solo en borrador. */
+export function canEditInvoice(status: InvoiceStatus): boolean {
+  return status === 'borrador';
+}
+export function canDeleteInvoice(status: InvoiceStatus): boolean {
+  return status === 'borrador';
+}
+
+/**
+ * ¿Se puede anular? `null` si sí; si no, el motivo para el 409.
+ * - Borrador: siempre.
+ * - Venta aprobada: no. Una factura de venta emitida se corrige con rectificativa
+ *   (art. 15 RD 1619/2012).
+ * - Compra aprobada: sí, solo sin vencimientos pagados (el motivo se exige en la API).
+ * - Pagada o anulada: no.
+ */
+export function invoiceCancelBlockReason(i: {
+  kind: InvoiceKind;
+  status: InvoiceStatus;
+  hasPaidMilestones: boolean;
+}): string | null {
+  if (i.status === 'borrador') return null;
+  if (i.status === 'anulada') return 'La factura ya está anulada';
+  if (i.status === 'pagada') {
+    return 'No se puede anular una factura pagada: reabre antes el vencimiento o registra una rectificativa';
+  }
+  if (i.kind === 'venta') {
+    return 'Una factura de venta emitida no se anula: se corrige con una factura rectificativa';
+  }
+  if (i.hasPaidMilestones) {
+    return 'No se puede anular una factura con vencimientos pagados';
+  }
+  return null;
+}
+
+/** Motivo de anulación; la API lo exige fuera de borrador. */
+export const invoiceCancelSchema = z.object({
+  motivo: z.string().trim().min(5).max(500).optional(),
+});
+export type InvoiceCancelInput = z.input<typeof invoiceCancelSchema>;
+
+/**
+ * Estado que le corresponde a la factura según sus vencimientos; `null` si no
+ * debe tocarse (borrador, anulada).
+ */
+export function invoiceStatusFromMilestones(
+  current: InvoiceStatus,
+  hayPrevistos: boolean,
+): InvoiceStatus | null {
+  if (current !== 'aprobada' && current !== 'pagada') return null;
+  return hayPrevistos ? 'aprobada' : 'pagada';
+}
 
 /** Leyenda legal obligatoria cuando se aplica inversión del sujeto pasivo. */
 export const ISP_LEGEND =
@@ -58,6 +167,32 @@ export const invoiceLineSchema = z.object({
   phaseId: z.string().uuid('Partida no válida').nullish(),
   categoryId: z.string().uuid('Categoría no válida').nullish(),
 });
+
+export const invoiceRectifySchema = z
+  .object({
+    clase: z.enum(RECTIFICATION_KINDS),
+    issueDate: isoDate,
+    motivo: z.string().trim().min(5).max(500),
+    /** Obligatorias si clase = 'diferencias'; prohibidas si clase = 'total' (se derivan). */
+    lines: z.array(invoiceLineSchema).min(1).optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.clase === 'diferencias' && !v.lines) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['lines'],
+        message: 'La rectificativa por diferencias exige líneas con el delta',
+      });
+    }
+    if (v.clase === 'total' && v.lines) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['lines'],
+        message: 'La rectificativa total deriva sus líneas de la original',
+      });
+    }
+  });
+export type InvoiceRectifyInput = z.input<typeof invoiceRectifySchema>;
 
 export const invoiceCreateSchema = z.object({
   kind: z.enum(INVOICE_KINDS),
@@ -127,6 +262,13 @@ export interface InvoiceDto {
   payableAmount: number;
   retentionReleaseDate: string | null;
   certificationId: string | null;
+  rectifiesInvoiceId: string | null;
+  rectifiesInvoiceNumber: string | null;
+  rectificationKind: RectificationKind | null;
+  rectificationReason: string | null;
+  /** Rectificativas activas (no anuladas) de esta factura. */
+  rectifiedByInvoiceIds: string[];
+  cancelReason: string | null;
   notes: string | null;
   lines: InvoiceLineDto[];
   deliveryNotes: InvoiceDeliveryNoteRef[];

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -56,6 +57,11 @@ export class FacturaeService {
     if (invoice.kind !== 'venta') {
       throw new BadRequestException(
         'Facturae solo se genera para facturas de venta (el documento que emite la propia empresa)',
+      );
+    }
+    if (invoice.rectifiesInvoiceId) {
+      throw new ConflictException(
+        'Facturae de facturas rectificativas no soportada todavía: no se emite como F1',
       );
     }
     if (invoice.status === 'borrador') {

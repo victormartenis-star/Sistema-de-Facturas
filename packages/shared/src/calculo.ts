@@ -10,10 +10,16 @@
  * §4 (dominio financiero del sector).
  */
 
+import { applyPct, fromCents, sumCents, toCents } from './dinero';
+
 /* ───────────────────────────── importes ───────────────────────────── */
 
 /**
- * Redondeo a dos decimales.
+ * Redondeo a dos decimales en coma flotante.
+ *
+ * **No usar para dinero**: las reglas de importes de este módulo calculan en
+ * céntimos enteros (`dinero.ts`). Se conserva para magnitudes que son
+ * coma flotante por naturaleza (VAN/TIR, ratios del control de costes).
  *
  * El dinero se guarda en `numeric` de PostgreSQL, pero el cálculo intermedio
  * ocurre en coma flotante; sin este redondeo aparecen totales como 121.00000000000001.
@@ -63,15 +69,81 @@ export function computeInvoiceAmounts(
   isp: boolean,
   retentionPct: number,
 ): InvoiceAmounts {
-  const baseAmount = round2(lines.reduce((s, l) => s + l.baseAmount, 0));
-  const vatAmount = isp
-    ? 0
-    : round2(lines.reduce((s, l) => s + (l.baseAmount * l.vatPct) / 100, 0));
+  const breakdown = computeVatBreakdown(lines, isp);
   return {
-    baseAmount,
-    vatAmount,
-    totalAmount: round2(baseAmount + vatAmount),
-    retentionAmount: round2((baseAmount * retentionPct) / 100),
+    baseAmount: breakdown.baseAmount,
+    vatAmount: breakdown.vatAmount,
+    totalAmount: breakdown.totalAmount,
+    retentionAmount: computeRetention(breakdown.baseAmount, retentionPct),
+  };
+}
+
+/** Porcentaje de retención de garantía por defecto (el de `projects.retention_pct`). */
+export const DEFAULT_RETENTION_PCT = 5;
+
+/**
+ * Retención de garantía: siempre sobre la **base imponible**. Única
+ * implementación: la usan `computeInvoiceAmounts` y `computeCertification`.
+ * Redondeo half-up simétrico en céntimos: 5 % de 20,10 € son 1,01 €.
+ */
+export function computeRetention(
+  baseAmount: number | string,
+  retentionPct: number | string,
+): number {
+  return fromCents(applyPct(toCents(baseAmount), retentionPct));
+}
+
+export interface VatGroup {
+  vatPct: number;
+  baseAmount: number;
+  vatAmount: number;
+}
+
+export interface VatBreakdown {
+  /** Un grupo por tipo de IVA, ordenado de menor a mayor. */
+  groups: VatGroup[];
+  baseAmount: number;
+  /** Suma de cuotas por grupo; 0 con ISP. */
+  vatAmount: number;
+  totalAmount: number;
+  isp: boolean;
+  /** Cuota que autoliquida el destinatario con ISP (informativa; 0 sin ISP). */
+  selfAssessedVat: number;
+}
+
+/**
+ * Desglose por tipo de IVA. La cuota se redondea **por grupo** (como exige el
+ * libro de IVA), no línea a línea.
+ */
+export function computeVatBreakdown(
+  lines: InvoiceLineAmount[],
+  isp: boolean,
+): VatBreakdown {
+  const byRate = new Map<number, bigint>();
+  for (const l of lines) {
+    byRate.set(l.vatPct, (byRate.get(l.vatPct) ?? 0n) + toCents(l.baseAmount));
+  }
+  const groups = [...byRate.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([vatPct, base]) => ({
+      vatPct,
+      base,
+      vat: applyPct(base, vatPct),
+    }));
+  const base = sumCents(groups.map((g) => g.base));
+  const theoreticalVat = sumCents(groups.map((g) => g.vat));
+  const vat = isp ? 0n : theoreticalVat;
+  return {
+    groups: groups.map((g) => ({
+      vatPct: g.vatPct,
+      baseAmount: fromCents(g.base),
+      vatAmount: fromCents(g.vat),
+    })),
+    baseAmount: fromCents(base),
+    vatAmount: fromCents(vat),
+    totalAmount: fromCents(base + vat),
+    isp,
+    selfAssessedVat: isp ? fromCents(theoreticalVat) : 0,
   };
 }
 
@@ -80,7 +152,7 @@ export function payableAmount(
   totalAmount: number,
   retentionAmount: number,
 ): number {
-  return round2(totalAmount - retentionAmount);
+  return fromCents(toCents(totalAmount) - toCents(retentionAmount));
 }
 
 /* ─────────────────────────────── fechas ─────────────────────────────── */
@@ -196,6 +268,84 @@ export function planMilestones(
   return plan;
 }
 
+export interface RectificationMilestoneInput extends MilestonePlanInput {
+  rectificationKind: 'total' | 'diferencias';
+  /** Solo 'total': lo ya liquidado de la original, por tipo de vencimiento. */
+  originalPaid: { ordinario: number; retencion: number };
+}
+
+/** Líneas de una rectificativa total: mismas líneas, base con signo cambiado. */
+export function buildRectificationLines<T extends { baseAmount: number }>(
+  lines: T[],
+): T[] {
+  return lines.map((l) => ({
+    ...l,
+    baseAmount: l.baseAmount === 0 ? 0 : -l.baseAmount,
+  }));
+}
+
+/**
+ * Vencimientos de una rectificativa. Importes siempre positivos: lo negativo
+ * sale como vencimiento en dirección inversa (abono). En 'total' solo se
+ * genera devolución por lo ya liquidado de la original (lo previsto se elimina,
+ * no se compensa); en 'diferencias' se reparte el delta como en una factura
+ * normal, invirtiendo la dirección de los importes negativos.
+ */
+export function planRectificationMilestones(
+  input: RectificationMilestoneInput,
+): PlannedMilestone[] {
+  const normal = input.kind === 'compra' ? 'pago' : 'cobro';
+  const inversa = normal === 'pago' ? 'cobro' : 'pago';
+  const dueOrdinario =
+    input.dueDate ?? addDays(input.issueDate, input.paymentTermsDays);
+  const dueRetencion =
+    input.retentionReleaseDate ??
+    addDays(input.issueDate, RETENTION_DEFAULT_DAYS);
+  const plan: PlannedMilestone[] = [];
+
+  if (input.rectificationKind === 'total') {
+    if (input.originalPaid.ordinario > 0) {
+      plan.push({
+        direction: inversa,
+        kind: 'ordinario',
+        dueDate: dueOrdinario,
+        amount: input.originalPaid.ordinario,
+      });
+    }
+    if (input.originalPaid.retencion > 0) {
+      plan.push({
+        direction: inversa,
+        kind: 'retencion',
+        dueDate: dueOrdinario,
+        amount: input.originalPaid.retencion,
+      });
+    }
+    return plan;
+  }
+
+  const ordinary = toCents(
+    payableAmount(input.totalAmount, input.retentionAmount),
+  );
+  const retention = toCents(input.retentionAmount);
+  if (ordinary !== 0n) {
+    plan.push({
+      direction: ordinary > 0n ? normal : inversa,
+      kind: 'ordinario',
+      dueDate: dueOrdinario,
+      amount: fromCents(ordinary < 0n ? -ordinary : ordinary),
+    });
+  }
+  if (retention !== 0n) {
+    plan.push({
+      direction: retention > 0n ? normal : inversa,
+      kind: 'retencion',
+      dueDate: dueRetencion,
+      amount: fromCents(retention < 0n ? -retention : retention),
+    });
+  }
+  return plan;
+}
+
 /* ───────────────────────── certificaciones ───────────────────────── */
 
 export interface CertificationAmounts {
@@ -218,12 +368,12 @@ export function computeCertification(
   previousCumulativeAmount: number,
   retentionPct: number,
 ): CertificationAmounts {
-  const cumulativeAmount = round2((contractAmount * cumulativePct) / 100);
-  const periodAmount = round2(cumulativeAmount - previousCumulativeAmount);
+  const cumulative = applyPct(toCents(contractAmount), cumulativePct);
+  const period = cumulative - toCents(previousCumulativeAmount);
   return {
-    cumulativeAmount,
-    periodAmount,
-    retentionAmount: round2((periodAmount * retentionPct) / 100),
+    cumulativeAmount: fromCents(cumulative),
+    periodAmount: fromCents(period),
+    retentionAmount: computeRetention(fromCents(period), retentionPct),
   };
 }
 

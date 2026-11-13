@@ -130,6 +130,84 @@ describe('Dashboard (integración) — KPIs globales y por obra', () => {
     });
   });
 
+  it('GET /dashboard/obras: el coste real cuenta compras aprobadas, pagadas y rectificadas, neteando la rectificativa', async () => {
+    const admin = await registerUser(app);
+    const token = admin.accessToken;
+    const project = await createProject(app, token);
+    const proveedor = await createContact(app, token, { kind: 'proveedor' });
+    const u = () => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+    /** Compra aprobada con su albarán validado (3-way match). */
+    const compra = async (importe: number): Promise<string> => {
+      const order = await authed(app, token)
+        .post('/purchase-orders')
+        .send({
+          projectId: project.id,
+          contactId: proveedor.id,
+          orderDate: '2026-09-14',
+          description: 'Suministro',
+          amount: importe,
+        })
+        .expect(201);
+      const note = await authed(app, token)
+        .post('/delivery-notes')
+        .send({
+          contactId: proveedor.id,
+          orderId: order.body.id,
+          noteNumber: `ALB-${u()}`,
+          noteDate: '2026-09-14',
+          amount: importe,
+        })
+        .expect(201);
+      await authed(app, token)
+        .post(`/delivery-notes/${note.body.id}/validar`)
+        .expect(201);
+      const inv = await authed(app, token)
+        .post('/invoices')
+        .send({
+          kind: 'compra',
+          contactId: proveedor.id,
+          invoiceNumber: `FC-${u()}`,
+          issueDate: '2026-09-14',
+          deliveryNoteIds: [note.body.id],
+          lines: [
+            {
+              description: 'Material',
+              baseAmount: importe,
+              vatPct: 21,
+              projectId: project.id,
+            },
+          ],
+        })
+        .expect(201);
+      await authed(app, token)
+        .post(`/invoices/${inv.body.id}/aprobar`)
+        .expect(201);
+      return inv.body.id as string;
+    };
+
+    // 500 rectificada por completo (original rectificada + rectificativa
+    // aprobada de −500), 300 pagada y 100 aprobada: coste real = 400.
+    const rectificada = await compra(500);
+    const rect = await authed(app, token)
+      .post(`/invoices/${rectificada}/rectificar`)
+      .send({
+        clase: 'total',
+        issueDate: '2026-10-01',
+        motivo: 'Error de importe',
+      })
+      .expect(201);
+    await authed(app, token)
+      .post(`/invoices/${rect.body.id}/aprobar`)
+      .expect(201);
+    const pagada = await compra(300);
+    await authed(app, token).post(`/invoices/${pagada}/pagar`).expect(201);
+    await compra(100);
+
+    const res = await authed(app, token).get('/dashboard/obras').expect(200);
+    expect(res.body[0].costReal).toBe(400);
+  });
+
   it('un usuario de obra sin obras asignadas ve el KPI vacío en /dashboard/obras', async () => {
     const admin = await registerUser(app);
     await createProject(app, admin.accessToken);

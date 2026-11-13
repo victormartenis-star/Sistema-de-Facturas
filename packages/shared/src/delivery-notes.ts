@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { type Transiciones, puedeTransitar } from './maquina-estados';
 
 /**
  * Albaranes y partes de trabajo. Circuito de punteado (matching):
@@ -18,6 +19,74 @@ export const DELIVERY_NOTE_STATUS_LABELS: Record<DeliveryNoteStatus, string> = {
   validado: 'Validado',
   facturado: 'Facturado',
 };
+
+/**
+ * Transiciones del albarán (usuario o sistema):
+ * - pendiente → validado: usuario (`POST :id/validar`).
+ * - validado → pendiente: usuario, solo sin factura (`POST :id/devolver`).
+ * - validado → facturado: sistema, al aprobar la factura.
+ * - facturado → validado: sistema, al rectificar/anular la factura.
+ */
+export const DELIVERY_NOTE_TRANSITIONS: Transiciones<DeliveryNoteStatus> = {
+  pendiente: ['validado'],
+  validado: ['pendiente', 'facturado'],
+  facturado: ['validado'],
+};
+
+export function canTransitionDeliveryNote(
+  from: DeliveryNoteStatus,
+  to: DeliveryNoteStatus,
+): boolean {
+  return puedeTransitar(DELIVERY_NOTE_TRANSITIONS, from, to);
+}
+
+interface DeliveryNoteEstado {
+  status: DeliveryNoteStatus;
+  invoiceId: string | null;
+}
+
+/**
+ * Edición del albarán según estado. Un validado sin factura solo admite
+ * `description`: el importe validado pasó el 3-way match y para cambiarlo hay
+ * que devolverlo a pendiente (auditado, con motivo) y revalidarlo.
+ */
+export function deliveryNoteEditBlockReason(
+  n: DeliveryNoteEstado,
+  campos: readonly string[],
+): string | null {
+  if (campos.length === 0 || n.status === 'pendiente') return null;
+  if (n.status === 'facturado') {
+    return 'No se puede editar un albarán ya facturado';
+  }
+  if (n.invoiceId) {
+    return 'No se puede editar un albarán vinculado a una factura';
+  }
+  const prohibidos = campos.filter((c) => c !== 'description');
+  if (prohibidos.length > 0) {
+    return `Un albarán validado solo admite cambiar la descripción. Para corregir ${prohibidos.join(', ')}, devolver el albarán a pendiente`;
+  }
+  return null;
+}
+
+/** Solo se borra un albarán pendiente. */
+export function canDeleteDeliveryNote(n: DeliveryNoteEstado): boolean {
+  return n.status === 'pendiente';
+}
+
+/** Solo se devuelve a pendiente un albarán validado y sin factura. */
+export function canReturnDeliveryNote(n: DeliveryNoteEstado): boolean {
+  return n.status === 'validado' && n.invoiceId === null;
+}
+
+/** Motivo de la devolución de un albarán validado a pendiente. */
+export const deliveryNoteReturnSchema = z.object({
+  motivo: z
+    .string()
+    .trim()
+    .min(5, 'Indica el motivo (mínimo 5 caracteres)')
+    .max(500, 'Máximo 500 caracteres'),
+});
+export type DeliveryNoteReturnInput = z.input<typeof deliveryNoteReturnSchema>;
 
 const isoDate = z
   .string()

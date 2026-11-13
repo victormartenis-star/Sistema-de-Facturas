@@ -5,12 +5,22 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
-import { Budget, BudgetItem, budgetItems, budgets, projects } from '@erp/db';
+import {
+  Budget,
+  BudgetItem,
+  DbOrTx,
+  budgetItems,
+  budgets,
+  projects,
+} from '@erp/db';
 import {
   Bc3ImportResultDto,
+  BUDGET_STATUS_LABELS,
+  BUDGET_TRANSITIONS,
   BudgetCreateInput,
   BudgetDetailDto,
   BudgetDto,
+  BudgetDuplicateInput,
   BudgetItemCreateInput,
   BudgetItemDto,
   BudgetItemUpdateInput,
@@ -18,9 +28,17 @@ import {
   BudgetStatus,
   BudgetUpdateInput,
   budgetCreateSchema,
+  budgetDuplicateSchema,
+  budgetEditBlockReason,
   budgetItemCreateSchema,
+  budgetItemEditBlockReason,
+  budgetItemStructureBlockReason,
   budgetItemUpdateSchema,
   budgetUpdateSchema,
+  canDeleteBudget,
+  centsToNumeric,
+  lineAmountCents,
+  motivoTransicionInvalida,
   round2,
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
@@ -147,7 +165,7 @@ export class BudgetsService {
   }
 
   async update(id: string, input: BudgetUpdateInput): Promise<BudgetDto> {
-    const budget = await this.findBudget(id);
+    const found = await this.findBudget(id);
     const data = budgetUpdateSchema.parse(input);
 
     // Cerrar el activo actual y activar el nuevo es una sola operación: si
@@ -155,12 +173,46 @@ export class BudgetsService {
     // activo. Se bloquea la fila de la obra para serializar dos activaciones
     // simultáneas (si no, podrían quedar dos presupuestos activos).
     const updated = await this.dbs.db.transaction(async (tx) => {
-      if (data.status === 'activo' && budget.status !== 'activo') {
+      if (data.status === 'activo' && found.status !== 'activo') {
         await tx
           .select({ id: projects.id })
           .from(projects)
-          .where(eq(projects.id, budget.projectId))
+          .where(eq(projects.id, found.projectId))
           .for('update');
+      }
+      // Las reglas de estado se comprueban releyendo la fila con bloqueo.
+      const budget = await this.lockBudget(tx, id);
+
+      const campos = (['name', 'notes'] as const).filter(
+        (c) => data[c] !== undefined,
+      );
+      const bloqueo = budgetEditBlockReason(
+        budget.status as BudgetStatus,
+        campos,
+      );
+      if (bloqueo) throw new ConflictException(bloqueo);
+
+      if (data.status !== undefined && data.status !== budget.status) {
+        const motivo = motivoTransicionInvalida(
+          BUDGET_TRANSITIONS,
+          budget.status as BudgetStatus,
+          data.status,
+          BUDGET_STATUS_LABELS,
+          'El presupuesto',
+        );
+        if (motivo) throw new ConflictException(motivo);
+      }
+
+      if (data.status === 'activo' && budget.status !== 'activo') {
+        const [{ n }] = await tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(budgetItems)
+          .where(eq(budgetItems.budgetId, id));
+        if (n === 0) {
+          throw new ConflictException(
+            'No se puede activar un presupuesto sin partidas',
+          );
+        }
         await tx
           .update(budgets)
           .set({ status: 'cerrado', updatedAt: new Date() })
@@ -202,10 +254,73 @@ export class BudgetsService {
 
   async remove(id: string): Promise<void> {
     await this.findBudget(id);
-    await this.dbs.db
-      .update(budgets)
-      .set({ deletedAt: new Date(), updatedAt: new Date() })
-      .where(eq(budgets.id, id));
+    await this.dbs.db.transaction(async (tx) => {
+      const budget = await this.lockBudget(tx, id);
+      if (!canDeleteBudget(budget.status as BudgetStatus)) {
+        throw new ConflictException(
+          `Solo se puede borrar un presupuesto en borrador (este está ${budget.status}). Ciérralo en lugar de borrarlo`,
+        );
+      }
+      await tx
+        .update(budgets)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(eq(budgets.id, id));
+    });
+  }
+
+  /**
+   * Nueva versión: copia cabecera y partidas a un borrador. Es la forma de
+   * corregir un presupuesto activo o cerrado; al activarse cierra el anterior.
+   */
+  async duplicate(id: string, input: BudgetDuplicateInput): Promise<BudgetDto> {
+    const original = await this.findBudget(id);
+    const data = budgetDuplicateSchema.parse(input);
+    const BATCH = 200;
+
+    const { copy, count, total } = await this.dbs.db.transaction(async (tx) => {
+      const items = await tx
+        .select()
+        .from(budgetItems)
+        .where(eq(budgetItems.budgetId, id))
+        .orderBy(asc(budgetItems.level), asc(budgetItems.sortOrder));
+
+      const [created] = await tx
+        .insert(budgets)
+        .values({
+          companyId: original.companyId,
+          projectId: original.projectId,
+          name: data.name ?? `${original.name} (copia)`,
+          source: original.source,
+          importedAt: original.importedAt,
+          notes: original.notes,
+        })
+        .returning();
+
+      for (let i = 0; i < items.length; i += BATCH) {
+        await tx.insert(budgetItems).values(
+          items.slice(i, i + BATCH).map((item) => ({
+            budgetId: created.id,
+            code: item.code,
+            name: item.name,
+            unit: item.unit,
+            unitPrice: item.unitPrice,
+            quantity: item.quantity,
+            totalAmount: item.totalAmount,
+            phaseId: item.phaseId,
+            level: item.level,
+            parentCode: item.parentCode,
+            sortOrder: item.sortOrder,
+          })),
+        );
+      }
+      return {
+        copy: created,
+        count: items.length,
+        total: items.reduce((sum, item) => sum + Number(item.totalAmount), 0),
+      };
+    });
+
+    return budgetToDto(copy, round2(total), count);
   }
 
   // ── Importación BC3 ──────────────────────────────────────────────────────────
@@ -294,25 +409,35 @@ export class BudgetsService {
   ): Promise<BudgetItemDto> {
     await this.findBudget(budgetId);
     const data = budgetItemCreateSchema.parse(input);
-    const totalAmount = round2(data.unitPrice * data.quantity);
+    const totalAmount = centsToNumeric(
+      lineAmountCents(data.unitPrice, data.quantity),
+    );
 
     try {
-      const [row] = await this.dbs.db
-        .insert(budgetItems)
-        .values({
-          budgetId,
-          code: data.code,
-          name: data.name,
-          unit: data.unit,
-          unitPrice: data.unitPrice.toFixed(4),
-          quantity: data.quantity.toFixed(4),
-          totalAmount: totalAmount.toFixed(2),
-          phaseId: data.phaseId ?? null,
-          level: data.level,
-          parentCode: data.parentCode ?? null,
-          sortOrder: data.sortOrder,
-        })
-        .returning();
+      const row = await this.dbs.db.transaction(async (tx) => {
+        const budget = await this.lockBudget(tx, budgetId);
+        const bloqueo = budgetItemStructureBlockReason(
+          budget.status as BudgetStatus,
+        );
+        if (bloqueo) throw new ConflictException(bloqueo);
+        const [created] = await tx
+          .insert(budgetItems)
+          .values({
+            budgetId,
+            code: data.code,
+            name: data.name,
+            unit: data.unit,
+            unitPrice: data.unitPrice.toFixed(4),
+            quantity: data.quantity.toFixed(4),
+            totalAmount,
+            phaseId: data.phaseId ?? null,
+            level: data.level,
+            parentCode: data.parentCode ?? null,
+            sortOrder: data.sortOrder,
+          })
+          .returning();
+        return created;
+      });
       return itemToDto(row);
     } catch (err) {
       this.rethrowDuplicateCode(err, data.code);
@@ -323,46 +448,83 @@ export class BudgetsService {
     itemId: string,
     input: BudgetItemUpdateInput,
   ): Promise<BudgetItemDto> {
-    const existing = await this.findItem(itemId);
+    const found = await this.findItem(itemId);
     const data = budgetItemUpdateSchema.parse(input);
+    const campos = Object.entries(data)
+      .filter(([, v]) => v !== undefined)
+      .map(([k]) => k);
 
-    const unitPrice =
-      data.unitPrice !== undefined
-        ? data.unitPrice
-        : Number(existing.unitPrice);
-    const quantity =
-      data.quantity !== undefined ? data.quantity : Number(existing.quantity);
-    const totalAmount = round2(unitPrice * quantity);
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const budget = await this.lockBudget(tx, found.budgetId);
+      const bloqueo = budgetItemEditBlockReason(
+        budget.status as BudgetStatus,
+        campos,
+      );
+      if (bloqueo) throw new ConflictException(bloqueo);
 
-    const [row] = await this.dbs.db
-      .update(budgetItems)
-      .set({
-        ...(data.name !== undefined && { name: data.name }),
-        ...(data.unit !== undefined && { unit: data.unit }),
-        ...(data.unitPrice !== undefined && {
-          unitPrice: data.unitPrice.toFixed(4),
-        }),
-        ...(data.quantity !== undefined && {
-          quantity: data.quantity.toFixed(4),
-        }),
-        ...(data.phaseId !== undefined && { phaseId: data.phaseId ?? null }),
-        ...(data.parentCode !== undefined && {
-          parentCode: data.parentCode ?? null,
-        }),
-        ...(data.level !== undefined && { level: data.level }),
-        ...(data.sortOrder !== undefined && { sortOrder: data.sortOrder }),
-        totalAmount: totalAmount.toFixed(2),
-        updatedAt: new Date(),
-      })
-      .where(eq(budgetItems.id, itemId))
-      .returning();
+      // Se relee la partida ya con el presupuesto bloqueado.
+      const [existing] = await tx
+        .select()
+        .from(budgetItems)
+        .where(eq(budgetItems.id, itemId))
+        .limit(1);
+      if (!existing) throw new NotFoundException('Partida no encontrada');
+
+      const totalAmount = centsToNumeric(
+        lineAmountCents(
+          data.unitPrice ?? existing.unitPrice,
+          data.quantity ?? existing.quantity,
+        ),
+      );
+      const [updated] = await tx
+        .update(budgetItems)
+        .set({
+          ...(data.name !== undefined && { name: data.name }),
+          ...(data.unit !== undefined && { unit: data.unit }),
+          ...(data.unitPrice !== undefined && {
+            unitPrice: data.unitPrice.toFixed(4),
+          }),
+          ...(data.quantity !== undefined && {
+            quantity: data.quantity.toFixed(4),
+          }),
+          ...(data.phaseId !== undefined && { phaseId: data.phaseId ?? null }),
+          ...(data.parentCode !== undefined && {
+            parentCode: data.parentCode ?? null,
+          }),
+          ...(data.level !== undefined && { level: data.level }),
+          ...(data.sortOrder !== undefined && { sortOrder: data.sortOrder }),
+          totalAmount,
+          updatedAt: new Date(),
+        })
+        .where(eq(budgetItems.id, itemId))
+        .returning();
+      return updated;
+    });
 
     return itemToDto(row);
   }
 
   async removeItem(itemId: string): Promise<void> {
-    await this.findItem(itemId);
-    await this.dbs.db.delete(budgetItems).where(eq(budgetItems.id, itemId));
+    const found = await this.findItem(itemId);
+    await this.dbs.db.transaction(async (tx) => {
+      const budget = await this.lockBudget(tx, found.budgetId);
+      const bloqueo = budgetItemStructureBlockReason(
+        budget.status as BudgetStatus,
+      );
+      if (bloqueo) throw new ConflictException(bloqueo);
+      await tx.delete(budgetItems).where(eq(budgetItems.id, itemId));
+    });
+  }
+
+  /** Relee el presupuesto con `FOR UPDATE`: las reglas de estado se aplican sobre el estado real. */
+  private async lockBudget(tx: DbOrTx, id: string): Promise<Budget> {
+    const [row] = await tx
+      .select()
+      .from(budgets)
+      .where(and(eq(budgets.id, id), isNull(budgets.deletedAt)))
+      .for('update');
+    if (!row) throw new NotFoundException('Presupuesto no encontrado');
+    return row;
   }
 
   // ── Helpers privados ─────────────────────────────────────────────────────────

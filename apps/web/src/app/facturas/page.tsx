@@ -9,11 +9,13 @@ import {
   type InvoiceCreateInput,
   type InvoiceDto,
   type InvoiceKind,
+  type InvoiceRectifyInput,
   type InvoiceStatus,
 } from '@erp/shared';
 import {
   ApiError,
   categoriesApi,
+  exportsApi,
   formatDate,
   formatEur,
   invoicesApi,
@@ -23,6 +25,8 @@ import { useDebouncedValue } from '@/lib/hooks';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { useToast } from '@/components/toast';
 import { InvoiceFormModal } from '@/components/invoice-form-modal';
+import { InvoiceRectifyModal } from '@/components/invoice-rectify-modal';
+import { ReasonDialog } from '@/components/reason-dialog';
 import {
   IconCheck,
   IconChevronDown,
@@ -39,6 +43,7 @@ import {
   PageHeader,
   SearchInput,
   TableSkeleton,
+  btnGhostCls,
   btnPrimaryCls,
   selectCls,
 } from '@/components/ui';
@@ -47,6 +52,7 @@ const STATUS_STYLES: Record<InvoiceStatus, string> = {
   borrador: 'bg-gray-200 text-gray-700',
   aprobada: 'bg-sky-100 text-sky-700',
   pagada: 'bg-emerald-100 text-emerald-700',
+  rectificada: 'bg-amber-100 text-amber-700',
   anulada: 'bg-red-100 text-red-600',
 };
 
@@ -76,6 +82,7 @@ export default function FacturasPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<InvoiceDto | null>(null);
   const [cancelTarget, setCancelTarget] = useState<InvoiceDto | null>(null);
+  const [rectifyTarget, setRectifyTarget] = useState<InvoiceDto | null>(null);
 
   const query = useQuery({
     queryKey: ['invoices', kind, status, debouncedSearch],
@@ -129,15 +136,25 @@ export default function FacturasPage() {
   });
 
   const cancelMutation = useMutation({
-    mutationFn: (id: string) => invoicesApi.cancel(id),
+    mutationFn: ({ id, motivo }: { id: string; motivo: string }) =>
+      invoicesApi.cancel(id, motivo),
     onSuccess: () => {
       toast('Factura anulada');
       invalidate();
       setCancelTarget(null);
     },
-    onError: (e) => {
-      toast(errText(e), 'error');
-      setCancelTarget(null);
+    onError: (e) => toast(errText(e), 'error'),
+  });
+
+  const rectifyMutation = useMutation({
+    mutationFn: ({ id, input }: { id: string; input: InvoiceRectifyInput }) =>
+      invoicesApi.rectify(id, input),
+    onSuccess: (rect) => {
+      toast(
+        `Rectificativa ${rect.invoiceNumber} creada en borrador: apruébala para aplicarla`,
+      );
+      invalidate();
+      setRectifyTarget(null);
     },
   });
 
@@ -176,6 +193,16 @@ export default function FacturasPage() {
             </option>
           ))}
         </select>
+        <button
+          onClick={() =>
+            exportsApi
+              .download('facturas', { kind, status })
+              .catch((e) => toast(errText(e), 'error'))
+          }
+          className={btnGhostCls}
+        >
+          Exportar CSV
+        </button>
         <button
           onClick={() => {
             setEditing(null);
@@ -262,6 +289,14 @@ export default function FacturasPage() {
                           ISP
                         </span>
                       )}
+                      {inv.rectifiesInvoiceNumber && (
+                        <span
+                          className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700"
+                          title={inv.rectificationReason ?? undefined}
+                        >
+                          Rectifica a {inv.rectifiesInvoiceNumber}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">{inv.contactName}</td>
                     <td className="px-4 py-3 text-gray-600">
@@ -319,14 +354,30 @@ export default function FacturasPage() {
                             >
                               {kind === 'compra' ? 'Pagar' : 'Cobrar'}
                             </button>
-                            <button
-                              onClick={() => setCancelTarget(inv)}
-                              className="rounded-md px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-50"
-                            >
-                              Anular
-                            </button>
+                            {/* Una venta aprobada no se anula: se rectifica. */}
+                            {kind === 'compra' && (
+                              <button
+                                onClick={() => setCancelTarget(inv)}
+                                className="rounded-md px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-50"
+                              >
+                                Anular
+                              </button>
+                            )}
                           </>
                         )}
+                        {(inv.status === 'aprobada' ||
+                          inv.status === 'pagada') &&
+                          inv.rectifiesInvoiceId === null && (
+                            <button
+                              onClick={() => {
+                                rectifyMutation.reset();
+                                setRectifyTarget(inv);
+                              }}
+                              className="rounded-md px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50"
+                            >
+                              Rectificar
+                            </button>
+                          )}
                       </div>
                     </td>
                   </tr>
@@ -449,14 +500,28 @@ export default function FacturasPage() {
         onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
         onCancel={() => setDeleteTarget(null)}
       />
-      <ConfirmDialog
+      <ReasonDialog
         open={cancelTarget !== null}
         title={`¿Anular la factura "${cancelTarget?.invoiceNumber ?? ''}"?`}
-        description="Se liberarán sus albaranes y se eliminarán los vencimientos previstos."
+        description="Se liberarán sus albaranes y se eliminarán los vencimientos previstos. Queda anulada para conservar la trazabilidad."
         confirmLabel="Anular"
+        required={cancelTarget?.status !== 'borrador'}
         loading={cancelMutation.isPending}
-        onConfirm={() => cancelTarget && cancelMutation.mutate(cancelTarget.id)}
+        onConfirm={(motivo) =>
+          cancelTarget && cancelMutation.mutate({ id: cancelTarget.id, motivo })
+        }
         onCancel={() => setCancelTarget(null)}
+      />
+      <InvoiceRectifyModal
+        open={rectifyTarget !== null}
+        invoice={rectifyTarget}
+        saving={rectifyMutation.isPending}
+        error={rectifyMutation.error ? errText(rectifyMutation.error) : null}
+        onSave={(input) =>
+          rectifyTarget &&
+          rectifyMutation.mutate({ id: rectifyTarget.id, input })
+        }
+        onClose={() => setRectifyTarget(null)}
       />
     </div>
   );

@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   DELIVERY_NOTE_STATUSES,
   deliveryNoteCreateSchema,
+  deliveryNoteReturnSchema,
   type DeliveryNoteDto,
 } from '@erp/shared';
 import { pedir, query } from '../api';
@@ -67,6 +68,30 @@ export function registrarAlbaranes(server: McpServer) {
       ejecutar(() =>
         pedir<DeliveryNoteDto>(`/delivery-notes/${id}/validar`, {
           method: 'POST',
+        }),
+      ),
+  );
+
+  server.registerTool(
+    'devolver_albaran',
+    {
+      title: 'Devolver albaran a pendiente',
+      description:
+        'Devuelve a pendiente un albaran VALIDADO que aun no esta en ninguna ' +
+        'factura, para corregirlo y volver a validarlo (pasa de nuevo el ' +
+        'cuadre con el pedido). Exige motivo; queda en auditoria. Un albaran ' +
+        'ya facturado se corrige rectificando la factura.',
+      inputSchema: {
+        id: z.string().uuid().describe('Identificador'),
+        ...deliveryNoteReturnSchema.shape,
+      },
+      annotations: { readOnlyHint: false, idempotentHint: false },
+    },
+    async ({ id, motivo }) =>
+      ejecutar(() =>
+        pedir<DeliveryNoteDto>(`/delivery-notes/${id}/devolver`, {
+          method: 'POST',
+          body: JSON.stringify({ motivo }),
         }),
       ),
   );

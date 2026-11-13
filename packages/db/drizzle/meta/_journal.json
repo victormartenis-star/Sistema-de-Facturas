@@ -211,6 +211,20 @@
       "when": 1794571959952,
       "tag": "0029_fase2_rol_lector",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1794582023565,
+      "tag": "0030_fase3_estado_rectificada",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1794583117258,
+      "tag": "0031_fase3_rectificativas",
+      "breakpoints": true
     }
   ]
 }

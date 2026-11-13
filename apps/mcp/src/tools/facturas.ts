@@ -4,7 +4,9 @@ import {
   INVOICE_KINDS,
   INVOICE_STATUSES,
   ISP_LEGEND,
+  invoiceCancelSchema,
   invoiceCreateSchema,
+  invoiceRectifySchema,
   type InvoiceDto,
 } from '@erp/shared';
 import { pedir, query } from '../api';
@@ -83,12 +85,6 @@ export function registrarFacturas(server: McpServer) {
       titulo: 'Marcar factura como pagada',
       desc: 'Marca una factura aprobada como pagada.',
     },
-    {
-      nombre: 'anular_factura',
-      ruta: 'anular',
-      titulo: 'Anular factura',
-      desc: 'Anula la factura. No la borra: queda en estado anulada para conservar la trazabilidad.',
-    },
   ] as const;
 
   for (const t of transiciones) {
@@ -106,4 +102,59 @@ export function registrarFacturas(server: McpServer) {
         ),
     );
   }
+
+  // La API exige un cuerpo JSON en /anular: fuera de borrador, con `motivo`
+  // (5-500 caracteres). Se envia siempre, aunque sea `{}`.
+  server.registerTool(
+    'anular_factura',
+    {
+      title: 'Anular factura',
+      description:
+        'Anula la factura. No la borra: queda en estado anulada para conservar ' +
+        'la trazabilidad. Fuera de borrador el motivo es OBLIGATORIO. ' +
+        'Una factura de VENTA aprobada no se anula: se corrige con ' +
+        'rectificar_factura. Una de compra con algun vencimiento pagado tampoco.',
+      inputSchema: {
+        id: z.string().uuid().describe('Identificador'),
+        ...invoiceCancelSchema.shape,
+      },
+      annotations: { readOnlyHint: false, idempotentHint: true },
+    },
+    async ({ id, motivo }) =>
+      ejecutar(() =>
+        pedir<InvoiceDto>(`/invoices/${id}/anular`, {
+          method: 'POST',
+          body: JSON.stringify(motivo ? { motivo } : {}),
+        }),
+      ),
+  );
+
+  server.registerTool(
+    'rectificar_factura',
+    {
+      title: 'Rectificar factura',
+      description:
+        'Crea una factura RECTIFICATIVA en estado borrador de una factura ' +
+        'aprobada o pagada (el numero lo asigna la API, serie R-AAAA-NNNN). ' +
+        'clase="total" invierte todas las lineas y, al aprobar la rectificativa ' +
+        '(aprobar_factura), la original pasa a rectificada, se eliminan sus ' +
+        'vencimientos previstos, los albaranes quedan libres y, si venia de ' +
+        'una certificacion, esta vuelve a borrador; NO se envian lineas. ' +
+        'clase="diferencias" exige lines con el delta (positivo o negativo) y ' +
+        'no cambia la original. Los importes los calcula la API. La Facturae ' +
+        'y VeriFactu de rectificativas aun no estan soportados (409).',
+      inputSchema: {
+        id: z.string().uuid().describe('Factura que se rectifica'),
+        ...invoiceRectifySchema.innerType().shape,
+      },
+      annotations: { readOnlyHint: false, idempotentHint: false },
+    },
+    async ({ id, ...cuerpo }) =>
+      ejecutar(() =>
+        pedir<InvoiceDto>(`/invoices/${id}/rectificar`, {
+          method: 'POST',
+          body: JSON.stringify(cuerpo),
+        }),
+      ),
+  );
 }

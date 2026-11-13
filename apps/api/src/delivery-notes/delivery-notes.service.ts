@@ -28,12 +28,18 @@ import {
   DeliveryNoteCreateInput,
   DeliveryNoteDto,
   DeliveryNoteStatus,
+  DeliveryNoteReturnInput,
   DeliveryNoteUpdateInput,
   PurchaseOrderStatus,
+  canDeleteDeliveryNote,
+  canReturnDeliveryNote,
   deliveryNoteBlockReason,
   deliveryNoteCreateSchema,
+  deliveryNoteEditBlockReason,
+  deliveryNoteReturnSchema,
   deliveryNoteUpdateSchema,
 } from '@erp/shared';
+import { AuditService } from '../audit/audit.service';
 import { DbService } from '../db/db.service';
 import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
 
@@ -83,6 +89,7 @@ export class DeliveryNotesService {
   constructor(
     private readonly dbs: DbService,
     private readonly orders: PurchaseOrdersService,
+    private readonly audit: AuditService,
   ) {}
 
   /**
@@ -180,34 +187,59 @@ export class DeliveryNotesService {
     id: string,
     input: DeliveryNoteUpdateInput,
   ): Promise<DeliveryNoteDto> {
-    const note = await this.find(id);
-    if (note.status === 'facturado') {
-      throw new ConflictException('No se puede editar un albarán ya facturado');
-    }
+    await this.find(id);
     const data = deliveryNoteUpdateSchema.parse(input);
+    const campos = Object.entries(data)
+      .filter(([, v]) => v !== undefined)
+      .map(([k]) => k);
     try {
-      await this.dbs.db
-        .update(deliveryNotes)
-        .set({
-          ...(data.contactId !== undefined && { contactId: data.contactId }),
-          ...(data.projectId !== undefined && {
-            projectId: data.projectId ?? null,
-          }),
-          ...(data.phaseId !== undefined && { phaseId: data.phaseId ?? null }),
-          ...(data.orderId !== undefined && { orderId: data.orderId ?? null }),
-          ...(data.noteNumber !== undefined && {
-            noteNumber: data.noteNumber,
-          }),
-          ...(data.noteDate !== undefined && { noteDate: data.noteDate }),
-          ...(data.description !== undefined && {
-            description: data.description ?? null,
-          }),
-          ...(data.amount !== undefined && {
-            amount: data.amount.toFixed(2),
-          }),
-          updatedAt: new Date(),
-        })
-        .where(eq(deliveryNotes.id, id));
+      await this.dbs.db.transaction(async (tx) => {
+        // Las reglas de estado se comprueban releyendo la fila con bloqueo.
+        const note = await this.lockNote(tx, id);
+        const bloqueo = deliveryNoteEditBlockReason(
+          {
+            status: note.status as DeliveryNoteStatus,
+            invoiceId: note.invoiceId,
+          },
+          campos,
+        );
+        if (bloqueo) throw new ConflictException(bloqueo);
+
+        await tx
+          .update(deliveryNotes)
+          .set({
+            ...(data.contactId !== undefined && { contactId: data.contactId }),
+            ...(data.projectId !== undefined && {
+              projectId: data.projectId ?? null,
+            }),
+            ...(data.phaseId !== undefined && {
+              phaseId: data.phaseId ?? null,
+            }),
+            ...(data.orderId !== undefined && {
+              orderId: data.orderId ?? null,
+            }),
+            ...(data.noteNumber !== undefined && {
+              noteNumber: data.noteNumber,
+            }),
+            ...(data.noteDate !== undefined && { noteDate: data.noteDate }),
+            ...(data.description !== undefined && {
+              description: data.description ?? null,
+            }),
+            ...(data.amount !== undefined && {
+              amount: data.amount.toFixed(2),
+            }),
+            updatedAt: new Date(),
+          })
+          .where(eq(deliveryNotes.id, id));
+
+        // El pedido (el de antes y el de ahora) puede quedar desfasado.
+        const pedidos = new Set<string>();
+        if (note.orderId) pedidos.add(note.orderId);
+        if (data.orderId) pedidos.add(data.orderId);
+        for (const pedido of pedidos) {
+          await this.orders.refreshStatus(pedido, tx);
+        }
+      });
     } catch (err) {
       this.rethrowDuplicateNumber(err, data.noteNumber ?? '');
     }
@@ -267,17 +299,90 @@ export class DeliveryNotesService {
     return this.get(id);
   }
 
-  async remove(id: string): Promise<void> {
+  /**
+   * Devuelve un albarán validado (y aún sin factura) a pendiente, con motivo.
+   * Es la corrección de un albarán ya dado por bueno: queda auditada y vuelve
+   * a pasar el 3-way match al revalidarlo.
+   */
+  async returnToPending(
+    id: string,
+    input: DeliveryNoteReturnInput,
+  ): Promise<DeliveryNoteDto> {
+    const { motivo } = deliveryNoteReturnSchema.parse(input);
     const note = await this.find(id);
-    if (note.status === 'facturado') {
-      throw new ConflictException(
-        'No se puede eliminar un albarán facturado: anula antes la factura',
-      );
-    }
-    await this.dbs.db
-      .update(deliveryNotes)
-      .set({ deletedAt: new Date(), updatedAt: new Date() })
-      .where(eq(deliveryNotes.id, id));
+
+    await this.dbs.db.transaction(async (tx) => {
+      // Mismo orden de bloqueo que `validate`: pedido -> albarán.
+      if (note.orderId) {
+        await tx
+          .select({ id: purchaseOrders.id })
+          .from(purchaseOrders)
+          .where(eq(purchaseOrders.id, note.orderId))
+          .for('update');
+      }
+      const locked = await this.lockNote(tx, id);
+      if (
+        !canReturnDeliveryNote({
+          status: locked.status as DeliveryNoteStatus,
+          invoiceId: locked.invoiceId,
+        })
+      ) {
+        throw new ConflictException(
+          locked.status === 'validado'
+            ? 'El albarán está vinculado a una factura: no se puede devolver a pendiente'
+            : 'Solo se devuelven a pendiente los albaranes validados',
+        );
+      }
+      await tx
+        .update(deliveryNotes)
+        .set({ status: 'pendiente', validatedAt: null, updatedAt: new Date() })
+        .where(eq(deliveryNotes.id, id));
+      if (locked.orderId) await this.orders.refreshStatus(locked.orderId, tx);
+    });
+
+    void this.audit.log({
+      entityType: 'delivery_note',
+      entityId: id,
+      action: 'update',
+      oldData: { status: 'validado' },
+      newData: { status: 'pendiente' },
+      meta: { accion: 'devolver', motivo },
+    });
+    return this.get(id);
+  }
+
+  async remove(id: string): Promise<void> {
+    await this.find(id);
+    await this.dbs.db.transaction(async (tx) => {
+      const note = await this.lockNote(tx, id);
+      const estado = {
+        status: note.status as DeliveryNoteStatus,
+        invoiceId: note.invoiceId,
+      };
+      if (!canDeleteDeliveryNote(estado)) {
+        throw new ConflictException(
+          estado.status === 'facturado'
+            ? 'No se puede eliminar un albarán facturado: anula antes la factura'
+            : 'No se puede eliminar un albarán validado: devuélvelo antes a pendiente',
+        );
+      }
+      await tx
+        .update(deliveryNotes)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(eq(deliveryNotes.id, id));
+      if (note.orderId) await this.orders.refreshStatus(note.orderId, tx);
+    });
+  }
+
+  /** Relee el albarán con `FOR UPDATE`: las reglas de estado se aplican sobre el estado real. */
+  private async lockNote(tx: DbOrTx, id: string): Promise<DeliveryNote> {
+    const [row] = await tx
+      .select()
+      .from(deliveryNotes)
+      .where(and(eq(deliveryNotes.id, id), isNull(deliveryNotes.deletedAt)))
+      .for('update');
+    if (!row) throw new NotFoundException('Albarán no encontrado');
+    return row;
   }
 
   private async get(
@@ -337,6 +442,15 @@ export class DeliveryNotesService {
       )
       .limit(1);
     if (!row) {
+      throw new NotFoundException('Albarán no encontrado');
+    }
+    // Un usuario restringido por obra solo toca albaranes de sus obras; el
+    // 404 (y no 403) no delata que el albarán exista.
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (
+      allowed !== null &&
+      (!row.projectId || !allowed.includes(row.projectId))
+    ) {
       throw new NotFoundException('Albarán no encontrado');
     }
     return row;

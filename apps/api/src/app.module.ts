@@ -13,6 +13,7 @@ import { ComplianceModule } from './compliance/compliance.module';
 import { ComparativosModule } from './modules/comparativos/comparativos.module';
 import { ContactsModule } from './contacts/contacts.module';
 import { CostControlModule } from './cost-control/cost-control.module';
+import { ExportsModule } from './exports/exports.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { DbModule } from './db/db.module';
@@ -72,6 +73,7 @@ import { InformesModule } from './modules/informes/informes.module';
     ComparativosModule,
     PartesDiariosModule,
     CostControlModule,
+    ExportsModule,
     PurchaseOrdersModule,
     DeliveryNotesModule,
     TreasuryModule,

@@ -6,6 +6,7 @@ import {
 import { and, eq, isNull, inArray } from 'drizzle-orm';
 import {
   CertificationLine,
+  DbOrTx,
   certificationLines,
   certifications,
   budgetItems,
@@ -14,6 +15,7 @@ import {
   CertificationLineCreateInput,
   CertificationLineDto,
   CertificationLineUpdateInput,
+  canEditCertification,
 } from '@erp/shared';
 import { ChangeOrdersService } from '../modules/change-orders/change-orders.service';
 import { DbService } from '../db/db.service';
@@ -55,13 +57,41 @@ export class CertificationLinesService {
     if (allowed !== null)
       filters.push(inArray(certifications.projectId, allowed));
     const [cert] = await this.db
-      .select({ id: certifications.id })
+      .select({ id: certifications.id, status: certifications.status })
       .from(certifications)
       .where(and(...filters))
       .limit(1);
     if (!cert)
       throw new NotFoundException(`Certificación ${certId} no encontrada`);
     return cert;
+  }
+
+  /**
+   * Ejecuta `fn` en una transacción con la certificación bloqueada
+   * (`FOR UPDATE`) y comprobado que sigue en borrador: las líneas de una
+   * certificación facturada no se tocan, ni siquiera si se factura a la vez.
+   */
+  private async withEditableCert<T>(
+    certId: string,
+    fn: (tx: DbOrTx) => Promise<T>,
+  ): Promise<T> {
+    await this.findCert(certId);
+    return this.db.transaction(async (tx) => {
+      const [locked] = await tx
+        .select({ status: certifications.status })
+        .from(certifications)
+        .where(eq(certifications.id, certId))
+        .for('update');
+      if (!locked) {
+        throw new NotFoundException(`Certificación ${certId} no encontrada`);
+      }
+      if (!canEditCertification(locked.status)) {
+        throw new ConflictException(
+          'La certificación ya está facturada: sus líneas no se pueden modificar',
+        );
+      }
+      return fn(tx);
+    });
   }
 
   async list(certId: string): Promise<CertificationLineDto[]> {
@@ -77,8 +107,6 @@ export class CertificationLinesService {
     certId: string,
     input: CertificationLineCreateInput,
   ): Promise<CertificationLineDto> {
-    await this.findCert(certId);
-
     // Verificar que la partida existe
     const [item] = await this.db
       .select({ id: budgetItems.id })
@@ -95,18 +123,20 @@ export class CertificationLinesService {
     await this.changeOrders.assertBudgetItemNotBlocked(input.budgetItemId);
 
     try {
-      const [row] = await this.db
-        .insert(certificationLines)
-        .values({
-          certificationId: certId,
-          budgetItemId: input.budgetItemId,
-          cumulativePct: String(input.cumulativePct),
-          cumulativeAmount: String(input.cumulativeAmount),
-          periodAmount: String(input.periodAmount),
-          notes: input.notes ?? null,
-        })
-        .returning();
-      return toDto(row);
+      return await this.withEditableCert(certId, async (tx) => {
+        const [row] = await tx
+          .insert(certificationLines)
+          .values({
+            certificationId: certId,
+            budgetItemId: input.budgetItemId,
+            cumulativePct: String(input.cumulativePct),
+            cumulativeAmount: String(input.cumulativeAmount),
+            periodAmount: String(input.periodAmount),
+            notes: input.notes ?? null,
+          })
+          .returning();
+        return toDto(row);
+      });
     } catch (err: unknown) {
       const pg = err as { code?: string };
       if (pg.code === '23505')
@@ -122,7 +152,6 @@ export class CertificationLinesService {
     lineId: string,
     input: CertificationLineUpdateInput,
   ): Promise<CertificationLineDto> {
-    await this.findCert(certId);
     const values: Record<string, unknown> = { updatedAt: new Date() };
     if (input.cumulativePct !== undefined)
       values['cumulativePct'] = String(input.cumulativePct);
@@ -132,31 +161,34 @@ export class CertificationLinesService {
       values['periodAmount'] = String(input.periodAmount);
     if (input.notes !== undefined) values['notes'] = input.notes ?? null;
 
-    const [row] = await this.db
-      .update(certificationLines)
-      .set(values)
-      .where(
-        and(
-          eq(certificationLines.id, lineId),
-          eq(certificationLines.certificationId, certId),
-        ),
-      )
-      .returning();
-    if (!row) throw new NotFoundException(`Línea ${lineId} no encontrada`);
-    return toDto(row);
+    return this.withEditableCert(certId, async (tx) => {
+      const [row] = await tx
+        .update(certificationLines)
+        .set(values)
+        .where(
+          and(
+            eq(certificationLines.id, lineId),
+            eq(certificationLines.certificationId, certId),
+          ),
+        )
+        .returning();
+      if (!row) throw new NotFoundException(`Línea ${lineId} no encontrada`);
+      return toDto(row);
+    });
   }
 
   async remove(certId: string, lineId: string): Promise<void> {
-    await this.findCert(certId);
-    const [row] = await this.db
-      .delete(certificationLines)
-      .where(
-        and(
-          eq(certificationLines.id, lineId),
-          eq(certificationLines.certificationId, certId),
-        ),
-      )
-      .returning({ id: certificationLines.id });
-    if (!row) throw new NotFoundException(`Línea ${lineId} no encontrada`);
+    await this.withEditableCert(certId, async (tx) => {
+      const [row] = await tx
+        .delete(certificationLines)
+        .where(
+          and(
+            eq(certificationLines.id, lineId),
+            eq(certificationLines.certificationId, certId),
+          ),
+        )
+        .returning({ id: certificationLines.id });
+      if (!row) throw new NotFoundException(`Línea ${lineId} no encontrada`);
+    });
   }
 }

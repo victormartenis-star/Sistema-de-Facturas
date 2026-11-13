@@ -5,6 +5,8 @@ import { useEffect, useState } from 'react';
 import {
   DELIVERY_NOTE_STATUSES,
   DELIVERY_NOTE_STATUS_LABELS,
+  canDeleteDeliveryNote,
+  canReturnDeliveryNote,
   type DeliveryNoteCreateInput,
   type DeliveryNoteDto,
   type DeliveryNoteStatus,
@@ -13,12 +15,14 @@ import {
   ApiError,
   contactsApi,
   deliveryNotesApi,
+  exportsApi,
   formatDate,
   formatEur,
   projectsApi,
 } from '@/lib/api';
 import { useDebouncedValue } from '@/lib/hooks';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { ReasonDialog } from '@/components/reason-dialog';
 import { useToast } from '@/components/toast';
 import {
   IconCheck,
@@ -34,6 +38,7 @@ import {
   PageHeader,
   SearchInput,
   TableSkeleton,
+  btnGhostCls,
   btnPrimaryCls,
   fieldCls,
   labelCls,
@@ -230,6 +235,9 @@ export default function AlbaranesPage() {
   const [deleteTarget, setDeleteTarget] = useState<DeliveryNoteDto | null>(
     null,
   );
+  const [returnTarget, setReturnTarget] = useState<DeliveryNoteDto | null>(
+    null,
+  );
 
   const query = useQuery({
     queryKey: ['delivery-notes', debouncedSearch, status],
@@ -261,6 +269,17 @@ export default function AlbaranesPage() {
     onSuccess: () => {
       toast('Albarán validado: listo para puntear en una factura');
       invalidate();
+    },
+    onError: (e) => toast(errText(e), 'error'),
+  });
+
+  const returnMutation = useMutation({
+    mutationFn: ({ id, motivo }: { id: string; motivo: string }) =>
+      deliveryNotesApi.returnToPending(id, { motivo }),
+    onSuccess: () => {
+      toast('Albarán devuelto a pendiente: corrígelo y vuelve a validarlo');
+      invalidate();
+      setReturnTarget(null);
     },
     onError: (e) => toast(errText(e), 'error'),
   });
@@ -304,6 +323,16 @@ export default function AlbaranesPage() {
             </option>
           ))}
         </select>
+        <button
+          onClick={() =>
+            exportsApi
+              .download('albaranes', { status })
+              .catch((e) => toast(errText(e), 'error'))
+          }
+          className={btnGhostCls}
+        >
+          Exportar CSV
+        </button>
         <button
           onClick={() => {
             setEditing(null);
@@ -391,7 +420,16 @@ export default function AlbaranesPage() {
                           Validar
                         </button>
                       )}
-                      {n.status !== 'facturado' && (
+                      {canReturnDeliveryNote(n) && (
+                        <button
+                          onClick={() => setReturnTarget(n)}
+                          title="Devolver a pendiente para corregirlo"
+                          className="rounded-md px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50"
+                        >
+                          Devolver
+                        </button>
+                      )}
+                      {n.status === 'pendiente' && (
                         <>
                           <button
                             onClick={() => {
@@ -404,13 +442,15 @@ export default function AlbaranesPage() {
                           >
                             <IconPencil size={14} />
                           </button>
-                          <button
-                            onClick={() => setDeleteTarget(n)}
-                            title="Eliminar"
-                            className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                          >
-                            <IconTrash size={14} />
-                          </button>
+                          {canDeleteDeliveryNote(n) && (
+                            <button
+                              onClick={() => setDeleteTarget(n)}
+                              title="Eliminar"
+                              className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                            >
+                              <IconTrash size={14} />
+                            </button>
+                          )}
                         </>
                       )}
                     </div>
@@ -432,6 +472,17 @@ export default function AlbaranesPage() {
           setModalOpen(false);
           setEditing(null);
         }}
+      />
+      <ReasonDialog
+        open={returnTarget !== null}
+        title={`¿Devolver el albarán "${returnTarget?.noteNumber ?? ''}" a pendiente?`}
+        description="Deberá revalidarse (y pasará de nuevo el cuadre con el pedido). Queda registrado en auditoría."
+        confirmLabel="Devolver"
+        loading={returnMutation.isPending}
+        onConfirm={(motivo) =>
+          returnTarget && returnMutation.mutate({ id: returnTarget.id, motivo })
+        }
+        onCancel={() => setReturnTarget(null)}
       />
       <ConfirmDialog
         open={deleteTarget !== null}

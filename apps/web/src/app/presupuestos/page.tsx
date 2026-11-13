@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import {
   BUDGET_STATUS_LABELS,
+  canDeleteBudget,
   type BudgetDetailDto,
   type BudgetDto,
   type BudgetItemDto,
@@ -384,6 +385,15 @@ function BudgetCard({
     onError: (e) => toast((e as Error).message, 'error'),
   });
 
+  const duplicateMutation = useMutation({
+    mutationFn: () => budgetsApi.duplicate(budget.id),
+    onSuccess: () => {
+      toast('Nueva versión creada en borrador: edítala y actívala');
+      qc.invalidateQueries({ queryKey: ['budgets', projectId] });
+    },
+    onError: (e) => toast((e as Error).message, 'error'),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: () => budgetsApi.remove(budget.id),
     onSuccess: () => {
@@ -446,13 +456,24 @@ function BudgetCard({
               Cerrar
             </button>
           )}
+          {/* Corregir un presupuesto activo o cerrado = nueva versión. */}
           <button
-            onClick={() => setDeleteOpen(true)}
-            className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
-            title="Eliminar presupuesto"
+            onClick={() => duplicateMutation.mutate()}
+            disabled={duplicateMutation.isPending}
+            className="rounded-lg px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+            title="Crea una copia en borrador (nueva versión) para corregirla"
           >
-            <IconTrash size={15} />
+            Duplicar
           </button>
+          {canDeleteBudget(budget.status) && (
+            <button
+              onClick={() => setDeleteOpen(true)}
+              className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+              title="Eliminar presupuesto"
+            >
+              <IconTrash size={15} />
+            </button>
+          )}
           <button
             onClick={() => setExpanded((v) => !v)}
             className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"

@@ -15,4 +15,13 @@ export class CostControlController {
   get(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.get(id);
   }
+
+  /**
+   * Economía de la obra: margen bruto, desviación por partida, retenciones
+   * e IVA. Mismo control de acceso que `cost-control`.
+   */
+  @Get('projects/:id/economics')
+  economics(@Param('id', ParseUUIDPipe) id: string) {
+    return this.service.getEconomics(id);
+  }
 }

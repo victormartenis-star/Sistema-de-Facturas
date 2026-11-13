@@ -3,13 +3,17 @@ import {
   addDays,
   addMonths,
   amountsMatch,
+  buildRectificationLines,
   computeCertification,
   computeInvoiceAmounts,
   computeIrr,
   computeNpv,
+  computeRetention,
+  computeVatBreakdown,
   daysBetween,
   payableAmount,
   planMilestones,
+  planRectificationMilestones,
   round2,
   startOfMonth,
   startOfWeek,
@@ -350,5 +354,205 @@ describe('computeIrr', () => {
     const irr = computeIrr(flows);
     expect(irr).not.toBeNull();
     expect(irr as number).toBeLessThan(0);
+  });
+});
+
+describe('retención sobre céntimos exactos', () => {
+  it('caso de referencia: 5 % sobre 20,10 € son 1,01 € (con round2 daba 1,00)', () => {
+    expect(computeRetention(20.1, 5)).toBe(1.01);
+    expect(
+      computeInvoiceAmounts([{ baseAmount: 20.1, vatPct: 21 }], false, 5),
+    ).toMatchObject({ retentionAmount: 1.01 });
+  });
+
+  it('otros medios céntimos que fallaban con coma flotante', () => {
+    expect(computeRetention(2.9, 5)).toBe(0.15);
+    expect(computeRetention(25.1, 5)).toBe(1.26);
+  });
+
+  it('acepta el numeric de Postgres como string', () => {
+    expect(computeRetention('20.10', '5.00')).toBe(1.01);
+  });
+
+  it('computeCertification(402, 5 %, 0, 5 %): acumulado 20,10 y retención 1,01', () => {
+    const c = computeCertification(402, 5, 0, 5);
+    expect(c.cumulativeAmount).toBe(20.1);
+    expect(c.retentionAmount).toBe(1.01);
+  });
+
+  it('es simétrica: la rectificativa con signo cambiado netea a cero', () => {
+    const lines = [{ baseAmount: 20.1, vatPct: 21 }];
+    const original = computeInvoiceAmounts(lines, false, 5);
+    const rect = computeInvoiceAmounts(
+      lines.map((l) => ({ ...l, baseAmount: -l.baseAmount })),
+      false,
+      5,
+    );
+    expect(rect.retentionAmount).toBe(-1.01);
+    expect(original.baseAmount + rect.baseAmount).toBe(0);
+    expect(original.vatAmount + rect.vatAmount).toBe(0);
+    expect(original.totalAmount + rect.totalAmount).toBe(0);
+    expect(original.retentionAmount + rect.retentionAmount).toBe(0);
+  });
+
+  it('payableAmount resta en céntimos exactos', () => {
+    expect(payableAmount(24.32, 1.01)).toBe(23.31);
+    expect(payableAmount(0.3, 0.1)).toBe(0.2);
+  });
+});
+
+describe('computeVatBreakdown', () => {
+  it('un grupo por tipo de IVA y la cuota total es la suma de grupos', () => {
+    const v = computeVatBreakdown(
+      [
+        { baseAmount: 100, vatPct: 21 },
+        { baseAmount: 50.5, vatPct: 10 },
+        { baseAmount: 20, vatPct: 21 },
+      ],
+      false,
+    );
+    expect(v.groups).toEqual([
+      { vatPct: 10, baseAmount: 50.5, vatAmount: 5.05 },
+      { vatPct: 21, baseAmount: 120, vatAmount: 25.2 },
+    ]);
+    expect(v.baseAmount).toBe(170.5);
+    expect(v.vatAmount).toBe(30.25);
+    expect(v.totalAmount).toBe(200.75);
+    expect(v.isp).toBe(false);
+    expect(v.selfAssessedVat).toBe(0);
+  });
+
+  it('la cuota se redondea por grupo, no línea a línea', () => {
+    // 3 líneas de 0,50 al 21 %: por línea 0,105 → 0,11 (×3 = 0,33);
+    // por grupo 1,50 × 21 % = 0,315 → 0,32.
+    const v = computeVatBreakdown(
+      Array.from({ length: 3 }, () => ({ baseAmount: 0.5, vatPct: 21 })),
+      false,
+    );
+    expect(v.vatAmount).toBe(0.32);
+  });
+
+  it('con ISP la cuota es 0, el total es la base y se informa la autoliquidada', () => {
+    const v = computeVatBreakdown([{ baseAmount: 1000, vatPct: 21 }], true);
+    expect(v.vatAmount).toBe(0);
+    expect(v.totalAmount).toBe(1000);
+    expect(v.selfAssessedVat).toBe(210);
+    expect(v.isp).toBe(true);
+  });
+});
+
+describe('buildRectificationLines', () => {
+  it('cambia el signo de la base y conserva el resto, sin mutar el origen', () => {
+    const origen = [
+      { description: 'A', baseAmount: 100.5, vatPct: 21 },
+      { description: 'B', baseAmount: 0, vatPct: 10 },
+    ];
+    const r = buildRectificationLines(origen);
+    expect(r.map((l) => l.baseAmount)).toEqual([-100.5, 0]);
+    expect(Object.is(r[1].baseAmount, -0)).toBe(false);
+    expect(r[0].description).toBe('A');
+    expect(origen[0].baseAmount).toBe(100.5);
+  });
+
+  it('original + rectificativa total netean a cero en base, IVA, total y retención', () => {
+    const lines = [{ baseAmount: 20.1, vatPct: 21 }];
+    const a = computeInvoiceAmounts(lines, false, 5);
+    const b = computeInvoiceAmounts(buildRectificationLines(lines), false, 5);
+    expect(b.retentionAmount).toBe(-1.01);
+    expect(a.baseAmount + b.baseAmount).toBe(0);
+    expect(a.vatAmount + b.vatAmount).toBe(0);
+    expect(a.totalAmount + b.totalAmount).toBe(0);
+    expect(a.retentionAmount + b.retentionAmount).toBe(0);
+  });
+});
+
+describe('planRectificationMilestones', () => {
+  const base = {
+    kind: 'venta' as const,
+    issueDate: '2026-10-01',
+    dueDate: null,
+    retentionReleaseDate: null,
+    paymentTermsDays: 30,
+  };
+
+  it('total sin pagos: no genera vencimientos', () => {
+    const plan = planRectificationMilestones({
+      ...base,
+      totalAmount: -1000,
+      retentionAmount: -50,
+      rectificationKind: 'total',
+      originalPaid: { ordinario: 0, retencion: 0 },
+    });
+    expect(plan).toEqual([]);
+  });
+
+  it('total con ordinario ya cobrado: un pago por ese importe', () => {
+    const plan = planRectificationMilestones({
+      ...base,
+      totalAmount: -1000,
+      retentionAmount: -50,
+      rectificationKind: 'total',
+      originalPaid: { ordinario: 950, retencion: 0 },
+    });
+    expect(plan).toEqual([
+      {
+        direction: 'pago',
+        kind: 'ordinario',
+        dueDate: '2026-10-31',
+        amount: 950,
+      },
+    ]);
+  });
+
+  it('total de una compra pagada: la devolución es un cobro', () => {
+    const plan = planRectificationMilestones({
+      ...base,
+      kind: 'compra',
+      totalAmount: -500,
+      retentionAmount: 0,
+      rectificationKind: 'total',
+      originalPaid: { ordinario: 500, retencion: 0 },
+    });
+    expect(plan).toHaveLength(1);
+    expect(plan[0].direction).toBe('cobro');
+    expect(plan[0].amount).toBe(500);
+  });
+
+  it('diferencias negativa con retención: pago ordinario y pago de retención, importes positivos', () => {
+    const plan = planRectificationMilestones({
+      ...base,
+      totalAmount: -200,
+      retentionAmount: -10,
+      rectificationKind: 'diferencias',
+      originalPaid: { ordinario: 0, retencion: 0 },
+    });
+    expect(plan).toEqual([
+      {
+        direction: 'pago',
+        kind: 'ordinario',
+        dueDate: '2026-10-31',
+        amount: 190,
+      },
+      {
+        direction: 'pago',
+        kind: 'retencion',
+        dueDate: '2027-10-01',
+        amount: 10,
+      },
+    ]);
+  });
+
+  it('diferencias positiva: vencimientos normales (cobro en una venta)', () => {
+    const plan = planRectificationMilestones({
+      ...base,
+      totalAmount: 100,
+      retentionAmount: 5,
+      rectificationKind: 'diferencias',
+      originalPaid: { ordinario: 0, retencion: 0 },
+    });
+    expect(plan.map((m) => [m.direction, m.kind, m.amount])).toEqual([
+      ['cobro', 'ordinario', 95],
+      ['cobro', 'retencion', 5],
+    ]);
   });
 });

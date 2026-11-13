@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   budgetCreateSchema,
+  budgetDuplicateSchema,
   budgetUpdateSchema,
   type BudgetDetailDto,
   type BudgetDto,
@@ -77,7 +78,11 @@ export function registrarPresupuestos(server: McpServer) {
       description:
         'Cambia nombre, notas o estado del presupuesto. Solo puede haber un ' +
         'presupuesto activo por obra: al pasar uno a activo, la API cierra el ' +
-        'anterior automáticamente. El agente no tiene que hacerlo a mano.',
+        'anterior automáticamente. El agente no tiene que hacerlo a mano. ' +
+        'Transiciones: borrador -> activo -> cerrado (cerrado es terminal; no se ' +
+        'vuelve atrás). Activar exige al menos una partida. Un presupuesto ' +
+        'activo o cerrado no admite cambios de precios ni de partidas: para ' +
+        'corregirlo usa duplicar_presupuesto.',
       inputSchema: {
         budgetId: z.string().uuid().describe('Identificador'),
         ...budgetUpdateSchema.shape,
@@ -94,12 +99,35 @@ export function registrarPresupuestos(server: McpServer) {
   );
 
   server.registerTool(
+    'duplicar_presupuesto',
+    {
+      title: 'Duplicar presupuesto (nueva version)',
+      description:
+        'Crea un borrador copia (cabecera y partidas) de un presupuesto. Es la ' +
+        'forma de corregir un presupuesto activo o cerrado: se edita la copia y ' +
+        'al activarla cierra el anterior, que queda intacto como historico.',
+      inputSchema: {
+        budgetId: z.string().uuid().describe('Presupuesto a copiar'),
+        ...budgetDuplicateSchema.shape,
+      },
+      annotations: { readOnlyHint: false, idempotentHint: false },
+    },
+    async ({ budgetId, ...body }) =>
+      ejecutar(() =>
+        pedir<BudgetDto>(`/budgets/${budgetId}/duplicar`, {
+          method: 'POST',
+          body: JSON.stringify(body),
+        }),
+      ),
+  );
+
+  server.registerTool(
     'eliminar_presupuesto',
     {
       title: 'Eliminar presupuesto',
       description:
         'Borra lógicamente un presupuesto. Solo se pueden borrar presupuestos ' +
-        'en estado borrador o cerrado; los activos deben cerrarse primero.',
+        'en estado borrador; los activos y cerrados se conservan como histórico.',
       inputSchema: {
         budgetId: z.string().uuid().describe('Identificador'),
       },

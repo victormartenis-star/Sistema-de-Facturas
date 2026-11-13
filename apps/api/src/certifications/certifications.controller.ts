@@ -12,9 +12,12 @@ import {
 import {
   CertificationCreateInput,
   CertificationInvoiceInput,
+  CertificationRectifyInput,
   certificationCreateSchema,
   certificationInvoiceSchema,
+  certificationRectifySchema,
 } from '@erp/shared';
+import { Roles } from '../auth/roles';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { CertificationsService } from './certifications.service';
 
@@ -33,6 +36,17 @@ export class CertificationsController {
     body: CertificationCreateInput,
   ) {
     return this.service.create(body);
+  }
+
+  /** Crea la certificación rectificativa (nuevo acumulado a origen, puede bajar). */
+  @Post(':id/rectificar')
+  @Roles('admin', 'gerente', 'administracion')
+  rectify(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(certificationRectifySchema))
+    body: CertificationRectifyInput,
+  ) {
+    return this.service.rectify(id, body);
   }
 
   /** Genera y aprueba la factura de venta de la certificación. */

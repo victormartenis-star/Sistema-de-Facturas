@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { request as httpsRequest } from 'node:https';
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -64,6 +65,11 @@ export class VerifactuSubmissionService {
     if (invoice.kind !== 'venta') {
       throw new BadRequestException(
         'VeriFactu solo se genera para facturas de venta',
+      );
+    }
+    if (invoice.rectifiesInvoiceId) {
+      throw new ConflictException(
+        'VeriFactu de facturas rectificativas no soportado todavía: no se emite como F1',
       );
     }
     if (invoice.status === 'borrador' || invoice.status === 'anulada') {

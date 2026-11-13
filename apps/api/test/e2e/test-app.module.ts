@@ -10,6 +10,7 @@ import { CertificationsModule } from '../../src/certifications/certifications.mo
 import { ContactsModule } from '../../src/contacts/contacts.module';
 import { CopilotoModule } from '../../src/copiloto/copiloto.module';
 import { CostControlModule } from '../../src/cost-control/cost-control.module';
+import { ExportsModule } from '../../src/exports/exports.module';
 import { DashboardModule } from '../../src/dashboard/dashboard.module';
 import { DbModule } from '../../src/db/db.module';
 import { DeliveryNotesModule } from '../../src/delivery-notes/delivery-notes.module';
@@ -86,6 +87,7 @@ import { UsersModule } from '../../src/users/users.module';
     RealEstateModule,
     OfflineFieldModule,
     CostControlModule,
+    ExportsModule,
     PurchaseOrdersModule, // importa ProveedoresModule (guard PRL)
     DeliveryNotesModule,
     DocumentsModule,

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const AUDIT_ACTIONS = ['create', 'update', 'delete'] as const;
+export const AUDIT_ACTIONS = ['create', 'update', 'delete', 'export'] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
 /**
@@ -13,6 +13,7 @@ export type AuditAction = (typeof AUDIT_ACTIONS)[number];
  * apps/api/src` al añadir un `audit.log()` nuevo.
  */
 export const AUDIT_ENTITY_TYPES = [
+  'export',
   'project',
   'budget',
   'certification',

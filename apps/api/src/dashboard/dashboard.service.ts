@@ -238,7 +238,7 @@ export class DashboardService {
       );
     }
 
-    // Coste real: líneas de facturas de compra aprobadas, agrupadas por obra
+    // Coste real: líneas de facturas de compra aprobadas, pagadas o rectificadas, agrupadas por obra
     const costRows = await this.dbs.db
       .select({
         projectId: invoiceLines.projectId,
@@ -250,7 +250,9 @@ export class DashboardService {
         and(
           inArray(invoiceLines.projectId, projectIds),
           eq(invoices.kind, 'compra'),
-          eq(invoices.status, 'aprobada'),
+          // Válidas: aprobada, pagada y rectificada (sigue siendo un documento
+          // fiscal; su rectificativa resta). Quedan fuera borrador y anulada.
+          inArray(invoices.status, ['aprobada', 'pagada', 'rectificada']),
           isNull(invoices.deletedAt),
         ),
       );

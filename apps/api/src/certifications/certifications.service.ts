@@ -9,8 +9,11 @@ import {
   CertificationCreateInput,
   CertificationDto,
   CertificationInvoiceInput,
+  CertificationRectifyInput,
   certificationCreateSchema,
   certificationInvoiceSchema,
+  certificationPctBlockReason,
+  certificationRectifySchema,
   computeCertification,
   round2,
 } from '@erp/shared';
@@ -36,6 +39,8 @@ function toDto(row: Certification): CertificationDto {
     retentionAmount: Number(row.retentionAmount),
     status: row.status as CertificationDto['status'],
     invoiceId: row.invoiceId,
+    rectifiesCertificationId: row.rectifiesCertificationId,
+    rectificationReason: row.rectificationReason,
     notes: row.notes,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -105,11 +110,12 @@ export class CertificationsService {
 
         const prevPct = prev ? Number(prev.cumulativePct) : 0;
         const prevCumulative = prev ? Number(prev.cumulativeAmount) : 0;
-        if (data.cumulativePct <= prevPct) {
-          throw new ConflictException(
-            `El % a origen debe superar el ${prevPct.toFixed(2)} % ya certificado`,
-          );
-        }
+        const bloqueoPct = certificationPctBlockReason({
+          cumulativePct: data.cumulativePct,
+          previousPct: prevPct,
+          isRectification: false,
+        });
+        if (bloqueoPct) throw new ConflictException(bloqueoPct);
 
         const retentionPct = data.retentionPct ?? Number(project.retentionPct);
         const { cumulativeAmount, periodAmount, retentionAmount } =
@@ -155,6 +161,212 @@ export class CertificationsService {
   }
 
   /**
+   * Certificación rectificativa: fija un nuevo acumulado a origen (que puede
+   * bajar) para corregir una certificación ya facturada. Al facturarla se emite
+   * una factura rectificativa por diferencias sobre la factura de la corregida.
+   */
+  async rectify(
+    id: string,
+    input: CertificationRectifyInput,
+  ): Promise<CertificationDto> {
+    const companyId = await this.dbs.getCompanyId();
+    const data = certificationRectifySchema.parse(input);
+    const orig = await this.find(id);
+    if (orig.status !== 'facturada' || !orig.invoiceId) {
+      throw new ConflictException(
+        'Solo se rectifica una certificación facturada',
+      );
+    }
+    const project = await this.findProject(orig.projectId);
+    if (project.contractAmount === null) {
+      throw new ConflictException(
+        'La obra no tiene importe de contrato: es necesario para certificar a origen',
+      );
+    }
+
+    let row: Certification;
+    try {
+      row = await this.dbs.db.transaction(async (tx) => {
+        await this.lockProject(tx, orig.projectId);
+        const [locked] = await tx
+          .select({ status: certifications.status })
+          .from(certifications)
+          .where(
+            and(eq(certifications.id, id), isNull(certifications.deletedAt)),
+          )
+          .for('update');
+        if (!locked || locked.status !== 'facturada') {
+          throw new ConflictException(
+            'Solo se rectifica una certificación facturada',
+          );
+        }
+        const [prev] = await tx
+          .select()
+          .from(certifications)
+          .where(
+            and(
+              eq(certifications.projectId, orig.projectId),
+              isNull(certifications.deletedAt),
+            ),
+          )
+          .orderBy(desc(certifications.seq))
+          .limit(1);
+        if (prev.status !== 'facturada') {
+          throw new ConflictException(
+            `Factura o elimina antes la certificación nº ${prev.seq} (borrador) para poder rectificar`,
+          );
+        }
+        const bloqueoPct = certificationPctBlockReason({
+          cumulativePct: data.cumulativePct,
+          previousPct: Number(prev.cumulativePct),
+          isRectification: true,
+        });
+        if (bloqueoPct) throw new ConflictException(bloqueoPct);
+
+        const retentionPct = Number(orig.retentionPct);
+        const { cumulativeAmount, periodAmount, retentionAmount } =
+          computeCertification(
+            Number(project.contractAmount),
+            data.cumulativePct,
+            Number(prev.cumulativeAmount),
+            retentionPct,
+          );
+        const [created] = await tx
+          .insert(certifications)
+          .values({
+            companyId,
+            projectId: orig.projectId,
+            seq: prev.seq + 1,
+            certDate: data.certDate,
+            cumulativePct: data.cumulativePct.toFixed(2),
+            cumulativeAmount: cumulativeAmount.toFixed(2),
+            periodAmount: periodAmount.toFixed(2),
+            retentionPct: retentionPct.toFixed(2),
+            retentionAmount: retentionAmount.toFixed(2),
+            notes: data.notes ?? null,
+            rectifiesCertificationId: orig.id,
+            rectificationReason: data.motivo,
+          })
+          .returning();
+        return created;
+      });
+    } catch (err) {
+      if ((err as { code?: string }).code === UNIQUE_VIOLATION) {
+        throw new ConflictException(
+          'Ya existe una certificación con ese número en la obra: reintenta',
+        );
+      }
+      throw err;
+    }
+    void this.audit.log({
+      entityType: 'certification',
+      entityId: row.id,
+      action: 'create',
+      newData: row,
+    });
+    return toDto(row);
+  }
+
+  /**
+   * Factura de una certificación rectificativa: genera una factura
+   * rectificativa por diferencias sobre la factura de la certificación
+   * corregida, la aprueba y deja la certificación como facturada.
+   */
+  private async invoiceRectification(
+    cert: Certification,
+    data: ReturnType<typeof certificationInvoiceSchema.parse>,
+  ): Promise<CertificationDto> {
+    const id = cert.id;
+    const [origCert] = await this.dbs.db
+      .select()
+      .from(certifications)
+      .where(eq(certifications.id, cert.rectifiesCertificationId as string))
+      .limit(1);
+    if (!origCert?.invoiceId) {
+      throw new ConflictException(
+        'La certificación corregida ya no tiene factura: rectifica la factura directamente',
+      );
+    }
+    // get() aplica el acceso por obra y el 404 habitual.
+    const origInvoice = await this.invoicesService.get(origCert.invoiceId);
+    if (data.contactId !== origInvoice.contactId) {
+      throw new ConflictException(
+        'La rectificativa se emite al mismo cliente que la factura original',
+      );
+    }
+    const period = Number(cert.periodAmount);
+    if (period === 0) {
+      throw new ConflictException(
+        'La certificación rectificativa no cambia el importe: no hay nada que facturar',
+      );
+    }
+    const project = await this.findProject(cert.projectId);
+    const description =
+      `Rectificación de la certificación nº ${origCert.seq} — ${project.name} ` +
+      `(${Number(cert.cumulativePct).toFixed(2)} % a origen; ` +
+      `acumulado ${Number(cert.cumulativeAmount).toFixed(2)} €)`;
+
+    const { row, invoiceId } = await this.dbs.db.transaction(async (tx) => {
+      const [locked] = await tx
+        .select({ status: certifications.status })
+        .from(certifications)
+        .where(and(eq(certifications.id, id), isNull(certifications.deletedAt)))
+        .for('update');
+      if (!locked || locked.status !== 'borrador') {
+        throw new ConflictException('La certificación ya está facturada');
+      }
+      const { row: invoice, contact } =
+        await this.invoicesService.crearRectificativaEnTx(
+          tx,
+          origCert.invoiceId as string,
+          {
+            clase: 'diferencias',
+            issueDate: data.issueDate,
+            motivo:
+              cert.rectificationReason ?? 'Rectificación de certificación',
+            lines: [
+              {
+                description,
+                baseAmount: period,
+                vatPct: origInvoice.lines[0]?.vatPct ?? 21,
+                projectId: cert.projectId,
+              },
+            ],
+          },
+        );
+      await this.invoicesService.aprobarEnTx(tx, invoice, contact);
+      const [updated] = await tx
+        .update(certifications)
+        .set({
+          status: 'facturada',
+          invoiceId: invoice.id,
+          updatedAt: new Date(),
+        })
+        .where(eq(certifications.id, id))
+        .returning();
+      return { row: updated, invoiceId: invoice.id };
+    });
+    void this.audit.log({
+      entityType: 'invoice',
+      entityId: invoiceId,
+      action: 'create',
+      newData: {
+        invoiceId,
+        kind: 'venta',
+        rectifies: origCert.invoiceId,
+        status: 'aprobada',
+      },
+    });
+    void this.audit.log({
+      entityType: 'certification',
+      entityId: id,
+      action: 'update',
+      newData: { status: 'facturada', invoiceId },
+    });
+    return toDto(row);
+  }
+
+  /**
    * Emite la factura de venta de la certificación: crea la factura con el
    * desglose a origen, la aprueba (generando vencimientos con la retención
    * de garantía diferida) y deja la certificación como facturada.
@@ -168,6 +380,9 @@ export class CertificationsService {
       throw new ConflictException('La certificación ya está facturada');
     }
     const data = certificationInvoiceSchema.parse(input);
+    if (cert.rectifiesCertificationId) {
+      return this.invoiceRectification(cert, data);
+    }
     const project = await this.findProject(cert.projectId);
 
     const pct = Number(cert.cumulativePct);
@@ -254,7 +469,7 @@ export class CertificationsService {
     const cert = await this.find(id);
     if (cert.status !== 'borrador') {
       throw new ConflictException(
-        'No se puede eliminar una certificación facturada: anula antes su factura',
+        'No se puede eliminar una certificación facturada: rectifica antes su factura',
       );
     }
     // Misma exclusión por obra que `create`: sin ella, un alta simultánea

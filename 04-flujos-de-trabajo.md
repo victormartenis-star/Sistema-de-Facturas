@@ -106,14 +106,67 @@ stateDiagram-v2
 stateDiagram-v2
     direction LR
     state "Factura" as inv {
-        [*] --> pendiente_validacion
-        pendiente_validacion --> validada
-        validada --> parcialmente_pagada
-        validada --> vencida : vence sin pago
-        vencida --> parcialmente_pagada
-        parcialmente_pagada --> pagada
-        validada --> pagada
-        pendiente_validacion --> anulada
-        validada --> anulada : rectificativa
+        [*] --> borrador
+        borrador --> aprobada : aprobar
+        borrador --> anulada : anular
+        aprobada --> pagada : pagar / último vencimiento liquidado
+        pagada --> aprobada : tesorería reabre un vencimiento
+        aprobada --> rectificada : se aprueba su rectificativa total
+        pagada --> rectificada : se aprueba su rectificativa total
+        aprobada --> anulada : solo compra, con motivo y sin vencimientos pagados
     }
 ```
+
+Los estados `rectificada` y `anulada` son terminales. `rectificada` sigue siendo un documento fiscal válido (cuenta en el coste y en el libro de IVA junto a su rectificativa, que resta); `anulada` es "no cuenta".
+
+## F7 · Rectificativas, devoluciones y cierre de estados
+
+Principio: lo que ya es un documento fiscal o una línea base **no se edita, se corrige con otro documento**. El histórico queda intacto y toda corrección deja motivo y traza en auditoría.
+
+### Estados y qué bloquean
+
+| Documento | Estados (terminal en negrita) | Se puede editar / borrar |
+|---|---|---|
+| Presupuesto | borrador → activo → **cerrado** (sin vuelta atrás; activar cierra el activo anterior y exige ≥ 1 partida) | Todo en borrador. En activo solo notas y la imputación a partida (`phaseId`, `sortOrder`). En cerrado nada. Solo se borra un borrador |
+| Albarán | pendiente → validado → facturado | Pendiente: todo. Validado sin factura: solo `description`. Vinculado a una factura o facturado: nada. Solo se borra un pendiente |
+| Factura | borrador → aprobada → pagada, y **rectificada** / **anulada** | Solo el borrador (edición y borrado) |
+| Certificación | borrador → facturada | Líneas y borrado solo en borrador |
+
+### Factura rectificativa (`POST /invoices/:id/rectificar`)
+
+```mermaid
+flowchart TD
+    A["Factura aprobada o pagada con un error"] --> B{"¿Qué hay que corregir?"}
+    B -- "Todo el documento<br/>(cliente, fecha, ISP...)" --> T["Rectificativa TOTAL<br/>líneas de la original con signo cambiado"]
+    B -- "Solo importes" --> D["Rectificativa POR DIFERENCIAS<br/>líneas con el delta (+ o −)"]
+    T --> R["Borrador R-AAAA-NNNN<br/>(numeración automática)"]
+    D --> R
+    R --> AP["Aprobar la rectificativa"]
+    AP --> E1["TOTAL: la original pasa a rectificada,<br/>se eliminan sus vencimientos previstos,<br/>sus albaranes vuelven a validado sin factura<br/>y su certificación vuelve a borrador"]
+    AP --> E2["DIFERENCIAS: la original no cambia"]
+```
+
+Reglas:
+- Solo se rectifica una factura `aprobada` o `pagada`, del mismo contacto, tipo e ISP que la original. Exige motivo (5-500 caracteres). Solo una rectificativa **total** por original.
+- Una **venta aprobada no se anula** (art. 15 RD 1619/2012): se rectifica. Una **compra aprobada** se puede anular con motivo y solo si ningún vencimiento está pagado.
+- Anular fuera de borrador exige `{ "motivo": "..." }` en el cuerpo (web, MCP y API).
+- Los vencimientos de una rectificativa nunca llevan importes negativos: lo negativo sale como vencimiento en dirección inversa (abono). En la total solo se devuelve lo ya pagado de la original.
+- Facturae y VeriFactu de una rectificativa responden 409 hasta que se implementen los registros R1-R4; no se emite un `F1` falso.
+- Original y rectificativa se compensan en coste, margen e IVA (la rectificada cuenta con su rectificativa restando).
+
+### Certificación rectificativa (`POST /certifications/:id/rectificar`)
+
+La certificación es **a origen**, así que la corrección de una medición es otra certificación que fija el acumulado correcto, y **puede ser menor** que el anterior (periodo negativo). Al facturarla se genera una factura rectificativa por diferencias enlazada a la factura de la certificación corregida. Si el error es de la factura y no de la medición, se rectifica la factura en total y la certificación vuelve a `borrador` para facturarla de nuevo.
+
+### Devolución de albarán (`POST /delivery-notes/:id/devolver`)
+
+Un albarán `validado` que aún no está en ninguna factura se devuelve a `pendiente` con motivo (auditado), se corrige y se revalida (vuelve a pasar el cuadre con el pedido). Una vez facturado, la corrección entra por la factura rectificativa; no existe "albarán rectificativo".
+
+### Nueva versión de presupuesto (`POST /budgets/:id/duplicar`)
+
+Un presupuesto activo o cerrado no se modifica: se duplica en un borrador (cabecera + partidas), se corrige y al activarlo cierra el anterior, que queda como histórico.
+
+### Analítica y exportación
+
+- `GET /projects/:id/economics`: margen bruto (sobre certificado y sobre facturado), desviación por partida con la fila "Sin partida", retenciones pendientes y IVA repercutido/soportado/ISP, en tiempo real.
+- `GET /exports/:recurso?format=csv|json`: 12 recursos (obras, partidas de presupuesto, albaranes, facturas y líneas, certificaciones, partes, vencimientos y economía). CSV con `;` y BOM UTF-8 para Excel; JSON como array de objetos. Todo es GET, así que el rol `lector` exporta; el rol `obra` solo ve sus obras y no accede a los resúmenes de empresa (`economia-resumen`, `economia-iva`). Cada exportación queda en auditoría con la acción `export`. Tope de 50.000 filas.

@@ -15,11 +15,15 @@ import type { Response } from 'express';
 import {
   INVOICE_KINDS,
   INVOICE_STATUSES,
+  InvoiceCancelInput,
   InvoiceCreateInput,
   InvoiceKind,
+  InvoiceRectifyInput,
   InvoiceStatus,
   InvoiceUpdateInput,
+  invoiceCancelSchema,
   invoiceCreateSchema,
+  invoiceRectifySchema,
   invoiceUpdateSchema,
 } from '@erp/shared';
 import { Roles } from '../auth/roles';
@@ -41,6 +45,7 @@ export class InvoicesController {
     @Query('kind') kind?: string,
     @Query('status') status?: string,
     @Query('search') search?: string,
+    @Query('rectificativas') rectificativas?: string,
   ) {
     const validKind = INVOICE_KINDS.includes(kind as InvoiceKind)
       ? (kind as InvoiceKind)
@@ -48,7 +53,12 @@ export class InvoicesController {
     const validStatus = INVOICE_STATUSES.includes(status as InvoiceStatus)
       ? (status as InvoiceStatus)
       : undefined;
-    return this.service.list(validKind, validStatus, search);
+    return this.service.list(
+      validKind,
+      validStatus,
+      search,
+      rectificativas === 'true',
+    );
   }
 
   @Get(':id')
@@ -114,10 +124,28 @@ export class InvoicesController {
     return this.service.markPaid(id);
   }
 
-  /** Anula la factura, libera albaranes y borra vencimientos previstos. */
+  /**
+   * Anula la factura, libera albaranes y borra vencimientos previstos.
+   * Fuera de borrador exige motivo; una venta aprobada no se anula (se rectifica).
+   */
   @Post(':id/anular')
-  cancel(@Param('id', ParseUUIDPipe) id: string) {
-    return this.service.cancel(id);
+  cancel(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(invoiceCancelSchema))
+    body: InvoiceCancelInput,
+  ) {
+    return this.service.cancel(id, body);
+  }
+
+  /** Crea la rectificativa (total o por diferencias) en borrador. */
+  @Post(':id/rectificar')
+  @Roles('admin', 'gerente', 'administracion')
+  rectify(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(invoiceRectifySchema))
+    body: InvoiceRectifyInput,
+  ) {
+    return this.service.rectify(id, body);
   }
 
   @Delete(':id')

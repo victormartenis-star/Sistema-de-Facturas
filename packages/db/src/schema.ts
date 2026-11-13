@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   AnyPgColumn,
   boolean,
+  check,
   date,
   index,
   integer,
@@ -268,10 +269,17 @@ export const projectPhases = pgTable(
 
 export const invoiceKindEnum = pgEnum('invoice_kind', ['compra', 'venta']);
 
+/** Clase de factura rectificativa: total (anula el efecto) o por diferencias. */
+export const rectificationKindEnum = pgEnum('rectification_kind', [
+  'total',
+  'diferencias',
+]);
+
 export const invoiceStatusEnum = pgEnum('invoice_status', [
   'borrador',
   'aprobada',
   'pagada',
+  'rectificada',
   'anulada',
 ]);
 
@@ -342,6 +350,14 @@ export const invoices = pgTable(
       .notNull()
       .default('no_generado'),
     verifactuSentAt: timestamp('verifactu_sent_at', { withTimezone: true }),
+    /** Factura que rectifica esta (null si no es rectificativa). */
+    rectifiesInvoiceId: uuid('rectifies_invoice_id').references(
+      (): AnyPgColumn => invoices.id,
+    ),
+    rectificationKind: rectificationKindEnum('rectification_kind'),
+    rectificationReason: text('rectification_reason'),
+    /** Motivo de anulación (obligatorio fuera de borrador). */
+    cancelReason: text('cancel_reason'),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -352,6 +368,16 @@ export const invoices = pgTable(
   },
   // Un mismo proveedor/cliente no puede repetir número de factura activo
   (t) => [
+    check(
+      'invoices_rectification_coherence',
+      sql`(${t.rectifiesInvoiceId} IS NULL AND ${t.rectificationKind} IS NULL AND ${t.rectificationReason} IS NULL) OR (${t.rectifiesInvoiceId} IS NOT NULL AND ${t.rectificationKind} IS NOT NULL AND ${t.rectificationReason} IS NOT NULL)`,
+    ),
+    index('invoices_rectifies_invoice_id_idx').on(t.rectifiesInvoiceId),
+    uniqueIndex('invoices_rectifies_total_unique')
+      .on(t.rectifiesInvoiceId)
+      .where(
+        sql`rectification_kind = 'total' AND deleted_at IS NULL AND status <> 'anulada'`,
+      ),
     index('invoices_company_status_issue_date_idx').on(
       t.companyId,
       t.status,
@@ -424,6 +450,11 @@ export const certifications = pgTable(
     status: certStatusEnum('status').notNull().default('borrador'),
     invoiceId: uuid('invoice_id').references(() => invoices.id),
     notes: text('notes'),
+    /** Certificación que corrige (null si no es rectificativa). */
+    rectifiesCertificationId: uuid('rectifies_certification_id').references(
+      (): AnyPgColumn => certifications.id,
+    ),
+    rectificationReason: text('rectification_reason'),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -434,6 +465,9 @@ export const certifications = pgTable(
   },
   (t) => [
     index('certifications_invoice_id_idx').on(t.invoiceId),
+    index('certifications_rectifies_certification_id_idx').on(
+      t.rectifiesCertificationId,
+    ),
     uniqueIndex('certifications_project_seq_unique')
       .on(t.projectId, t.seq)
       .where(sql`deleted_at IS NULL`),
@@ -548,6 +582,8 @@ export const deliveryNotes = pgTable(
     status: deliveryNoteStatusEnum('status').notNull().default('pendiente'),
     validatedAt: timestamp('validated_at', { withTimezone: true }),
     invoiceId: uuid('invoice_id').references(() => invoices.id),
+    /** Último motivo de devolución a pendiente (el detalle va a auditoría). */
+    returnReason: text('return_reason'),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -1008,7 +1044,7 @@ export type NewCertificationLine = typeof certificationLines.$inferInsert;
 
 // ─── Auditoría ────────────────────────────────────────────────────────────────
 
-export const AUDIT_ACTIONS = ['create', 'update', 'delete'] as const;
+export const AUDIT_ACTIONS = ['create', 'update', 'delete', 'export'] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
 /**

@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   certificationCreateSchema,
   certificationInvoiceSchema,
+  certificationRectifySchema,
   type CertificationDto,
 } from '@erp/shared';
 import { pedir, query } from '../api';
@@ -105,6 +106,32 @@ export function registrarCertificaciones(server: McpServer) {
         });
         return { ok: true, id: certificationId };
       }),
+  );
+
+  server.registerTool(
+    'rectificar_certificacion',
+    {
+      title: 'Rectificar certificacion',
+      description:
+        'Crea una certificacion RECTIFICATIVA en borrador que fija el nuevo ' +
+        '% acumulado correcto a origen (puede ser MENOR que el anterior; el ' +
+        'importe del periodo sale negativo). Al facturarla (facturar_certificacion) ' +
+        'se genera una factura rectificativa por diferencias enlazada a la ' +
+        'original. Si lo que esta mal es la factura (cliente, fecha, ISP), ' +
+        'usa rectificar_factura con clase=total: la certificacion vuelve a borrador.',
+      inputSchema: {
+        id: z.string().uuid().describe('Certificacion que se corrige'),
+        ...certificationRectifySchema.shape,
+      },
+      annotations: { readOnlyHint: false, idempotentHint: false },
+    },
+    async ({ id, ...cuerpo }) =>
+      ejecutar(() =>
+        pedir<CertificationDto>(`/certifications/${id}/rectificar`, {
+          method: 'POST',
+          body: JSON.stringify(cuerpo),
+        }),
+      ),
   );
 
   // ── Herramienta de resumen de avance ────────────────────────────────────────
