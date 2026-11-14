@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { getDb } from '@erp/db';
+import { closeDb, getDb } from '@erp/db';
 
 /** Índices de la Fase 2 (migración 0028_fase2_indices). */
 const INDICES_ESPERADOS = [
@@ -29,6 +29,13 @@ const INDICES_ESPERADOS = [
 ];
 
 describe('Índices de la Fase 2', () => {
+  // Esta spec usa `getDb()` sin levantar una app Nest, así que nadie más
+  // cierra el pool de `pg`: sin esto Jest avisa «did not exit one second
+  // after the test run has completed».
+  afterAll(async () => {
+    await closeDb();
+  });
+
   it('existen todos los índices del núcleo económico', async () => {
     const db = getDb();
     const res = await db.execute(
