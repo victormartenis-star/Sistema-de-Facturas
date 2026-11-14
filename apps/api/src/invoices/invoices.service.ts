@@ -72,6 +72,11 @@ import {
 import { ComplianceService } from '../compliance/compliance.service';
 import { ProveedoresService } from '../modules/proveedores/proveedores.service';
 import { AuditService } from '../audit/audit.service';
+import {
+  cambiarEstado,
+  cambiarEstadoMasivo,
+  MENSAJE_ESTADO_CAMBIADO,
+} from '../common/cambiar-estado';
 import { DbService } from '../db/db.service';
 
 type InvoiceCreateData = ReturnType<typeof invoiceCreateSchema.parse>;
@@ -363,8 +368,9 @@ export class InvoicesService {
     );
 
     await this.dbs.db.transaction(async (tx) => {
+      let editadas: { id: string }[] = [];
       try {
-        await tx
+        editadas = await tx
           .update(invoices)
           .set({
             ...(data.contactId !== undefined && { contactId: data.contactId }),
@@ -392,9 +398,16 @@ export class InvoicesService {
             retentionAmount: amounts.retentionAmount.toFixed(2),
             updatedAt: new Date(),
           })
-          .where(eq(invoices.id, id));
+          // Solo un borrador admite edición. La condición va en el propio
+          // UPDATE: si una aprobación concurrente ganó la carrera, no se toca
+          // ninguna fila y se responde 409 (los importes no cambian).
+          .where(and(eq(invoices.id, id), eq(invoices.status, 'borrador')))
+          .returning({ id: invoices.id });
       } catch (err) {
         this.rethrowDuplicateNumber(err, data.invoiceNumber ?? '');
+      }
+      if (editadas.length === 0) {
+        throw new ConflictException(MENSAJE_ESTADO_CAMBIADO);
       }
       if (data.lines) {
         await tx.delete(invoiceLines).where(eq(invoiceLines.invoiceId, id));
@@ -480,12 +493,18 @@ export class InvoicesService {
    * vencimientos. Solo usa `tx`. Las comprobaciones de homologación PRL
    * (solo compra) las hace `approve` antes de abrir la transacción.
    */
-  async aprobarEnTx(tx: Tx, invoice: Invoice, contact: Contact): Promise<void> {
-    const id = invoice.id;
+  async aprobarEnTx(
+    tx: Tx,
+    invoiceLeida: Invoice,
+    contact: Contact,
+  ): Promise<void> {
+    const id = invoiceLeida.id;
     // Se relee con bloqueo: dos aprobaciones simultáneas se serializan y la
-    // segunda ve que ya no es borrador.
+    // segunda ve que ya no es borrador. Se trabaja con la fila bloqueada (no
+    // con la leída antes de abrir la transacción): un PATCH que haya ganado la
+    // carrera deja importes nuevos y los vencimientos deben salir de ellos.
     const [locked] = await tx
-      .select({ status: invoices.status })
+      .select()
       .from(invoices)
       .where(and(eq(invoices.id, id), isNull(invoices.deletedAt)))
       .for('update');
@@ -496,6 +515,7 @@ export class InvoicesService {
     ) {
       throw new ConflictException('Solo se aprueban facturas en borrador');
     }
+    const invoice = locked;
 
     if (invoice.rectifiesInvoiceId) {
       await this.aprobarRectificativaEnTx(tx, invoice, contact);
@@ -523,16 +543,17 @@ export class InvoicesService {
           `No se puede aprobar: la base de la factura (${base.toFixed(2)} €) no cuadra con la suma de los albaranes (${notesTotal.toFixed(2)} €)`,
         );
       }
-      await tx
-        .update(deliveryNotes)
-        .set({ status: 'facturado', updatedAt: new Date() })
-        .where(eq(deliveryNotes.invoiceId, id));
+      await cambiarEstadoMasivo(
+        tx,
+        deliveryNotes,
+        'delivery_note',
+        eq(deliveryNotes.invoiceId, id),
+        'validado',
+        'facturado',
+      );
     }
 
-    await tx
-      .update(invoices)
-      .set({ status: 'aprobada', updatedAt: new Date() })
-      .where(eq(invoices.id, id));
+    await cambiarEstado(tx, invoices, 'invoice', id, 'borrador', 'aprobada');
 
     await this.insertMilestones(tx, invoice, contact);
   }
@@ -607,18 +628,34 @@ export class InvoicesService {
             eq(paymentMilestones.status, 'previsto'),
           ),
         );
-      await tx
-        .update(invoices)
-        .set({ status: 'rectificada', updatedAt: new Date() })
-        .where(eq(invoices.id, orig.id));
-      await tx
-        .update(deliveryNotes)
-        .set({ invoiceId: null, status: 'validado', updatedAt: new Date() })
-        .where(eq(deliveryNotes.invoiceId, orig.id));
-      await tx
-        .update(certifications)
-        .set({ status: 'borrador', invoiceId: null, updatedAt: new Date() })
-        .where(eq(certifications.invoiceId, orig.id));
+      await cambiarEstado(
+        tx,
+        invoices,
+        'invoice',
+        orig.id,
+        orig.status as InvoiceStatus,
+        'rectificada',
+      );
+      // Los albaranes de una factura aprobada están `facturado`; la
+      // certificación de la que procede, `facturada`.
+      await cambiarEstadoMasivo(
+        tx,
+        deliveryNotes,
+        'delivery_note',
+        eq(deliveryNotes.invoiceId, orig.id),
+        'facturado',
+        'validado',
+        { invoiceId: null },
+      );
+      await cambiarEstadoMasivo(
+        tx,
+        certifications,
+        'certification',
+        eq(certifications.invoiceId, orig.id),
+        'facturada',
+        'borrador',
+        { invoiceId: null },
+      );
     }
 
     const plan = planRectificationMilestones({
@@ -634,13 +671,26 @@ export class InvoicesService {
     });
     // Sin nada pendiente de liquidar, la rectificativa nace liquidada (misma
     // regla que `invoiceStatusFromMilestones`).
-    await tx
-      .update(invoices)
-      .set({
-        status: plan.length > 0 ? 'aprobada' : 'pagada',
-        updatedAt: new Date(),
-      })
-      .where(eq(invoices.id, invoice.id));
+    // borrador -> pagada no existe en la máquina de estados: se pasa por
+    // `aprobada` (dos transiciones legales en la misma transacción).
+    await cambiarEstado(
+      tx,
+      invoices,
+      'invoice',
+      invoice.id,
+      'borrador',
+      'aprobada',
+    );
+    if (plan.length === 0) {
+      await cambiarEstado(
+        tx,
+        invoices,
+        'invoice',
+        invoice.id,
+        'aprobada',
+        'pagada',
+      );
+    }
     if (plan.length > 0) {
       await tx.insert(paymentMilestones).values(
         plan.map((m) => ({
@@ -867,19 +917,17 @@ export class InvoicesService {
       throw new ConflictException('Solo se pueden liquidar facturas aprobadas');
     }
     await this.dbs.db.transaction(async (tx) => {
-      await tx
-        .update(invoices)
-        .set({ status: 'pagada', updatedAt: new Date() })
-        .where(eq(invoices.id, id));
-      await tx
-        .update(paymentMilestones)
-        .set({ status: 'pagado', paidAt: todayIso(), updatedAt: new Date() })
-        .where(
-          and(
-            eq(paymentMilestones.invoiceId, id),
-            eq(paymentMilestones.status, 'previsto'),
-          ),
-        );
+      // WHERE status = 'aprobada': si una anulación concurrente ganó, 409.
+      await cambiarEstado(tx, invoices, 'invoice', id, 'aprobada', 'pagada');
+      await cambiarEstadoMasivo(
+        tx,
+        paymentMilestones,
+        'milestone',
+        eq(paymentMilestones.invoiceId, id),
+        'previsto',
+        'pagado',
+        { paidAt: todayIso() },
+      );
     });
     return this.get(id);
   }
@@ -938,18 +986,30 @@ export class InvoicesService {
       await tx
         .delete(paymentMilestones)
         .where(eq(paymentMilestones.invoiceId, id));
+      // Albaranes de una factura aprobada (`facturado`) vuelven a `validado`;
+      // los de un borrador ya estaban `validado` y solo se desvinculan.
+      await cambiarEstadoMasivo(
+        tx,
+        deliveryNotes,
+        'delivery_note',
+        eq(deliveryNotes.invoiceId, id),
+        'facturado',
+        'validado',
+        { invoiceId: null },
+      );
       await tx
         .update(deliveryNotes)
-        .set({ invoiceId: null, status: 'validado', updatedAt: new Date() })
+        .set({ invoiceId: null, updatedAt: new Date() })
         .where(eq(deliveryNotes.invoiceId, id));
-      await tx
-        .update(invoices)
-        .set({
-          status: 'anulada',
-          cancelReason: data.motivo ?? null,
-          updatedAt: new Date(),
-        })
-        .where(eq(invoices.id, id));
+      await cambiarEstado(
+        tx,
+        invoices,
+        'invoice',
+        id,
+        locked.status as InvoiceStatus,
+        'anulada',
+        { cancelReason: data.motivo ?? null },
+      );
     });
     void this.audit.log({
       entityType: 'invoice',
@@ -971,10 +1031,16 @@ export class InvoicesService {
         .update(deliveryNotes)
         .set({ invoiceId: null, updatedAt: new Date() })
         .where(eq(deliveryNotes.invoiceId, id));
-      await tx
+      // Borrado lógico solo de borradores: la condición va en el UPDATE para
+      // que una aprobación concurrente no deje una factura aprobada borrada.
+      const borradas = await tx
         .update(invoices)
         .set({ deletedAt: new Date(), updatedAt: new Date() })
-        .where(eq(invoices.id, id));
+        .where(and(eq(invoices.id, id), eq(invoices.status, 'borrador')))
+        .returning({ id: invoices.id });
+      if (borradas.length === 0) {
+        throw new ConflictException(MENSAJE_ESTADO_CAMBIADO);
+      }
     });
   }
 

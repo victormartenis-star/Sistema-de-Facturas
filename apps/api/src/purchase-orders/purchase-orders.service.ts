@@ -40,6 +40,7 @@ import {
   todayIso,
   traceabilityReading,
 } from '@erp/shared';
+import { cambiarEstado } from '../common/cambiar-estado';
 import { DbService } from '../db/db.service';
 import { ProveedoresService } from '../modules/proveedores/proveedores.service';
 
@@ -236,54 +237,97 @@ export class PurchaseOrdersService {
    * silencio, porque ese importe es coste que se perdería.
    */
   async close(id: string): Promise<PurchaseOrderDto> {
-    const order = await this.find(id);
-    if (order.status === 'anulado') {
-      throw new ConflictException('El pedido está anulado');
-    }
-    const delivered = (await this.deliveredByOrder([id])).get(id);
-    const pending = round2(
-      (delivered?.deliveredAmount ?? 0) - (delivered?.invoicedAmount ?? 0),
-    );
-    if (pending > 0) {
-      throw new ConflictException(
-        `No se puede cerrar: quedan ${pending.toFixed(2)} € recibidos sin facturar. Regulariza la factura o anota la incidencia antes de cerrar.`,
+    await this.find(id); // 404 / empresa
+    await this.dbs.db.transaction(async (tx) => {
+      // Bloqueo ANTES de leer el estado: cerrar y anular a la vez se
+      // serializan y el segundo ve el estado ya cambiado.
+      await this.bloquearPedidos(tx, [id]);
+      const [order] = await tx
+        .select()
+        .from(purchaseOrders)
+        .where(
+          and(eq(purchaseOrders.id, id), isNull(purchaseOrders.deletedAt)),
+        );
+      if (!order) throw new NotFoundException('Pedido no encontrado');
+      if (order.status === 'anulado') {
+        throw new ConflictException('El pedido está anulado');
+      }
+      const delivered = (await this.deliveredByOrder([id], tx)).get(id);
+      const pending = round2(
+        (delivered?.deliveredAmount ?? 0) - (delivered?.invoicedAmount ?? 0),
       );
-    }
-    await this.dbs.db
-      .update(purchaseOrders)
-      .set({ status: 'cerrado', closedAt: new Date(), updatedAt: new Date() })
-      .where(eq(purchaseOrders.id, id));
+      if (pending > 0) {
+        throw new ConflictException(
+          `No se puede cerrar: quedan ${pending.toFixed(2)} € recibidos sin facturar. Regulariza la factura o anota la incidencia antes de cerrar.`,
+        );
+      }
+      // Cerrar un pedido ya cerrado es una transición ilegal (409).
+      await cambiarEstado(
+        tx,
+        purchaseOrders,
+        'purchase_order',
+        id,
+        order.status as PurchaseOrderStatus,
+        'cerrado',
+        { closedAt: new Date() },
+      );
+    });
     return this.get(id);
   }
 
+  /**
+   * CAMBIO DE COMPORTAMIENTO (máquina de estados): solo se anula desde
+   * `emitido`. Un pedido cerrado ya no se puede anular (antes sí) porque
+   * `cerrado` y `anulado` son terminales. Anular un pedido ya anulado sigue
+   * siendo idempotente.
+   */
   async cancel(id: string): Promise<PurchaseOrderDto> {
-    const order = await this.find(id);
-    const delivered = (await this.deliveredByOrder([id])).get(id);
-    if ((delivered?.count ?? 0) > 0) {
-      throw new ConflictException(
-        'No se puede anular un pedido con albaranes imputados',
+    await this.find(id); // 404 / empresa
+    await this.dbs.db.transaction(async (tx) => {
+      await this.bloquearPedidos(tx, [id]);
+      const [order] = await tx
+        .select()
+        .from(purchaseOrders)
+        .where(
+          and(eq(purchaseOrders.id, id), isNull(purchaseOrders.deletedAt)),
+        );
+      if (!order) throw new NotFoundException('Pedido no encontrado');
+      const delivered = (await this.deliveredByOrder([id], tx)).get(id);
+      if ((delivered?.count ?? 0) > 0) {
+        throw new ConflictException(
+          'No se puede anular un pedido con albaranes imputados',
+        );
+      }
+      if (order.status === 'anulado') return;
+      await cambiarEstado(
+        tx,
+        purchaseOrders,
+        'purchase_order',
+        id,
+        order.status as PurchaseOrderStatus,
+        'anulado',
       );
-    }
-    if (order.status === 'anulado') return this.get(id);
-    await this.dbs.db
-      .update(purchaseOrders)
-      .set({ status: 'anulado', updatedAt: new Date() })
-      .where(eq(purchaseOrders.id, id));
+    });
     return this.get(id);
   }
 
   async remove(id: string): Promise<void> {
-    const delivered = (await this.deliveredByOrder([id])).get(id);
-    if ((delivered?.count ?? 0) > 0) {
-      throw new ConflictException(
-        'No se puede eliminar un pedido con albaranes imputados',
-      );
-    }
     await this.find(id);
-    await this.dbs.db
-      .update(purchaseOrders)
-      .set({ deletedAt: new Date(), updatedAt: new Date() })
-      .where(eq(purchaseOrders.id, id));
+    await this.dbs.db.transaction(async (tx) => {
+      // Con el pedido bloqueado, un albarán que se imputa a la vez no se cuela
+      // entre la comprobación y el borrado (el alta de albaranes lo bloquea).
+      await this.bloquearPedidos(tx, [id]);
+      const delivered = (await this.deliveredByOrder([id], tx)).get(id);
+      if ((delivered?.count ?? 0) > 0) {
+        throw new ConflictException(
+          'No se puede eliminar un pedido con albaranes imputados',
+        );
+      }
+      await tx
+        .update(purchaseOrders)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(eq(purchaseOrders.id, id));
+    });
   }
 
   /**
@@ -326,10 +370,14 @@ export class PurchaseOrdersService {
       delivered?.receivedAmount ?? 0,
     );
     if (next !== order.status) {
-      await tx
-        .update(purchaseOrders)
-        .set({ status: next, updatedAt: new Date() })
-        .where(eq(purchaseOrders.id, id));
+      await cambiarEstado(
+        tx,
+        purchaseOrders,
+        'purchase_order',
+        id,
+        order.status as PurchaseOrderStatus,
+        next,
+      );
     }
   }
 

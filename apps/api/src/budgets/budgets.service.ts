@@ -44,6 +44,7 @@ import {
   motivoTransicionInvalida,
   round2,
 } from '@erp/shared';
+import { cambiarEstado, cambiarEstadoMasivo } from '../common/cambiar-estado';
 import { DbService } from '../db/db.service';
 import { parseBc3 } from './bc3-parser';
 
@@ -240,25 +241,34 @@ export class BudgetsService {
             'No se puede activar un presupuesto sin partidas',
           );
         }
-        await tx
-          .update(budgets)
-          .set({ status: 'cerrado', updatedAt: new Date() })
-          .where(
-            and(
-              eq(budgets.projectId, budget.projectId),
-              eq(budgets.status, 'activo'),
-            ),
-          );
+        await cambiarEstadoMasivo(
+          tx,
+          budgets,
+          'budget',
+          eq(budgets.projectId, budget.projectId),
+          'activo',
+          'cerrado',
+        );
       }
 
+      const valores = {
+        ...(data.name !== undefined && { name: data.name }),
+        ...(data.notes !== undefined && { notes: data.notes }),
+      };
+      if (data.status !== undefined && data.status !== budget.status) {
+        return cambiarEstado(
+          tx,
+          budgets,
+          'budget',
+          id,
+          budget.status as BudgetStatus,
+          data.status,
+          valores,
+        );
+      }
       const [row] = await tx
         .update(budgets)
-        .set({
-          ...(data.name !== undefined && { name: data.name }),
-          ...(data.status !== undefined && { status: data.status }),
-          ...(data.notes !== undefined && { notes: data.notes }),
-          updatedAt: new Date(),
-        })
+        .set({ ...valores, updatedAt: new Date() })
         .where(eq(budgets.id, id))
         .returning();
       return row;

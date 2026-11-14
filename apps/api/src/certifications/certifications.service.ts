@@ -22,6 +22,10 @@ import {
   round2,
 } from '@erp/shared';
 import { AuditService } from '../audit/audit.service';
+import {
+  cambiarEstado,
+  MENSAJE_ESTADO_CAMBIADO,
+} from '../common/cambiar-estado';
 import { DbService } from '../db/db.service';
 import { InvoicesService } from '../invoices/invoices.service';
 
@@ -386,15 +390,15 @@ export class CertificationsService {
           },
         );
       await this.invoicesService.aprobarEnTx(tx, invoice, contact);
-      const [updated] = await tx
-        .update(certifications)
-        .set({
-          status: 'facturada',
-          invoiceId: invoice.id,
-          updatedAt: new Date(),
-        })
-        .where(eq(certifications.id, id))
-        .returning();
+      const updated = await cambiarEstado(
+        tx,
+        certifications,
+        'certification',
+        id,
+        'borrador',
+        'facturada',
+        { invoiceId: invoice.id },
+      );
       return { row: updated, invoiceId: invoice.id };
     });
     void this.audit.log({
@@ -483,15 +487,15 @@ export class CertificationsService {
         prep.amounts,
       );
       await this.invoicesService.aprobarEnTx(tx, invoice, prep.contact);
-      const [updated] = await tx
-        .update(certifications)
-        .set({
-          status: 'facturada',
-          invoiceId: invoice.id,
-          updatedAt: new Date(),
-        })
-        .where(eq(certifications.id, id))
-        .returning();
+      const updated = await cambiarEstado(
+        tx,
+        certifications,
+        'certification',
+        id,
+        'borrador',
+        'facturada',
+        { invoiceId: invoice.id },
+      );
       return { row: updated, invoiceId: invoice.id };
     });
     // Auditoría tras el commit (si fallara, no debe abortar la transacción).
@@ -543,10 +547,18 @@ export class CertificationsService {
           'Solo se puede eliminar la última certificación de la obra',
         );
       }
-      await tx
+      // Solo borradores: la condición va en el UPDATE (una facturación
+      // concurrente no deja una certificación facturada borrada).
+      const borradas = await tx
         .update(certifications)
         .set({ deletedAt: new Date(), updatedAt: new Date() })
-        .where(eq(certifications.id, id));
+        .where(
+          and(eq(certifications.id, id), eq(certifications.status, 'borrador')),
+        )
+        .returning({ id: certifications.id });
+      if (borradas.length === 0) {
+        throw new ConflictException(MENSAJE_ESTADO_CAMBIADO);
+      }
     });
     void this.audit.log({
       entityType: 'certification',

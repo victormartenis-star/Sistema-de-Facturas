@@ -16,6 +16,7 @@ import { CostControlModule } from './cost-control/cost-control.module';
 import { ExportsModule } from './exports/exports.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
+import { CommonModule } from './common/common.module';
 import { DbModule } from './db/db.module';
 import { DeliveryNotesModule } from './delivery-notes/delivery-notes.module';
 import { DocumentsModule } from './documents/documents.module';
@@ -58,6 +59,7 @@ import { InformesModule } from './modules/informes/informes.module';
     // y conviene rechazar por exceso de peticiones antes de gastar tiempo
     // verificando el JWT.
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 100 }]),
+    CommonModule,
     DbModule,
     AuditModule,
     AuthModule,

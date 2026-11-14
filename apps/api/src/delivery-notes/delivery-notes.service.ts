@@ -44,6 +44,7 @@ import {
   type PaginaDto,
 } from '@erp/shared';
 import { AuditService } from '../audit/audit.service';
+import { cambiarEstado } from '../common/cambiar-estado';
 import { DbService } from '../db/db.service';
 import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
 
@@ -323,14 +324,15 @@ export class DeliveryNotesService {
         throw new UnprocessableEntityException(dto.blockReason);
       }
 
-      await tx
-        .update(deliveryNotes)
-        .set({
-          status: 'validado',
-          validatedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(deliveryNotes.id, id));
+      await cambiarEstado(
+        tx,
+        deliveryNotes,
+        'delivery_note',
+        id,
+        'pendiente',
+        'validado',
+        { validatedAt: new Date() },
+      );
       if (note.orderId) await this.orders.refreshStatus(note.orderId, tx);
     });
     return this.get(id);
@@ -364,10 +366,15 @@ export class DeliveryNotesService {
             : 'Solo se devuelven a pendiente los albaranes validados',
         );
       }
-      await tx
-        .update(deliveryNotes)
-        .set({ status: 'pendiente', validatedAt: null, updatedAt: new Date() })
-        .where(eq(deliveryNotes.id, id));
+      await cambiarEstado(
+        tx,
+        deliveryNotes,
+        'delivery_note',
+        id,
+        'validado',
+        'pendiente',
+        { validatedAt: null },
+      );
       if (locked.orderId) await this.orders.refreshStatus(locked.orderId, tx);
     });
 

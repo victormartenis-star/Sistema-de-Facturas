@@ -5,6 +5,7 @@
  */
 
 import { z } from 'zod';
+import { type Transiciones } from './maquina-estados';
 
 export const MILESTONE_DIRECTIONS = ['cobro', 'pago'] as const;
 export type MilestoneDirection = (typeof MILESTONE_DIRECTIONS)[number];
@@ -28,6 +29,12 @@ export type MilestoneStatus = (typeof MILESTONE_STATUSES)[number];
 export const MILESTONE_STATUS_LABELS: Record<MilestoneStatus, string> = {
   previsto: 'Previsto',
   pagado: 'Liquidado',
+};
+
+/** Vencimiento: previsto ↔ pagado (reabrir un vencimiento liquidado es legal). */
+export const MILESTONE_TRANSITIONS: Transiciones<MilestoneStatus> = {
+  previsto: ['pagado'],
+  pagado: ['previsto'],
 };
 
 /**

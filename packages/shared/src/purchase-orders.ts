@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { type Transiciones } from './maquina-estados';
 import { amountsMatch, round2 } from './calculo';
 
 /**
@@ -30,6 +31,28 @@ export const PURCHASE_ORDER_STATUS_LABELS: Record<PurchaseOrderStatus, string> =
     cerrado: 'Cerrado',
     anulado: 'Anulado',
   };
+
+/**
+ * Transiciones del pedido.
+ * - emitido ↔ servido_parcial ↔ servido: las hace el sistema vía
+ *   `deriveOrderStatus` según los albaranes validados.
+ * - emitido, servido_parcial, servido, facturado → cerrado (usuario).
+ * - emitido → anulado (usuario; además sin albaranes imputados).
+ * - `facturado` no se asigna en ningún flujo hoy; solo puede cerrarse.
+ * - cerrado y anulado son TERMINALES.
+ *
+ * CAMBIO DE COMPORTAMIENTO: antes se podía anular un pedido cerrado (y
+ * anular desde servido_parcial/servido si los albaranes lo permitían); ahora
+ * solo se anula desde `emitido` y cerrado/anulado no admiten cambios.
+ */
+export const PURCHASE_ORDER_TRANSITIONS: Transiciones<PurchaseOrderStatus> = {
+  emitido: ['servido_parcial', 'servido', 'cerrado', 'anulado'],
+  servido_parcial: ['emitido', 'servido', 'cerrado'],
+  servido: ['emitido', 'servido_parcial', 'cerrado'],
+  facturado: ['cerrado'],
+  cerrado: [],
+  anulado: [],
+};
 
 /* ─────────────────────────── numeración ─────────────────────────── */
 

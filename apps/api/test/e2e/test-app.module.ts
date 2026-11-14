@@ -12,6 +12,7 @@ import { CopilotoModule } from '../../src/copiloto/copiloto.module';
 import { CostControlModule } from '../../src/cost-control/cost-control.module';
 import { ExportsModule } from '../../src/exports/exports.module';
 import { DashboardModule } from '../../src/dashboard/dashboard.module';
+import { CommonModule } from '../../src/common/common.module';
 import { DbModule } from '../../src/db/db.module';
 import { DeliveryNotesModule } from '../../src/delivery-notes/delivery-notes.module';
 import { DocumentsModule } from '../../src/documents/documents.module';
@@ -68,6 +69,7 @@ import { UsersModule } from '../../src/users/users.module';
  */
 @Module({
   imports: [
+    CommonModule,
     DbModule,
     AuditModule,
     AuthModule,

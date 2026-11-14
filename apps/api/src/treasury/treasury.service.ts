@@ -44,6 +44,7 @@ import {
 } from '@erp/shared';
 import { AuditService } from '../audit/audit.service';
 import { ComplianceService } from '../compliance/compliance.service';
+import { cambiarEstado } from '../common/cambiar-estado';
 import { DbService } from '../db/db.service';
 
 const MONTHS_ES = [
@@ -380,23 +381,26 @@ export class TreasuryService {
       }
     }
     await this.dbs.db.transaction(async (tx) => {
-      await tx
-        .update(paymentMilestones)
-        .set({
-          status,
-          paidAt: status === 'pagado' ? todayIso() : null,
-          updatedAt: new Date(),
-        })
-        .where(eq(paymentMilestones.id, id));
-
       // La factura queda pagada cuando no le quedan vencimientos previstos.
       // Se bloquea la fila y el estado lo decide la regla pura: una factura
-      // en borrador o anulada no se toca.
+      // en borrador o anulada no se toca. El bloqueo va ANTES de tocar el
+      // vencimiento (mismo orden que anular: factura -> vencimientos), para
+      // que pagar y anular a la vez no se interbloqueen.
       const [invoice] = await tx
         .select({ status: invoices.status })
         .from(invoices)
         .where(eq(invoices.id, row.invoiceId))
         .for('update');
+
+      await cambiarEstado(
+        tx,
+        paymentMilestones,
+        'milestone',
+        id,
+        row.status as MilestoneStatus,
+        status,
+        { paidAt: status === 'pagado' ? todayIso() : null },
+      );
       const [pending] = await tx
         .select({ id: paymentMilestones.id })
         .from(paymentMilestones)
@@ -414,10 +418,14 @@ export class TreasuryService {
           )
         : null;
       if (next && next !== invoice.status) {
-        await tx
-          .update(invoices)
-          .set({ status: next, updatedAt: new Date() })
-          .where(eq(invoices.id, row.invoiceId));
+        await cambiarEstado(
+          tx,
+          invoices,
+          'invoice',
+          row.invoiceId,
+          invoice.status as InvoiceStatus,
+          next,
+        );
       }
     });
   }
