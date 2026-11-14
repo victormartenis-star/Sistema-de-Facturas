@@ -12,19 +12,39 @@
  *
  *   npm run seed:campo -- --bd erp_dev                       (simulación)
  *   npm run seed:campo -- --bd erp_dev --api http://localhost:3001 --confirmar
+ *   npm run seed:campo -- --bd erp_dev --limpiar              (lista qué borraría)
+ *   npm run seed:campo -- --bd erp_dev --limpiar --api http://localhost:3001 --confirmar
  *
  * Credenciales de un admin existente: SEED_EMAIL y SEED_PASSWORD (entorno).
  * Además crea 3 usuarios de prueba (campo-*@erp.test: un lector y dos perfiles
  * de obra) con contraseñas aleatorias; sus credenciales se guardan SOLO en el
  * fichero de SEED_CAMPO_CREDENCIALES (obligatoria al escribir; fuera del repo).
- * No se reejecuta: si ya existe la obra CAMPO-A aborta (`--limpiar` no está
- * implementado). Dentro de una ejecución, cada entidad se busca por clave natural.
+ * No se reejecuta sobre datos previos: si ya existe la obra CAMPO-A aborta y
+ * pide `--limpiar`. Dentro de una ejecución, cada entidad se busca por clave natural.
+ *
+ * `--limpiar` borra de la base (conexión DATABASE_URL, en una transacción: todo
+ * o nada) SOLO filas con identificador `CAMPO-` y los usuarios campo-*@erp.test;
+ * si una fila que no es de campo depende de una de campo, aborta sin borrar.
+ * Sin `--confirmar` solo cuenta por tabla lo que borraría (transacción de solo
+ * lectura). Con `--confirmar`, el orden es: validar entorno, API y login ->
+ * limpiar -> sembrar, todo en la misma invocación (así no se borra sin poder
+ * volver a sembrar). Es la única parte del script que habla con Postgres.
  * Requiere Node >= 22.18 (ejecuta TypeScript directamente) y `build:packages`.
  */
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { Client } from 'pg';
 import {
+  BLOCKING_COMPLIANCE_DOC_TYPES,
+  ORDEN_BORRADO_CAMPO,
+  columnasIdentificador,
+  condicionSqlCampo,
+  exigirSoloFilasCampo,
+  motivoAbortoPorDependientes,
+  resumenLimpieza,
+  validarOrdenBorrado,
+  type BloqueoLimpiezaCampo,
   PERFILES_USUARIO_CAMPO,
   conPrefijoCampo,
   decidirEjecucionSeedCampo,
@@ -377,6 +397,135 @@ function imprimirPlan(): void {
   }
 }
 
+// ─── Limpieza (--limpiar) ───────────────────────────────────────────────────
+
+/**
+ * Lista (y con 'escribir' borra) las filas de campo. Todo en una transacción:
+ * en 'simular' es de solo lectura y termina en ROLLBACK. Aborta sin borrar si
+ * alguna fila que no es de campo depende de una de campo.
+ */
+async function limpiarCampo(modo: ModoSeedCampo): Promise<void> {
+  const errOrden = validarOrdenBorrado();
+  if (errOrden.length > 0) throw new Error(errOrden.join('; '));
+  const cliente = new Client({ connectionString: process.env.DATABASE_URL });
+  await cliente.connect();
+  try {
+    await cliente.query(
+      modo === 'escribir' ? 'BEGIN' : 'BEGIN TRANSACTION READ ONLY',
+    );
+    const conteos: Record<string, number> = {};
+    const ids: Record<string, string[] | null> = {};
+    for (const t of ORDEN_BORRADO_CAMPO) {
+      const cond = condicionSqlCampo(t.tabla);
+      const cols = columnasIdentificador(t);
+      if (cols.length > 0) {
+        const res = await cliente.query(
+          `SELECT id, ${cols.join(', ')} FROM ${t.tabla} WHERE ${cond}`,
+        );
+        // Defensa en profundidad: la condición SQL y el filtro puro deben coincidir.
+        exigirSoloFilasCampo(t, res.rows);
+        ids[t.tabla] = res.rows.map((r) => String(r.id));
+        conteos[t.tabla] = res.rowCount ?? 0;
+      } else {
+        const res = await cliente.query(
+          `SELECT count(*)::int AS n FROM ${t.tabla} WHERE ${cond}`,
+        );
+        ids[t.tabla] = null;
+        conteos[t.tabla] = res.rows[0].n as number;
+      }
+    }
+
+    // Filas ajenas que dependen de filas de campo (cualquier tabla de la BD).
+    const nombres = ORDEN_BORRADO_CAMPO.map((t) => t.tabla);
+    const fks = await cliente.query<{
+      hijo: string;
+      columna: string;
+      padre: string;
+      tipo: string;
+      n_cols: number;
+      col_padre: string;
+    }>(
+      `SELECT c.conrelid::regclass::text AS hijo, a.attname AS columna,
+              c.confrelid::regclass::text AS padre, c.confdeltype AS tipo,
+              array_length(c.conkey, 1) AS n_cols, ap.attname AS col_padre
+         FROM pg_constraint c
+         JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
+         JOIN pg_attribute ap ON ap.attrelid = c.confrelid AND ap.attnum = c.confkey[1]
+        WHERE c.contype = 'f' AND c.confrelid::regclass::text = ANY($1)`,
+      [nombres],
+    );
+    const bloqueos: BloqueoLimpiezaCampo[] = [];
+    for (const fk of fks.rows) {
+      if (fk.n_cols !== 1 || fk.col_padre !== 'id') {
+        throw new Error(
+          `FK no soportada por la limpieza: ${fk.hijo}.${fk.columna} -> ${fk.padre}.${fk.col_padre}.`,
+        );
+      }
+      const condPadre = condicionSqlCampo(fk.padre);
+      const enLista = nombres.includes(fk.hijo);
+      const propias = enLista ? ` AND NOT ${condicionSqlCampo(fk.hijo)}` : '';
+      const res = await cliente.query(
+        `SELECT count(*)::int AS n FROM ${fk.hijo}
+          WHERE ${fk.columna} IN (SELECT id FROM ${fk.padre} WHERE ${condPadre})${propias}`,
+      );
+      const n = res.rows[0].n as number;
+      if (n === 0) continue;
+      if (fk.tipo === 'n' || fk.tipo === 'd') {
+        // SET NULL / SET DEFAULT: la fila ajena sobrevive (p. ej. audit_log.user_id).
+        console.log(
+          `aviso: ${fk.hijo}.${fk.columna} de ${n} fila(s) ajena(s) quedará sin referencia.`,
+        );
+      } else {
+        bloqueos.push({
+          tablaDependiente: fk.hijo,
+          columna: fk.columna,
+          tablaReferenciada: fk.padre,
+          filas: n,
+        });
+      }
+    }
+    const aborto = motivoAbortoPorDependientes(bloqueos);
+    if (aborto) throw new Error(aborto);
+
+    const lineas = resumenLimpieza(conteos);
+    console.log(
+      lineas.length === 0
+        ? 'Limpieza: no hay datos de campo que borrar.'
+        : `Limpieza (${modo === 'escribir' ? 'se borra, hijos antes que padres' : 'simulación, nada se borra'}):`,
+    );
+    for (const l of lineas) console.log(`  ${l}`);
+
+    if (modo === 'escribir') {
+      for (const t of ORDEN_BORRADO_CAMPO) {
+        if ((conteos[t.tabla] ?? 0) === 0) continue;
+        const porIds = ids[t.tabla];
+        const res = porIds
+          ? await cliente.query(
+              `DELETE FROM ${t.tabla} WHERE id = ANY($1::uuid[])`,
+              [porIds],
+            )
+          : await cliente.query(
+              `DELETE FROM ${t.tabla} WHERE ${condicionSqlCampo(t.tabla)}`,
+            );
+        if (res.rowCount !== conteos[t.tabla]) {
+          throw new Error(
+            `${t.tabla}: se esperaban ${conteos[t.tabla]} borrados y fueron ${res.rowCount}.`,
+          );
+        }
+      }
+      await cliente.query('COMMIT');
+      console.log('Limpieza confirmada (transacción cerrada).');
+    } else {
+      await cliente.query('ROLLBACK');
+    }
+  } catch (err) {
+    await cliente.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    await cliente.end();
+  }
+}
+
 // ─── Escritura (solo con --confirmar) ───────────────────────────────────────
 
 interface Fila {
@@ -389,7 +538,11 @@ function fechaDesdeHoy(dias: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-async function escribirTodo(modo: ModoSeedCampo, api: string): Promise<void> {
+async function escribirTodo(
+  modo: ModoSeedCampo,
+  api: string,
+  limpiar: boolean,
+): Promise<void> {
   const email = process.env.SEED_EMAIL;
   const password = process.env.SEED_PASSWORD;
   if (!email || !password) {
@@ -443,6 +596,9 @@ async function escribirTodo(modo: ModoSeedCampo, api: string): Promise<void> {
   if (!sesion.ok) throw new Error(`Login fallido (${sesion.status}).`);
   token = ((await sesion.json()) as { accessToken: string }).accessToken;
 
+  // Solo tras validar entorno, API y login: borrar y sembrar van juntos.
+  if (limpiar) await limpiarCampo(modo);
+
   // Idempotencia: si ya hay datos de campo, no se reejecuta.
   const previas = await pedir<{ code: string }[]>('/projects');
   const aborto = motivoAbortoPorExistentes(previas.map((x) => x.code));
@@ -490,7 +646,7 @@ async function escribirTodo(modo: ModoSeedCampo, api: string): Promise<void> {
         await enviar('POST', `/contacts/${fila.id}/cumplimiento/exigir`, {
           required: true,
         });
-        for (const docType of ['plan_seguridad', 'seguro_rc']) {
+        for (const docType of BLOCKING_COMPLIANCE_DOC_TYPES) {
           await enviar('POST', `/contacts/${fila.id}/cumplimiento/documentos`, {
             docType,
             issuedAt: fechaDesdeHoy(-300),
@@ -827,6 +983,7 @@ async function main(): Promise<void> {
   }
   console.log(`Base de datos: ${decision.bd}. Modo: ${decision.modo}.`);
   if (decision.modo === 'simular') {
+    if (decision.limpiar) await limpiarCampo('simular');
     imprimirPlan();
     console.log(
       '\nSimulación terminada. Añade --api <url> --confirmar para escribir.',
@@ -834,7 +991,7 @@ async function main(): Promise<void> {
     return;
   }
   console.log(`API destino: ${decision.api}`);
-  await escribirTodo('escribir', decision.api);
+  await escribirTodo('escribir', decision.api, decision.limpiar);
 }
 
 main().catch((err) => {
