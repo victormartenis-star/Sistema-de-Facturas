@@ -378,7 +378,7 @@ describe('Facturas rectificativas y anulación (integración)', () => {
         .send({
           clase: 'diferencias',
           rectificationMotive: 'R4',
-          rectificationType: 'S',
+          rectificationType: 'I',
           issueDate: '2026-10-01',
           motivo: 'Descuento pactado',
         })
@@ -388,7 +388,7 @@ describe('Facturas rectificativas y anulación (integración)', () => {
         .send({
           clase: 'diferencias',
           rectificationMotive: 'R4',
-          rectificationType: 'S',
+          rectificationType: 'I',
           issueDate: '2026-10-01',
           motivo: 'Descuento pactado',
           lines: [
@@ -523,7 +523,7 @@ describe('Facturas rectificativas y anulación (integración)', () => {
         .send({
           clase: 'diferencias',
           rectificationMotive: 'R4',
-          rectificationType: 'S',
+          rectificationType: 'I',
           issueDate: '2026-10-01',
           motivo: 'Ajuste de precio',
           lines: [
@@ -570,6 +570,17 @@ describe('Facturas rectificativas y anulación (integración)', () => {
       await authed(app, token)
         .post(`/invoices/${id}/rectificar`)
         .send({ ...base, rectificationMotive: 'R1', rectificationType: 'I' })
+        .expect(400);
+      // Diferencias con tipo S (aunque lleve líneas) también es incoherente.
+      await authed(app, token)
+        .post(`/invoices/${id}/rectificar`)
+        .send({
+          ...base,
+          clase: 'diferencias',
+          rectificationMotive: 'R1',
+          rectificationType: 'S',
+          lines: [{ description: 'Ajuste', baseAmount: -10, vatPct: 21 }],
+        })
         .expect(400);
       const res = await authed(app, token)
         .post(`/invoices/${id}/rectificar`)

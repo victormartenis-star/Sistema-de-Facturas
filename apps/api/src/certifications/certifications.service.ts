@@ -45,6 +45,8 @@ function toDto(row: Certification): CertificationDto {
     invoiceId: row.invoiceId,
     rectifiesCertificationId: row.rectifiesCertificationId,
     rectificationReason: row.rectificationReason,
+    rectificationMotive: row.rectificationMotive,
+    rectificationType: row.rectificationType,
     notes: row.notes,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -287,6 +289,8 @@ export class CertificationsService {
             notes: data.notes ?? null,
             rectifiesCertificationId: orig.id,
             rectificationReason: data.motivo,
+            rectificationMotive: data.rectificationMotive,
+            rectificationType: data.rectificationType,
           })
           .returning();
         return created;
@@ -365,6 +369,9 @@ export class CertificationsService {
             issueDate: data.issueDate,
             motivo:
               cert.rectificationReason ?? 'Rectificación de certificación',
+            // Se hereda de la certificación rectificativa (validado al crearla).
+            rectificationMotive: cert.rectificationMotive,
+            rectificationType: cert.rectificationType,
             lines: [
               {
                 description,

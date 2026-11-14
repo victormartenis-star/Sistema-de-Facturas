@@ -282,10 +282,14 @@ describe('Certifications (integración) — creación, facturación y RBAC por o
         .post(`/certifications/${c1.id}/rectificar`)
         .send({
           certDate: '2026-10-01',
+          rectificationMotive: 'R4',
+          rectificationType: 'I',
           cumulativePct: 35,
           motivo: 'La medición real era del 35 %',
         })
         .expect(201);
+      expect(rect.body.rectificationMotive).toBe('R4');
+      expect(rect.body.rectificationType).toBe('I');
       expect(rect.body.status).toBe('borrador');
       expect(rect.body.seq).toBe(2);
       expect(rect.body.rectifiesCertificationId).toBe(c1.id);
@@ -307,6 +311,8 @@ describe('Certifications (integración) — creación, facturación y RBAC por o
         .expect(200);
       expect(inv.body.rectifiesInvoiceId).toBe(c1.invoiceId);
       expect(inv.body.rectificationKind).toBe('diferencias');
+      expect(inv.body.rectificationMotive).toBe('R4');
+      expect(inv.body.rectificationType).toBe('I');
       expect(inv.body.baseAmount).toBe(-5000);
       expect(inv.body.invoiceNumber).toMatch(/^R-\d{4}-\d{4}$/);
 
@@ -315,6 +321,55 @@ describe('Certifications (integración) — creación, facturación y RBAC por o
         .get(`/invoices/${c1.invoiceId}`)
         .expect(200);
       expect(orig.body.status).toBe('aprobada');
+    });
+
+    it('motivo y tipo oficiales: obligatorios y coherentes (400)', async () => {
+      const admin = await registerUser(app, { email: 'admin@test.dintel.es' });
+      const token = admin.accessToken;
+      const project = await createProject(app, token, {
+        contractAmount: 100_000,
+      });
+      const cliente = await createContact(app, token, { kind: 'cliente' });
+      const c1 = await certFacturada(token, project.id, cliente.id, 40);
+      const base = {
+        certDate: '2026-10-01',
+        cumulativePct: 35,
+        motivo: 'La medición real era del 35 %',
+      };
+      const enviar = (cuerpo: object) =>
+        authed(app, token)
+          .post(`/certifications/${c1.id}/rectificar`)
+          .send(cuerpo);
+      // Sin motivo
+      await enviar({ ...base, rectificationType: 'I' }).expect(400);
+      // Sin tipo
+      await enviar({ ...base, rectificationMotive: 'R4' }).expect(400);
+      // Motivo y tipo fuera de catálogo
+      await enviar({
+        ...base,
+        rectificationMotive: 'R9',
+        rectificationType: 'I',
+      }).expect(400);
+      await enviar({
+        ...base,
+        rectificationMotive: 'R4',
+        rectificationType: 'X',
+      }).expect(400);
+      // Tipo incoherente: la certificación rectificativa es por diferencias (I)
+      const incoherente = await enviar({
+        ...base,
+        rectificationMotive: 'R4',
+        rectificationType: 'S',
+      }).expect(400);
+      expect(JSON.stringify(incoherente.body)).toContain("tipo 'S'");
+      const ok = await enviar({
+        ...base,
+        rectificationMotive: 'R2',
+        rectificationType: 'I',
+      }).expect(201);
+      expect(ok.body.rectificationMotive).toBe('R2');
+      expect(ok.body.rectificationType).toBe('I');
+      expect(ok.body.rectifiesCertificationId).toBe(c1.id);
     });
 
     it('rechaza rectificar una certificación en borrador (409)', async () => {
@@ -335,6 +390,8 @@ describe('Certifications (integración) — creación, facturación y RBAC por o
         .post(`/certifications/${borrador.body.id}/rectificar`)
         .send({
           certDate: '2026-10-01',
+          rectificationMotive: 'R4',
+          rectificationType: 'I',
           cumulativePct: 10,
           motivo: 'Sin facturar',
         })
@@ -353,6 +410,8 @@ describe('Certifications (integración) — creación, facturación y RBAC por o
         .post(`/certifications/${c1.id}/rectificar`)
         .send({
           certDate: '2026-10-01',
+          rectificationMotive: 'R4',
+          rectificationType: 'I',
           cumulativePct: 50,
           motivo: 'Subir no vale',
         })
@@ -412,6 +471,8 @@ describe('Certifications (integración) — creación, facturación y RBAC por o
         .post(`/certifications/${c1.id}/rectificar`)
         .send({
           certDate: '2026-10-01',
+          rectificationMotive: 'R4',
+          rectificationType: 'I',
           cumulativePct: 30,
           motivo: 'Medición a la baja',
         })
@@ -439,6 +500,8 @@ describe('Certifications (integración) — creación, facturación y RBAC por o
         .post(`/certifications/${c1.id}/rectificar`)
         .send({
           certDate: '2026-10-01',
+          rectificationMotive: 'R4',
+          rectificationType: 'I',
           cumulativePct: 30,
           motivo: 'Sin permiso',
         })

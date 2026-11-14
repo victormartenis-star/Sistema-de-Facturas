@@ -91,8 +91,23 @@ describe('certificationRectifySchema', () => {
       certDate: '2026-10-01',
       cumulativePct: 0,
       motivo: 'Medición errónea',
+      rectificationMotive: 'R4',
+      rectificationType: 'I',
     };
     expect(certificationRectifySchema.safeParse(ok).success).toBe(true);
+    const { rectificationMotive: _m, ...sinMotivo } = ok;
+    const { rectificationType: _t, ...sinTipo } = ok;
+    expect(certificationRectifySchema.safeParse(sinMotivo).success).toBe(false);
+    expect(certificationRectifySchema.safeParse(sinTipo).success).toBe(false);
+    // La certificación rectificativa es por diferencias: el tipo S es incoherente.
+    expect(
+      certificationRectifySchema.safeParse({ ...ok, rectificationType: 'S' })
+        .success,
+    ).toBe(false);
+    expect(
+      certificationRectifySchema.safeParse({ ...ok, rectificationMotive: 'R9' })
+        .success,
+    ).toBe(false);
     expect(
       certificationRectifySchema.safeParse({ ...ok, motivo: 'no' }).success,
     ).toBe(false);

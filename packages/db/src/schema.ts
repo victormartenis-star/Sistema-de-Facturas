@@ -470,6 +470,10 @@ export const certifications = pgTable(
       (): AnyPgColumn => certifications.id,
     ),
     rectificationReason: text('rectification_reason'),
+    /** Motivo oficial R1-R4 (solo certificaciones rectificativas). */
+    rectificationMotive: rectificationMotiveEnum('rectification_motive'),
+    /** Tipo oficial S/I (solo certificaciones rectificativas). */
+    rectificationType: rectificationTypeEnum('rectification_type'),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()

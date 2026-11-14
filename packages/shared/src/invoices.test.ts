@@ -233,6 +233,8 @@ describe('invoiceRectifySchema', () => {
     rectificationMotive: 'R4',
     rectificationType: 'S',
   };
+  // Total ⇔ S; diferencias ⇔ I.
+  const dif = { ...base, rectificationType: 'I' };
   const linea = { description: 'Ajuste', baseAmount: -50, vatPct: 21 };
   it('total no admite líneas', () => {
     expect(
@@ -248,11 +250,11 @@ describe('invoiceRectifySchema', () => {
   });
   it('diferencias exige líneas', () => {
     expect(
-      invoiceRectifySchema.safeParse({ ...base, clase: 'diferencias' }).success,
+      invoiceRectifySchema.safeParse({ ...dif, clase: 'diferencias' }).success,
     ).toBe(false);
     expect(
       invoiceRectifySchema.safeParse({
-        ...base,
+        ...dif,
         clase: 'diferencias',
         lines: [linea],
       }).success,
@@ -300,8 +302,12 @@ describe('motivo y tipo oficiales de rectificativa', () => {
 
   it('casos válidos', () => {
     expect(check('total', 'R1', 'S')).toEqual([]);
-    expect(check('diferencias', 'R4', 'S')).toEqual([]);
     expect(check('diferencias', 'R3', 'I')).toEqual([]);
+  });
+
+  it('total+I y diferencias+S son incoherentes', () => {
+    expect(check('total', 'R1', 'I')).toHaveLength(1);
+    expect(check('diferencias', 'R4', 'S')).toHaveLength(1);
   });
 
   it('motivo obligatorio y dentro de R1-R4', () => {
@@ -327,8 +333,9 @@ describe('motivo y tipo oficiales de rectificativa', () => {
     expect(check('total', 'R1', 'X')).toHaveLength(1);
   });
 
-  it("tipo 'I' exige clase diferencias", () => {
-    expect(check('total', 'R1', 'I')).toHaveLength(1);
+  it('motivo fuera de R1-R4 y tipo fuera de S/I', () => {
+    expect(check('diferencias', 'R5', 'I')).toHaveLength(1);
+    expect(check('diferencias', 'R1', 'X')).toHaveLength(1);
   });
 
   it('no se aceptan en facturas que no son rectificativas', () => {

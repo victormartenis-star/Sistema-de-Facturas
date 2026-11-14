@@ -147,7 +147,12 @@ export function InvoiceRectifyModal({
             <select
               id="rect-clase"
               value={clase}
-              onChange={(e) => setClase(e.target.value as RectificationKind)}
+              onChange={(e) => {
+                const k = e.target.value as RectificationKind;
+                setClase(k);
+                // Total ⇔ S; diferencias ⇔ I.
+                setRectType(k === 'total' ? 'S' : 'I');
+              }}
               className={fieldCls}
             >
               {RECTIFICATION_KINDS.map((k) => (
@@ -194,8 +199,8 @@ export function InvoiceRectifyModal({
             </select>
             {!clasifOk && (
               <p className="mt-1 text-xs text-red-600">
-                El tipo Diferencias solo es válido en una rectificativa por
-                diferencias.
+                El tipo debe ser coherente con la clase: total con Sustitución
+                (S), diferencias con Diferencias (I).
               </p>
             )}
           </div>

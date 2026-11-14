@@ -3,7 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   certificationCreateSchema,
   certificationInvoiceSchema,
-  certificationRectifySchema,
+  certificationRectifyBaseSchema,
   type CertificationDto,
 } from '@erp/shared';
 import { pedir, query } from '../api';
@@ -121,7 +121,7 @@ export function registrarCertificaciones(server: McpServer) {
         'usa rectificar_factura con clase=total: la certificacion vuelve a borrador.',
       inputSchema: {
         id: z.string().uuid().describe('Certificacion que se corrige'),
-        ...certificationRectifySchema.shape,
+        ...certificationRectifyBaseSchema.shape,
       },
       annotations: { readOnlyHint: false, idempotentHint: false },
     },

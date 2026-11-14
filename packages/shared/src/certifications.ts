@@ -1,5 +1,12 @@
 import { z } from 'zod';
 import { type Transiciones, puedeTransitar } from './maquina-estados';
+import {
+  RECTIFICATION_MOTIVES,
+  RECTIFICATION_TYPES,
+  type RectificationMotive,
+  type RectificationType,
+  rectificationClassificationErrors,
+} from './invoices';
 
 /**
  * Certificaciones de obra con facturación a origen:
@@ -78,15 +85,42 @@ export const certificationCreateSchema = z.object({
 });
 
 /** Certificación rectificativa: fija el nuevo acumulado a origen (puede bajar). */
-export const certificationRectifySchema = z.object({
+export const certificationRectifyBaseSchema = z.object({
   certDate: isoDate,
   cumulativePct: z
     .number({ invalid_type_error: 'Debe ser un número' })
     .min(0, 'Entre 0 y 100')
     .max(100, 'No puede superar el 100 %'),
   motivo: z.string().trim().min(5).max(500),
+  /** Motivo oficial R1-R4 (obligatorio). */
+  rectificationMotive: z.enum(RECTIFICATION_MOTIVES, {
+    required_error: 'El motivo de rectificación (R1-R4) es obligatorio',
+  }),
+  /** Tipo oficial S/I (obligatorio). */
+  rectificationType: z.enum(RECTIFICATION_TYPES, {
+    required_error: 'El tipo de rectificación (S o I) es obligatorio',
+  }),
   notes: z.string().trim().max(1000).nullish(),
 });
+/**
+ * La rectificativa de una certificación genera siempre una factura rectificativa
+ * por diferencias: la regla compartida (total⇔S, diferencias⇔I) solo admite 'I'.
+ */
+export const certificationRectifySchema =
+  certificationRectifyBaseSchema.superRefine((v, ctx) => {
+    for (const message of rectificationClassificationErrors({
+      esRectificativa: true,
+      clase: 'diferencias',
+      motive: v.rectificationMotive,
+      type: v.rectificationType,
+    })) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['rectificationType'],
+        message,
+      });
+    }
+  });
 export type CertificationRectifyInput = z.input<
   typeof certificationRectifySchema
 >;
@@ -134,6 +168,8 @@ export interface CertificationDto {
   invoiceId: string | null;
   rectifiesCertificationId: string | null;
   rectificationReason: string | null;
+  rectificationMotive: RectificationMotive | null;
+  rectificationType: RectificationType | null;
   notes: string | null;
   createdAt: string;
   updatedAt: string;

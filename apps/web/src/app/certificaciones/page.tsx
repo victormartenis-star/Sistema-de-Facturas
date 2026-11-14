@@ -17,6 +17,9 @@ import {
   type CertificationCreateInput,
   type CertificationInvoiceInput,
   type CertificationRectifyInput,
+  RECTIFICATION_MOTIVES,
+  RECTIFICATION_MOTIVE_LABELS,
+  type RectificationMotive,
   canEditCertification,
   type CertificationLineDto,
   type CertificationLineCreateInput,
@@ -670,6 +673,7 @@ function RectificarCertModal({
   );
   const [cumulativePct, setCumulativePct] = useState('');
   const [motivo, setMotivo] = useState('');
+  const [rectMotive, setRectMotive] = useState<RectificationMotive>('R4');
   const [notes, setNotes] = useState('');
 
   const mutation = useMutation({
@@ -706,6 +710,9 @@ function RectificarCertModal({
             certDate,
             cumulativePct: pctVal,
             motivo: motivo.trim(),
+            rectificationMotive: rectMotive,
+            // La certificación rectificativa se factura por diferencias: tipo I.
+            rectificationType: 'I',
             notes: notes.trim() || null,
           });
         }}
@@ -746,6 +753,25 @@ function RectificarCertModal({
               required
             />
           </div>
+        </div>
+        <div>
+          <label className={labelCls} htmlFor="rc-motive">
+            Motivo oficial
+          </label>
+          <select
+            id="rc-motive"
+            value={rectMotive}
+            onChange={(e) =>
+              setRectMotive(e.target.value as RectificationMotive)
+            }
+            className={fieldCls}
+          >
+            {RECTIFICATION_MOTIVES.map((m) => (
+              <option key={m} value={m}>
+                {RECTIFICATION_MOTIVE_LABELS[m]}
+              </option>
+            ))}
+          </select>
         </div>
         <div>
           <label className={labelCls} htmlFor="rc-motivo">

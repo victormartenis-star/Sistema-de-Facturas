@@ -232,6 +232,13 @@
       "when": 1794584000000,
       "tag": "0032_fase3_motivo_tipo_rectificativa",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1794680242489,
+      "tag": "0033_fase3_motivo_tipo_rectificativa_certificacion",
+      "breakpoints": true
     }
   ]
 }

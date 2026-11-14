@@ -919,6 +919,9 @@ async function escribirTodo(
       `/invoices/${orig.id}/rectificar`,
       {
         clase: r.clase,
+        // Dato de prueba: la API exige motivo/tipo coherentes (total ⇔ S, diferencias ⇔ I).
+        rectificationMotive: 'R4',
+        rectificationType: r.clase === 'total' ? 'S' : 'I',
         issueDate: fechaDesdeHoy(-1),
         motivo: r.motivo,
         ...(r.delta !== undefined && r.obra

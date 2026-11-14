@@ -92,7 +92,8 @@ export const RECTIFICATION_TYPE_LABELS: Record<RectificationType, string> = {
 /**
  * Coherencia interna de motivo y tipo oficiales. Devuelve la lista de errores
  * (vacía si es válida). `esRectificativa = false` exige que no vengan.
- * Un tipo 'I' exige clase 'diferencias' (rectificativa con líneas de delta).
+ * Regla de negocio: rectificativa total ⇔ tipo 'S' (sustitución); por
+ * diferencias ⇔ tipo 'I'. Cualquier otra combinación es incoherente.
  */
 export function rectificationClassificationErrors(i: {
   esRectificativa: boolean;
@@ -124,9 +125,13 @@ export function rectificationClassificationErrors(i: {
     !(RECTIFICATION_TYPES as readonly string[]).includes(i.type as string)
   ) {
     errors.push('Tipo de rectificación no válido: use S o I');
+  } else if (i.type === 'S' && i.clase !== 'total') {
+    errors.push(
+      "El tipo 'S' (sustitución) exige una rectificativa total: para diferencias use el tipo 'I'",
+    );
   } else if (i.type === 'I' && i.clase !== 'diferencias') {
     errors.push(
-      "El tipo 'I' (diferencias) exige una rectificativa por diferencias con líneas de delta",
+      "El tipo 'I' (diferencias) exige una rectificativa por diferencias: para total use el tipo 'S'",
     );
   }
   return errors;
