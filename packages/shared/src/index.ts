@@ -12,6 +12,7 @@ export * from './compliance';
 export * from './contacts';
 export * from './cost-control';
 export * from './exportacion';
+export * from './periodo-iva';
 export * from './equipos';
 export * from './facturae';
 export * from './documents';

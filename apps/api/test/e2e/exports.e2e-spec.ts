@@ -269,6 +269,54 @@ describe('Exportaciones (integración) — GET /exports/:recurso', () => {
     expect((await cuota(menor)) + (await cuota(mayor))).toBe(4203);
   });
 
+  it('economia-iva con periodo trimestral equivale a su from/to; inválido o incoherente da 400', async () => {
+    const admin = await registerUser(app);
+    const token = admin.accessToken;
+    const cliente = await createContact(app, token, { kind: 'cliente' });
+    const res = await authed(app, token)
+      .post('/invoices')
+      .send({
+        kind: 'venta',
+        contactId: cliente.id,
+        invoiceNumber: `FV-T-${Date.now()}`,
+        issueDate: '2026-02-10',
+        dueDate: '2026-03-10',
+        lines: [{ description: 'Obra', baseAmount: 200, vatPct: 21 }],
+      })
+      .expect(201);
+    await authed(app, token)
+      .post(`/invoices/${res.body.id}/aprobar`)
+      .expect(201);
+
+    const porPeriodo = await authed(app, token)
+      .get('/exports/economia-iva?format=json&periodo=2026-T1')
+      .expect(200);
+    const porRango = await authed(app, token)
+      .get('/exports/economia-iva?format=json&from=2026-01-01&to=2026-03-31')
+      .expect(200);
+    expect(porPeriodo.body).toEqual(porRango.body);
+    const rep = porPeriodo.body.find(
+      (f: { lado: string }) => f.lado === 'repercutido',
+    );
+    expect(rep.periodo).toBe('2026-T1');
+    expect(rep.baseAmount).toBe(200);
+
+    await authed(app, token)
+      .get('/exports/economia-iva?periodo=2026-T5')
+      .expect(400);
+    await authed(app, token)
+      .get('/exports/economia-iva?periodo=2026T1')
+      .expect(400);
+    await authed(app, token)
+      .get('/exports/economia-iva?periodo=2026-T1&from=2026-02-01')
+      .expect(400);
+    await authed(app, token)
+      .get(
+        '/exports/economia-iva?periodo=2026-T1&from=2026-01-01&to=2026-03-31',
+      )
+      .expect(200);
+  });
+
   it('parámetros obligatorios y recurso desconocido', async () => {
     const admin = await registerUser(app);
     await authed(app, admin.accessToken)

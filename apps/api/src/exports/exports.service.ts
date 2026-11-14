@@ -47,6 +47,9 @@ import {
   ExportQuery,
   ExportRecurso,
   FacturaIvaInput,
+  periodoIvaDeFecha,
+  RangoPeriodoIva,
+  rangoPeriodoIva,
   toCents,
   toCsv,
   toExportJson,
@@ -121,11 +124,16 @@ const resta = (a: string, b: string) => centsToNumeric(toCents(a) - toCents(b));
 /**
  * Exportaciones CSV/JSON de recursos del ERP.
  *
- * Criterios fiscales aprobados por el titular (solo documentación): el
- * periodo de IVA es TRIMESTRAL (relevante para `economia-iva`); Facturae usa
- * el método estándar para facturas no enviadas previamente; y la clase de
- * rectificativa (`total` / `diferencias`) se elige siempre de forma
- * explícita, sin valor por defecto (ver `packages/shared/src/facturae.ts`).
+ * Criterios fiscales aprobados por el titular: el periodo de IVA es
+ * TRIMESTRAL y está implementado en `economia-iva`: el parámetro `periodo`
+ * (`AAAA-T1`..`AAAA-T4`, ver `packages/shared/src/periodo-iva.ts`) deriva
+ * `from`/`to`; si se indica junto a `from`/`to` que no coinciden, 400. El
+ * dataset añade la columna `periodo` (trimestre de la consulta cuando el
+ * rango cae en un único trimestre; vacía si abarca varios, porque las filas
+ * agregan todo el rango). Facturae usa el método estándar para facturas no
+ * enviadas previamente; y la clase de rectificativa (`total` / `diferencias`)
+ * se elige siempre de forma explícita, sin valor por defecto (ver
+ * `packages/shared/src/facturae.ts`).
  */
 @Injectable()
 export class ExportsService {
@@ -862,8 +870,34 @@ export class ExportsService {
   }
 
   private async economiaIva(q: ExportQuery): Promise<Dataset> {
-    const from = this.requerir(q.from, 'from');
-    const to = this.requerir(q.to, 'to');
+    let { from, to } = q;
+    if (q.periodo !== undefined) {
+      let rango: RangoPeriodoIva;
+      try {
+        rango = rangoPeriodoIva(q.periodo);
+      } catch (e) {
+        throw new BadRequestException((e as Error).message);
+      }
+      if (
+        (from !== undefined && from !== rango.from) ||
+        (to !== undefined && to !== rango.to)
+      ) {
+        throw new BadRequestException(
+          `"periodo" ${q.periodo} (${rango.from}..${rango.to}) no coincide con from/to indicados`,
+        );
+      }
+      from = rango.from;
+      to = rango.to;
+    }
+    from = this.requerir(from, 'from');
+    to = this.requerir(to, 'to');
+    let periodo: string | null = null;
+    try {
+      const p = periodoIvaDeFecha(from);
+      periodo = p === periodoIvaDeFecha(to) ? p : null;
+    } catch {
+      periodo = null; // fuera del dominio de periodos: columna vacía
+    }
     await this.obrasVisibles(q.projectId);
     const lineas = await this.dbs.db
       .select({
@@ -912,21 +946,24 @@ export class ExportsService {
     }
     const iva = computeIvaObra([...porFactura.values()], q.projectId);
     interface Fila {
+      periodo: string | null;
       lado: string;
       vatPct: number | null;
       baseAmount: number;
       vatAmount: number;
     }
     const filas: Fila[] = [
-      ...iva.repercutido.map((g) => ({ lado: 'repercutido', ...g })),
-      ...iva.soportado.map((g) => ({ lado: 'soportado', ...g })),
+      ...iva.repercutido.map((g) => ({ periodo, lado: 'repercutido', ...g })),
+      ...iva.soportado.map((g) => ({ periodo, lado: 'soportado', ...g })),
       {
+        periodo,
         lado: 'isp_emitida',
         vatPct: null,
         baseAmount: iva.ispEmitidas.baseAmount,
         vatAmount: 0,
       },
       {
+        periodo,
         lado: 'isp_recibida',
         vatPct: null,
         baseAmount: iva.ispRecibidas.baseAmount,
@@ -935,6 +972,7 @@ export class ExportsService {
     ];
     return dataset<Fila>(
       [
+        texto('periodo', 'Periodo', (r) => r.periodo),
         texto('lado', 'Lado', (r) => r.lado),
         numero('vatPct', 'IVA %', (r) => r.vatPct),
         importe('baseAmount', 'Base', (r) => r.baseAmount),

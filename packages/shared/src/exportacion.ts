@@ -152,6 +152,8 @@ export const exportQuerySchema = z.object({
   budgetId: z.string().uuid().optional(),
   from: fechaIso.optional(),
   to: fechaIso.optional(),
+  /** Trimestre de IVA AAAA-T1..AAAA-T4 (economia-iva); deriva from/to. */
+  periodo: z.string().trim().min(1).max(20).optional(),
   status: z.string().trim().min(1).max(30).optional(),
   kind: z.enum(['compra', 'venta']).optional(),
   sep: z.enum([';', ',']).default(';'),
