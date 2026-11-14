@@ -19,6 +19,7 @@ export default defineConfig({
       exclude: [
         'src/**/*.test.ts',
         'src/index.ts',
+        'src/test-helpers/**', // utilidades solo de test (validación XSD)
         'src/proveedores/**', // ajeno a esta tarea, ver Roadmap y Fases
       ],
       thresholds: {

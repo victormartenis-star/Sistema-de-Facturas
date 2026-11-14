@@ -1,5 +1,6 @@
 import { round2 } from './calculo';
-import { ISP_LEGEND } from './invoices';
+import { ISP_LEGEND, type RectificationType } from './invoices';
+import { periodoIvaDeFecha, rangoPeriodoIva } from './periodo-iva';
 
 /**
  * Facturae XML (formato de factura electrónica española) y huella de
@@ -8,13 +9,19 @@ import { ISP_LEGEND } from './invoices';
  * **Alcance deliberadamente preliminar** — no es un generador legalmente
  * válido para presentar ante la AEAT:
  * - No incluye firma electrónica XAdES (obligatoria en Facturae real).
- * - No está validado contra el XSD oficial de Facturae 3.2.2.
+ * - Esquema: el XML se valida en tests contra el XSD oficial de Facturae
+ *   3.2.2 (`packages/shared/test-fixtures/xsd/`, namespace
+ *   `http://www.facturae.gob.es/formato/Versiones/Facturaev3_2_2.xml`).
+ *   Cumplir el XSD es condición necesaria, no suficiente: no se han
+ *   comprobado las reglas de negocio de la AEAT/FACe.
  * - VeriFactu es en realidad un *Registro de Facturación* (Reglamento RD
  *   1007/2023 y Orden HAC/1177/2024) con su propio esquema XML y envío a la
- *   AEAT; **no** es un campo dentro de Facturae. Aquí se incrusta la huella
- *   como una extensión propia (`AdditionalData/Extensions`) para dejar
- *   constancia interna del encadenamiento, no como sustituto del registro
+ *   AEAT; **no** es un campo dentro de Facturae. La huella solo deja rastro
+ *   informativo en `InvoiceAdditionalInformation` (`Extensions` del XSD solo
+ *   admite contenido de otro namespace), no como sustituto del registro
  *   real.
+ * - Rectificativas: con `corrective` se genera `InvoiceClass=OR` y el bloque
+ *   `<Corrective>`; la API aún no lo usa (responde 409).
  * - Emisor y receptor se asumen personas jurídicas residentes en España
  *   (`PersonTypeCode=J`, `ResidenceTypeCode=R`): el esquema no modela esa
  *   distinción para contactos ni empresa.
@@ -40,7 +47,7 @@ import { ISP_LEGEND } from './invoices';
 
 export const FACTURAE_SCHEMA_VERSION = '3.2.2';
 export const FACTURAE_NAMESPACE =
-  'http://www.facturae.es/Facturae/2014/v3.2.2/Facturae';
+  'http://www.facturae.gob.es/formato/Versiones/Facturaev3_2_2.xml';
 
 /** Se usa cuando no hay dato fiscal real disponible (ver cabecera del fichero). */
 export const FACTURAE_UNKNOWN_ADDRESS: FacturaePartyAddress = {
@@ -80,6 +87,87 @@ export interface FacturaeVerifactuInfo {
   generatedAt: string;
 }
 
+/* ───────────────────── Factura rectificativa (bloque Corrective) ───────────────────── *
+ *
+ * Literales copiados del XSD oficial 3.2.2 (`ReasonCodeType`,
+ * `ReasonDescriptionType`, `CorrectionMethodType` y
+ * `CorrectionMethodDescriptionType`). El XSD exige que la descripción sea
+ * uno de los literales de su enumeración `ReasonDescriptionType`, que difiere
+ * en mayúsculas y espacios de las anotaciones de `ReasonCodeType`.
+ */
+
+export const FACTURAE_REASON_CODES = {
+  '01': 'Número de la factura',
+  '02': 'Serie de la factura',
+  '03': 'Fecha expedición',
+  '04': 'Nombre y apellidos/Razón Social-Emisor',
+  '05': 'Nombre y apellidos/Razón Social-Receptor',
+  '06': 'Identificación fiscal Emisor/obligado',
+  '07': 'Identificación fiscal Receptor',
+  '08': 'Domicilio Emisor/Obligado',
+  '09': 'Domicilio Receptor',
+  '10': 'Detalle Operación',
+  '11': 'Porcentaje impositivo a aplicar',
+  '12': 'Cuota tributaria a aplicar',
+  '13': 'Fecha/Periodo a aplicar',
+  '14': 'Clase de factura',
+  '15': 'Literales legales',
+  '16': 'Base imponible',
+  '80': 'Cálculo de cuotas repercutidas',
+  '81': 'Cálculo de cuotas retenidas',
+  '82': 'Base imponible modificada por devolución de envases / embalajes',
+  '83': 'Base imponible modificada por descuentos y bonificaciones',
+  '84': 'Base imponible modificada por resolución firme, judicial o administrativa',
+  '85': 'Base imponible modificada cuotas repercutidas no satisfechas. Auto de declaración de concurso',
+} as const;
+export type FacturaeReasonCode = keyof typeof FACTURAE_REASON_CODES;
+
+/** Criterios de rectificación del XSD. Este generador solo usa '01' y '02'. */
+export const FACTURAE_CORRECTION_METHODS = {
+  '01': 'Rectificación íntegra',
+  '02': 'Rectificación por diferencias',
+  '03': 'Rectificación por descuento por volumen de operaciones durante un periodo',
+  '04': 'Autorizadas por la Agencia Tributaria',
+} as const;
+export type FacturaeCorrectionMethod = '01' | '02';
+
+/**
+ * Tipo de rectificativa del sistema -> criterio Facturae: sustitución (S)
+ * repite la factura íntegra ('01'); diferencias (I) solo lo corregido ('02').
+ */
+export function correctionMethodFromType(
+  type: RectificationType,
+): FacturaeCorrectionMethod {
+  return type === 'S' ? '01' : '02';
+}
+
+/**
+ * Periodo natural (trimestre de IVA) de la fecha de la factura original, en
+ * el formato `{ start, end }` de `corrective.taxPeriod`.
+ */
+export function facturaeTaxPeriodOf(originalIssueDate: string): {
+  start: string;
+  end: string;
+} {
+  const { from, to } = rangoPeriodoIva(periodoIvaDeFecha(originalIssueDate));
+  return { start: from, end: to };
+}
+
+export interface FacturaeCorrectiveInput {
+  /** Número de la factura que se rectifica (máx. 20 caracteres, límite del XSD). */
+  originalNumber: string;
+  originalSeries?: string;
+  /** Fecha de expedición de la factura rectificada, AAAA-MM-DD. */
+  originalIssueDate: string;
+  reasonCode: FacturaeReasonCode;
+  /** Si se indica debe ser el literal del XSD de `reasonCode`; si no, se usa ese. */
+  reasonDescription?: string;
+  correctionMethod: FacturaeCorrectionMethod;
+  /** Periodo natural de los efectos fiscales de la factura original, AAAA-MM-DD. */
+  taxPeriod: { start: string; end: string };
+  additionalReason?: string;
+}
+
 export interface FacturaeInvoiceInput {
   invoiceNumber: string;
   /** AAAA-MM-DD */
@@ -95,6 +183,8 @@ export interface FacturaeInvoiceInput {
   retentionAmount: number;
   totalAmount: number;
   verifactu: FacturaeVerifactuInfo;
+  /** Solo en rectificativas: InvoiceClass pasa a `OR` y se añade `<Corrective>`. */
+  corrective?: FacturaeCorrectiveInput;
 }
 
 function escapeXml(value: string): string {
@@ -217,6 +307,81 @@ function lineXml(line: FacturaeLineInput, isp: boolean): string {
         </InvoiceLine>`;
 }
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function assertIsoDate(value: string, field: string): void {
+  if (!ISO_DATE_RE.test(value) || Number.isNaN(Date.parse(value))) {
+    throw new Error(`Facturae: ${field} no es una fecha AAAA-MM-DD válida`);
+  }
+}
+
+function assertMaxLength(value: string, max: number, field: string): void {
+  if (value.length > max) {
+    throw new Error(
+      `Facturae: ${field} supera el máximo de ${max} caracteres (${value.length})`,
+    );
+  }
+}
+
+/** Valida el bloque Corrective y devuelve su XML (orden de `CorrectiveType` del XSD). */
+function correctiveXml(c: FacturaeCorrectiveInput): string {
+  if (c.originalNumber.length === 0) {
+    throw new Error(
+      'Facturae: el número de la factura rectificada es obligatorio',
+    );
+  }
+  assertMaxLength(c.originalNumber, 20, 'el número de la factura rectificada');
+  if (c.originalSeries !== undefined) {
+    assertMaxLength(c.originalSeries, 20, 'la serie de la factura rectificada');
+  }
+  const expected = FACTURAE_REASON_CODES[c.reasonCode];
+  if (expected === undefined) {
+    throw new Error(`Facturae: código de motivo no válido "${c.reasonCode}"`);
+  }
+  if (c.reasonDescription !== undefined && c.reasonDescription !== expected) {
+    throw new Error(
+      `Facturae: la descripción del motivo "${c.reasonDescription}" no corresponde al código ${c.reasonCode} ("${expected}")`,
+    );
+  }
+  if (c.correctionMethod !== '01' && c.correctionMethod !== '02') {
+    throw new Error(
+      `Facturae: criterio de rectificación no soportado "${String(c.correctionMethod)}"`,
+    );
+  }
+  assertIsoDate(c.originalIssueDate, 'la fecha de la factura rectificada');
+  assertIsoDate(c.taxPeriod.start, 'el inicio del periodo de rectificación');
+  assertIsoDate(c.taxPeriod.end, 'el fin del periodo de rectificación');
+  if (c.taxPeriod.start > c.taxPeriod.end) {
+    throw new Error(
+      'Facturae: el periodo de rectificación termina antes de empezar',
+    );
+  }
+  if (c.additionalReason !== undefined) {
+    assertMaxLength(c.additionalReason, 2500, 'la ampliación del motivo');
+  }
+  const series = c.originalSeries
+    ? `
+          <InvoiceSeriesCode>${escapeXml(c.originalSeries)}</InvoiceSeriesCode>`
+    : '';
+  const additional = c.additionalReason
+    ? `
+          <AdditionalReasonDescription>${escapeXml(c.additionalReason)}</AdditionalReasonDescription>`
+    : '';
+  return `
+        <Corrective>
+          <InvoiceNumber>${escapeXml(c.originalNumber)}</InvoiceNumber>${series}
+          <ReasonCode>${c.reasonCode}</ReasonCode>
+          <ReasonDescription>${escapeXml(expected)}</ReasonDescription>
+          <TaxPeriod>
+            <StartDate>${c.taxPeriod.start}</StartDate>
+            <EndDate>${c.taxPeriod.end}</EndDate>
+          </TaxPeriod>
+          <CorrectionMethod>${c.correctionMethod}</CorrectionMethod>
+          <CorrectionMethodDescription>${escapeXml(FACTURAE_CORRECTION_METHODS[c.correctionMethod])}</CorrectionMethodDescription>${additional}
+          <InvoiceIssueDate>${c.originalIssueDate}</InvoiceIssueDate>
+        </Corrective>`;
+}
+
 /** Construye el XML Facturae 3.2.2 de una factura de venta. Función pura. */
 export function buildFacturaeXml(input: FacturaeInvoiceInput): string {
   const legalLiterals = input.isp
@@ -225,7 +390,11 @@ export function buildFacturaeXml(input: FacturaeInvoiceInput): string {
         <LegalReference>${escapeXml(ISP_LEGEND)}</LegalReference>
       </LegalLiterals>`
     : '';
+  const corrective = input.corrective ? correctiveXml(input.corrective) : '';
   const outstanding = round2(input.totalAmount - input.retentionAmount);
+  // Rastro interno de la huella VeriFactu: `Extensions` solo admite
+  // contenido de otro namespace (xs:any ##other), así que va en texto libre.
+  const additionalInformation = `Huella VeriFactu (preliminar): ${input.verifactu.hash}; huella anterior: ${input.verifactu.previousHash || '(primera de la cadena)'}; generada: ${input.verifactu.generatedAt}`;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <fe:Facturae xmlns:fe="${FACTURAE_NAMESPACE}" xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
@@ -249,7 +418,7 @@ export function buildFacturaeXml(input: FacturaeInvoiceInput): string {
       <InvoiceHeader>
         <InvoiceNumber>${escapeXml(input.invoiceNumber)}</InvoiceNumber>
         <InvoiceDocumentType>FC</InvoiceDocumentType>
-        <InvoiceClass>OO</InvoiceClass>
+        <InvoiceClass>${input.corrective ? 'OR' : 'OO'}</InvoiceClass>${corrective}
       </InvoiceHeader>
       <InvoiceIssueData>
         <IssueDate>${input.issueDate}</IssueDate>
@@ -268,18 +437,11 @@ export function buildFacturaeXml(input: FacturaeInvoiceInput): string {
         <InvoiceTotal>${money(input.totalAmount)}</InvoiceTotal>
         <TotalOutstandingAmount>${money(outstanding)}</TotalOutstandingAmount>
         <TotalExecutableAmount>${money(outstanding)}</TotalExecutableAmount>
-      </InvoiceTotals>${legalLiterals}
+      </InvoiceTotals>
       <Items>${input.lines.map((l) => lineXml(l, input.isp)).join('')}
-      </Items>
+      </Items>${legalLiterals}
       <AdditionalData>
-        <Extensions>
-          <Extension>
-            <ExtensionName>VeriFactuHashPreliminar</ExtensionName>
-            <Hash>${escapeXml(input.verifactu.hash)}</Hash>
-            <PreviousHash>${escapeXml(input.verifactu.previousHash)}</PreviousHash>
-            <GeneratedAt>${escapeXml(input.verifactu.generatedAt)}</GeneratedAt>
-          </Extension>
-        </Extensions>
+        <InvoiceAdditionalInformation>${escapeXml(additionalInformation)}</InvoiceAdditionalInformation>
       </AdditionalData>
     </Invoice>
   </Invoices>
