@@ -21,6 +21,7 @@ import {
   invoiceStatusFromMilestones,
 } from './invoices';
 import {
+  CODIGO_FACTURAE_R3,
   FACTURAE_REASON_CODES,
   allowedFacturaeReasonCodes,
 } from './facturae-reason';
@@ -432,6 +433,9 @@ describe('motivo y tipo oficiales de rectificativa', () => {
       ]);
       expect(allowedFacturaeReasonCodes('R2')).toEqual(['85']);
       expect(allowedFacturaeReasonCodes('R3')).toEqual(['85']);
+      // R3 usa la constante de anclaje (aproximación, ajustable por el asesor).
+      expect(allowedFacturaeReasonCodes('R3')).toEqual([CODIGO_FACTURAE_R3]);
+      expect(CODIGO_FACTURAE_R3).toBe('85');
       expect(allowedFacturaeReasonCodes('R4')).toEqual(
         Object.keys(FACTURAE_REASON_CODES),
       );

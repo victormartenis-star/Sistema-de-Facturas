@@ -724,7 +724,7 @@ export class InvoicesService {
       /** Obligatorios al rectificar vía API; null en flujos internos (certificaciones). */
       rectificationMotive?: RectificationMotive | null;
       rectificationType?: RectificationType | null;
-      /** Solo vía API; null en certificaciones (su Facturae responde 409). */
+      /** Código Facturae: lo elige el titular (API) o lo hereda la certificación; null solo en datos antiguos. */
       facturaeReasonCode?: string | null;
       lines?: InvoiceCreateInput['lines'];
     },

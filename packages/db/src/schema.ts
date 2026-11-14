@@ -481,6 +481,8 @@ export const certifications = pgTable(
     rectificationMotive: rectificationMotiveEnum('rectification_motive'),
     /** Tipo oficial S/I (solo certificaciones rectificativas). */
     rectificationType: rectificationTypeEnum('rectification_type'),
+    /** Código de motivo Facturae (ReasonCode); null en rectificativas antiguas. */
+    facturaeReasonCode: varchar('facturae_reason_code', { length: 2 }),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()

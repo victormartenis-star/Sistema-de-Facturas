@@ -97,8 +97,11 @@ export interface FacturaeVerifactuInfo {
 
 /* ───────────────────── Factura rectificativa (bloque Corrective) ───────────────────── *
  * Códigos de motivo (ReasonCode): ver `facturae-reason.ts` (reexportados aquí).
+ * Nota: R3 (créditos incobrables) → '85' es una APROXIMACIÓN (Facturae no tiene
+ * código exacto para incobrables); ver `CODIGO_FACTURAE_R3` en ese fichero.
  */
 export {
+  CODIGO_FACTURAE_R3,
   FACTURAE_REASON_CODES,
   allowedFacturaeReasonCodes,
   facturaeReasonCodeErrors,

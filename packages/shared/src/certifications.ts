@@ -1,3 +1,7 @@
+import {
+  FACTURAE_REASON_CODES,
+  facturaeReasonCodeErrors,
+} from './facturae-reason';
 import { z } from 'zod';
 import { type Transiciones, puedeTransitar } from './maquina-estados';
 import {
@@ -100,6 +104,15 @@ export const certificationRectifyBaseSchema = z.object({
   rectificationType: z.enum(RECTIFICATION_TYPES, {
     required_error: 'El tipo de rectificación (S o I) es obligatorio',
   }),
+  /**
+   * Código de motivo Facturae (ReasonCode), elegido por el titular y acotado
+   * por el motivo R1-R4. Obligatorio; la factura generada lo hereda.
+   */
+  facturaeReasonCode: z
+    .string({ required_error: 'El código de motivo Facturae es obligatorio' })
+    .refine((c) => Object.hasOwn(FACTURAE_REASON_CODES, c), {
+      message: 'Código de motivo Facturae no válido',
+    }),
   notes: z.string().trim().max(1000).nullish(),
 });
 /**
@@ -119,6 +132,18 @@ export const certificationRectifySchema =
         path: ['rectificationType'],
         message,
       });
+    }
+    if (RECTIFICATION_MOTIVES.includes(v.rectificationMotive)) {
+      for (const message of facturaeReasonCodeErrors(
+        v.rectificationMotive,
+        v.facturaeReasonCode,
+      )) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['facturaeReasonCode'],
+          message,
+        });
+      }
     }
   });
 export type CertificationRectifyInput = z.input<
@@ -170,6 +195,8 @@ export interface CertificationDto {
   rectificationReason: string | null;
   rectificationMotive: RectificationMotive | null;
   rectificationType: RectificationType | null;
+  /** Código de motivo Facturae (null en rectificativas antiguas sin código). */
+  facturaeReasonCode: string | null;
   notes: string | null;
   createdAt: string;
   updatedAt: string;

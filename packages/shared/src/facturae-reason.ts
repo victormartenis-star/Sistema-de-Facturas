@@ -40,14 +40,25 @@ export const FACTURAE_REASON_CODES = {
 export type FacturaeReasonCode = keyof typeof FACTURAE_REASON_CODES;
 
 /**
+ * ANCLAJE R3 → código Facturae. APROXIMACIÓN, no equivalencia exacta.
+ *
+ * R3 (art. 80.4 LIVA, créditos incobrables) se mapea a '85', que en Facturae
+ * corresponde a "Base imponible modificada cuotas repercutidas no satisfechas.
+ * Auto de declaración de concurso" (es decir, la modificación de base por
+ * concurso). Facturae no tiene un código exacto para incobrables, así que se
+ * usa el más próximo. Esta constante es el ÚNICO punto a tocar si el asesor
+ * fiscal decide otro código: `allowedFacturaeReasonCodes` la usa para R3.
+ */
+export const CODIGO_FACTURAE_R3: FacturaeReasonCode = '85';
+
+/**
  * Códigos de motivo Facturae admitidos para cada motivo R1-R4. El titular
  * elige el código de forma EXPLÍCITA: no hay valor por defecto ni mapeo
  * automático. Listas tomadas del diseño de auditoría.
  * - R1 (art. 80.1, 80.2, error fundado en derecho).
  * - R2 (art. 80.3, concurso).
- * - R3 (art. 80.4, créditos incobrables): APROXIMACIÓN. El XSD no tiene un
- *   código exacto para incobrables; se admite '85' provisionalmente y
- *   REQUIERE CONFIRMACIÓN DEL TITULAR.
+ * - R3 (art. 80.4, créditos incobrables): APROXIMACIÓN, ver
+ *   `CODIGO_FACTURAE_R3` (REQUIERE CONFIRMACIÓN DEL ASESOR FISCAL).
  * - R4 (resto): cualquier código válido.
  */
 const REASON_CODES_BY_MOTIVE: Record<
@@ -56,7 +67,7 @@ const REASON_CODES_BY_MOTIVE: Record<
 > = {
   R1: ['80', '82', '83', '84', '11', '12', '16'],
   R2: ['85'],
-  R3: ['85'],
+  R3: [CODIGO_FACTURAE_R3],
 };
 
 export function allowedFacturaeReasonCodes(

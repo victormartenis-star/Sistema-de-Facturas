@@ -253,6 +253,13 @@
       "when": 1794688157854,
       "tag": "0035_fase3_numero_venta_unico",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794691131339,
+      "tag": "0036_fase3_codigo_motivo_facturae_certificacion",
+      "breakpoints": true
     }
   ]
 }

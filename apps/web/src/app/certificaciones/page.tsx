@@ -17,8 +17,10 @@ import {
   type CertificationCreateInput,
   type CertificationInvoiceInput,
   type CertificationRectifyInput,
+  FACTURAE_REASON_CODES,
   RECTIFICATION_MOTIVES,
   RECTIFICATION_MOTIVE_LABELS,
+  allowedFacturaeReasonCodes,
   type RectificationMotive,
   canEditCertification,
   type CertificationLineDto,
@@ -674,6 +676,8 @@ function RectificarCertModal({
   const [cumulativePct, setCumulativePct] = useState('');
   const [motivo, setMotivo] = useState('');
   const [rectMotive, setRectMotive] = useState<RectificationMotive>('R4');
+  // Sin valor por defecto: lo elige el titular, acotado por el motivo.
+  const [reasonCode, setReasonCode] = useState('');
   const [notes, setNotes] = useState('');
 
   const mutation = useMutation({
@@ -683,6 +687,7 @@ function RectificarCertModal({
       toast('Certificación rectificativa creada en borrador');
       setCumulativePct('');
       setMotivo('');
+      setReasonCode('');
       setNotes('');
       onSuccess();
       onClose();
@@ -693,6 +698,8 @@ function RectificarCertModal({
   const pctVal = parseFloat(cumulativePct);
   const pctOk = Number.isFinite(pctVal) && pctVal >= 0 && pctVal <= 100;
   const motivoOk = motivo.trim().length >= MOTIVO_MIN;
+  const codigosPermitidos = allowedFacturaeReasonCodes(rectMotive);
+  const codigoOk = (codigosPermitidos as string[]).includes(reasonCode);
 
   if (!cert) return null;
 
@@ -713,6 +720,7 @@ function RectificarCertModal({
             rectificationMotive: rectMotive,
             // La certificación rectificativa se factura por diferencias: tipo I.
             rectificationType: 'I',
+            facturaeReasonCode: reasonCode,
             notes: notes.trim() || null,
           });
         }}
@@ -761,9 +769,10 @@ function RectificarCertModal({
           <select
             id="rc-motive"
             value={rectMotive}
-            onChange={(e) =>
-              setRectMotive(e.target.value as RectificationMotive)
-            }
+            onChange={(e) => {
+              setRectMotive(e.target.value as RectificationMotive);
+              setReasonCode('');
+            }}
             className={fieldCls}
           >
             {RECTIFICATION_MOTIVES.map((m) => (
@@ -772,6 +781,29 @@ function RectificarCertModal({
               </option>
             ))}
           </select>
+        </div>
+        <div>
+          <label className={labelCls} htmlFor="rc-code">
+            Código de motivo Facturae
+          </label>
+          <select
+            id="rc-code"
+            value={reasonCode}
+            onChange={(e) => setReasonCode(e.target.value)}
+            className={fieldCls}
+          >
+            <option value="">Selecciona un código…</option>
+            {codigosPermitidos.map((c) => (
+              <option key={c} value={c}>
+                {c} - {FACTURAE_REASON_CODES[c]}
+              </option>
+            ))}
+          </select>
+          {rectMotive === 'R3' && (
+            <p className="mt-1 text-xs text-gray-500">
+              Para R3 el código es una aproximación pendiente de confirmar.
+            </p>
+          )}
         </div>
         <div>
           <label className={labelCls} htmlFor="rc-motivo">
@@ -804,7 +836,7 @@ function RectificarCertModal({
           </button>
           <button
             type="submit"
-            disabled={mutation.isPending || !pctOk || !motivoOk}
+            disabled={mutation.isPending || !pctOk || !motivoOk || !codigoOk}
             className={btnPrimaryCls + ' disabled:opacity-60'}
           >
             Crear rectificativa

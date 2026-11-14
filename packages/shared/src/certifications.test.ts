@@ -93,6 +93,7 @@ describe('certificationRectifySchema', () => {
       motivo: 'Medición errónea',
       rectificationMotive: 'R4',
       rectificationType: 'I',
+      facturaeReasonCode: '16',
     };
     expect(certificationRectifySchema.safeParse(ok).success).toBe(true);
     const { rectificationMotive: _m, ...sinMotivo } = ok;
@@ -115,5 +116,45 @@ describe('certificationRectifySchema', () => {
       certificationRectifySchema.safeParse({ ...ok, cumulativePct: -1 })
         .success,
     ).toBe(false);
+  });
+
+  it('exige un código de motivo Facturae coherente con el motivo R1-R4', () => {
+    const ok = {
+      certDate: '2026-10-01',
+      cumulativePct: 30,
+      motivo: 'Medición errónea',
+      rectificationMotive: 'R1',
+      rectificationType: 'I',
+      facturaeReasonCode: '83',
+    };
+    expect(certificationRectifySchema.safeParse(ok).success).toBe(true);
+    const { facturaeReasonCode: _c, ...sinCodigo } = ok;
+    expect(certificationRectifySchema.safeParse(sinCodigo).success).toBe(false);
+    // 85 no es de R1; 99 no existe
+    for (const facturaeReasonCode of ['85', '99']) {
+      const r = certificationRectifySchema.safeParse({
+        ...ok,
+        facturaeReasonCode,
+      });
+      expect(r.success).toBe(false);
+      if (!r.success) {
+        expect(r.error.issues[0]?.path).toEqual(['facturaeReasonCode']);
+      }
+    }
+    // R2 admite 85; R4 admite cualquiera válido
+    expect(
+      certificationRectifySchema.safeParse({
+        ...ok,
+        rectificationMotive: 'R2',
+        facturaeReasonCode: '85',
+      }).success,
+    ).toBe(true);
+    expect(
+      certificationRectifySchema.safeParse({
+        ...ok,
+        rectificationMotive: 'R4',
+        facturaeReasonCode: '01',
+      }).success,
+    ).toBe(true);
   });
 });
