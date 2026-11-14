@@ -13,6 +13,16 @@
  * uso real, esta estructura debe revisarse contra la especificación
  * técnica vigente en el momento del despliegue (el Reglamento ha tenido
  * variaciones desde su publicación) y contra un caso de prueba de la AEAT.
+ *
+ * Criterios fiscales aprobados por el titular (documentados, sin efecto en
+ * el comportamiento):
+ * - Periodo de IVA: liquidación TRIMESTRAL.
+ * - Método Facturae: estándar, para facturas NO enviadas previamente
+ *   (generación y firma estándar; no se reenvían registros ya notificados).
+ * - Rectificativas: la clase (`total` o `diferencias`) se elige de forma
+ *   EXPLÍCITA al rectificar (`RECTIFICATION_KINDS`); no existe valor por
+ *   defecto. Hoy Facturae/VeriFactu de una rectificativa responden 409
+ *   (registros R1-R4 pendientes).
  */
 
 export const VERIFACTU_STATUSES = [

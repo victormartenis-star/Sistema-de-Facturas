@@ -37,6 +37,17 @@ function sanitizeFileName(value: string): string {
  * XAdES-BES si hay certificado configurado (`FacturaeSigningService`, Fase
  * 14) — si no, lo devuelve sin firmar, igual que siempre.
  *
+ *
+ * Criterios fiscales aprobados por el titular (documentados, sin efecto en
+ * el comportamiento):
+ * - Periodo de IVA: liquidación TRIMESTRAL.
+ * - Método Facturae: estándar, para facturas NO enviadas previamente
+ *   (generación y firma estándar; no se reenvían registros ya notificados).
+ * - Rectificativas: la clase (`total` o `diferencias`) se elige de forma
+ *   EXPLÍCITA al rectificar (`RECTIFICATION_KINDS`); no existe valor por
+ *   defecto. Hoy Facturae/VeriFactu de una rectificativa responden 409
+ *   (registros R1-R4 pendientes).
+ *
  * Ver la cabecera de `packages/shared/src/facturae.ts` para el resto del
  * alcance deliberadamente preliminar (sin validar contra el XSD oficial,
  * direcciones fiscales con datos de relleno).

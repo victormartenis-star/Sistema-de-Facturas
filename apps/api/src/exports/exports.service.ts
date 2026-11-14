@@ -118,6 +118,15 @@ const booleano = <T>(
 const isoFecha = (d: Date | null) => (d ? d.toISOString() : null);
 const resta = (a: string, b: string) => centsToNumeric(toCents(a) - toCents(b));
 
+/**
+ * Exportaciones CSV/JSON de recursos del ERP.
+ *
+ * Criterios fiscales aprobados por el titular (solo documentación): el
+ * periodo de IVA es TRIMESTRAL (relevante para `economia-iva`); Facturae usa
+ * el método estándar para facturas no enviadas previamente; y la clase de
+ * rectificativa (`total` / `diferencias`) se elige siempre de forma
+ * explícita, sin valor por defecto (ver `packages/shared/src/facturae.ts`).
+ */
 @Injectable()
 export class ExportsService {
   constructor(

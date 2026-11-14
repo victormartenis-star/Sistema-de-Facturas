@@ -24,6 +24,16 @@ import { ISP_LEGEND } from './invoices';
  *   dirección real. Antes de un uso real hace falta una migración que añada
  *   esos campos a `companies` y `contacts`.
  *
+ * Criterios fiscales aprobados por el titular (documentados, sin efecto en
+ * el comportamiento):
+ * - Periodo de IVA: liquidación TRIMESTRAL.
+ * - Método Facturae: estándar, para facturas NO enviadas previamente
+ *   (generación y firma estándar; no se reenvían registros ya notificados).
+ * - Rectificativas: la clase (`total` o `diferencias`) se elige de forma
+ *   EXPLÍCITA al rectificar (`RECTIFICATION_KINDS`); no existe valor por
+ *   defecto. Hoy Facturae/VeriFactu de una rectificativa responden 409
+ *   (registros R1-R4 pendientes).
+ *
  * Solo aplica a facturas de **venta**: Facturae describe una factura emitida
  * por el vendedor (nuestra empresa) al comprador (el contacto cliente).
  */

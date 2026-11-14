@@ -11,6 +11,11 @@ const XADES_OBJECT_ID = 'XadesObject';
 /**
  * Firma XAdES-BES del XML Facturae (Fase 14).
  *
+ * Criterio aprobado: método Facturae estándar para facturas NO enviadas
+ * previamente (firma estándar de la factura emitida; no se firman ni se
+ * reenvían registros ya notificados). Periodo de IVA trimestral; la clase de
+ * rectificativa es siempre explícita (ver `facturae.ts`).
+ *
  * Mismo patrón "opt-in silencioso" que `VerifactuSubmissionService`: sin
  * `FACTURAE_CERT_PATH`/`FACTURAE_KEY_PATH`, `enabled` es `false` y
  * `FacturaeService` sigue devolviendo el XML sin firmar de siempre.
