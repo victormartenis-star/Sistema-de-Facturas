@@ -547,11 +547,82 @@ export function motivoAbortoPorDependientes(
   return `No se borra nada: hay filas que no son de campo y dependen de datos ${PREFIJO_CAMPO}: ${detalle}. Resuélvelo a mano y reintenta.`;
 }
 
-/** Líneas legibles `tabla: n` en orden de borrado (solo tablas con filas). */
+/** Tabla de auditoría: sus filas se borran antes que las entidades que registran. */
+export const TABLA_AUDITORIA_CAMPO = 'audit_log';
+
+const RE_UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Ids (únicos) de las filas CAMPO- ya leídas, para localizar su auditoría.
+ * Ignora las tablas sin ids leídos (`null`). Lanza si algún id no es un uuid,
+ * para no pasar jamás basura a la consulta.
+ */
+export function idsAuditoriaCampo(
+  idsPorTabla: Readonly<Record<string, readonly string[] | null>>,
+): string[] {
+  const unicos = new Set<string>();
+  for (const [tabla, ids] of Object.entries(idsPorTabla)) {
+    for (const id of ids ?? []) {
+      if (!RE_UUID.test(id)) {
+        throw new Error(`${tabla}: id no válido para auditoría (${id}).`);
+      }
+      unicos.add(id.toLowerCase());
+    }
+  }
+  return [...unicos];
+}
+
+/** Fila de `audit_log` reducida a lo que decide si se borra. */
+export interface FilaAuditoriaCampo {
+  entity_id: string;
+  company_id: string;
+}
+
+/**
+ * Una fila de auditoría es de campo solo si su `entity_id` es el de una fila
+ * CAMPO- a borrar Y su `company_id` es el de una empresa de esas filas.
+ * Una fila con `entity_id` de campo pero otra empresa NO se toca.
+ */
+export function filtrarAuditoriaCampo<T extends FilaAuditoriaCampo>(
+  filas: readonly T[],
+  idsEntidad: readonly string[],
+  idsEmpresa: readonly string[],
+): { campo: T[]; ajenas: T[] } {
+  const ent = new Set(idsEntidad.map((x) => x.toLowerCase()));
+  const emp = new Set(idsEmpresa.map((x) => x.toLowerCase()));
+  const campo: T[] = [];
+  const ajenas: T[] = [];
+  for (const f of filas) {
+    const ok =
+      ent.has(f.entity_id.toLowerCase()) && emp.has(f.company_id.toLowerCase());
+    (ok ? campo : ajenas).push(f);
+  }
+  return { campo, ajenas };
+}
+
+/** Lanza si alguna fila de auditoría a borrar no cumple el filtro de campo. */
+export function exigirSoloAuditoriaCampo(
+  filas: readonly FilaAuditoriaCampo[],
+  idsEntidad: readonly string[],
+  idsEmpresa: readonly string[],
+): void {
+  const { ajenas } = filtrarAuditoriaCampo(filas, idsEntidad, idsEmpresa);
+  if (ajenas.length > 0) {
+    throw new Error(
+      `${TABLA_AUDITORIA_CAMPO}: ${ajenas.length} fila(s) no corresponden a entidades de campo; no se borra nada.`,
+    );
+  }
+}
+
+/**
+ * Líneas legibles `tabla: n` en orden de borrado (solo tablas con filas).
+ * `audit_log` va primero: se borra antes que las entidades.
+ */
 export function resumenLimpieza(
   conteos: Readonly<Record<string, number>>,
 ): string[] {
-  return ORDEN_BORRADO_CAMPO.filter((t) => (conteos[t.tabla] ?? 0) > 0).map(
-    (t) => `${t.tabla}: ${conteos[t.tabla]}`,
-  );
+  return [{ tabla: TABLA_AUDITORIA_CAMPO }, ...ORDEN_BORRADO_CAMPO]
+    .filter((t) => (conteos[t.tabla] ?? 0) > 0)
+    .map((t) => `${t.tabla}: ${conteos[t.tabla]}`);
 }

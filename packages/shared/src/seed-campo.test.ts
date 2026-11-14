@@ -23,6 +23,10 @@ import {
   condicionSqlCampo,
   motivoAbortoPorDependientes,
   resumenLimpieza,
+  TABLA_AUDITORIA_CAMPO,
+  idsAuditoriaCampo,
+  filtrarAuditoriaCampo,
+  exigirSoloAuditoriaCampo,
 } from './seed-campo';
 import { userCreateSchema } from './auth';
 
@@ -529,5 +533,68 @@ describe('validarAsignacionesCampo', () => {
         { email: 'campo-g@erp.test', fullName: 'g', role: 'admin', obras: [] },
       ]).join(' '),
     ).toMatch(/rol/);
+  });
+});
+
+describe('auditoría de las entidades de campo', () => {
+  const A = '11111111-1111-4111-8111-111111111111';
+  const B = '22222222-2222-4222-8222-222222222222';
+  const OTRO = '33333333-3333-4333-8333-333333333333';
+  const EMP = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const EMP2 = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+  it('reúne ids únicos de todas las tablas e ignora las sin ids', () => {
+    expect(
+      idsAuditoriaCampo({
+        projects: [A, B],
+        contacts: [A],
+        refresh_tokens: null,
+      }).sort(),
+    ).toEqual([A, B]);
+    expect(idsAuditoriaCampo({})).toEqual([]);
+  });
+
+  it('rechaza ids que no son uuid', () => {
+    expect(() => idsAuditoriaCampo({ projects: ["x' OR 1=1"] })).toThrow(
+      /id no válido/,
+    );
+  });
+
+  it('solo es de campo con entity_id de campo y empresa de campo', () => {
+    const filas = [
+      { entity_id: A, company_id: EMP },
+      { entity_id: B, company_id: EMP },
+      { entity_id: A, company_id: EMP2 },
+      { entity_id: OTRO, company_id: EMP },
+    ];
+    const { campo, ajenas } = filtrarAuditoriaCampo(filas, [A, B], [EMP]);
+    expect(campo).toEqual([filas[0], filas[1]]);
+    expect(ajenas).toEqual([filas[2], filas[3]]);
+  });
+
+  it('sin empresas o sin ids no selecciona nada', () => {
+    const f = [{ entity_id: A, company_id: EMP }];
+    expect(filtrarAuditoriaCampo(f, [A], []).campo).toEqual([]);
+    expect(filtrarAuditoriaCampo(f, [], [EMP]).campo).toEqual([]);
+  });
+
+  it('exigirSoloAuditoriaCampo lanza ante filas ajenas', () => {
+    expect(() =>
+      exigirSoloAuditoriaCampo([{ entity_id: A, company_id: EMP }], [A], [EMP]),
+    ).not.toThrow();
+    expect(() =>
+      exigirSoloAuditoriaCampo(
+        [{ entity_id: A, company_id: EMP2 }],
+        [A],
+        [EMP],
+      ),
+    ).toThrow(/audit_log: 1 fila/);
+  });
+
+  it('el resumen incluye audit_log primero y omite ceros', () => {
+    expect(
+      resumenLimpieza({ contacts: 3, [TABLA_AUDITORIA_CAMPO]: 7, projects: 0 }),
+    ).toEqual(['audit_log: 7', 'contacts: 3']);
+    expect(resumenLimpieza({ audit_log: 0 })).toEqual([]);
   });
 });

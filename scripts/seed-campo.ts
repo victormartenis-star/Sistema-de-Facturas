@@ -25,6 +25,11 @@
  * `--limpiar` borra de la base (conexión DATABASE_URL, en una transacción: todo
  * o nada) SOLO filas con identificador `CAMPO-` y los usuarios campo-*@erp.test;
  * si una fila que no es de campo depende de una de campo, aborta sin borrar.
+ * También borra de `audit_log` (sin FK a las entidades) SOLO las filas cuyo
+ * `entity_id` es el id de una fila CAMPO- ya leída y cuyo `company_id` es el de
+ * las empresas de esas filas (projects/contacts/users CAMPO-): una fila con
+ * `entity_id` de campo pero otra empresa no se toca. Se borra antes que las
+ * entidades, en la misma transacción, y el recuento se verifica como el resto.
  * Sin `--confirmar` solo cuenta por tabla lo que borraría (transacción de solo
  * lectura). Con `--confirmar`, el orden es: validar entorno, API y login ->
  * limpiar -> sembrar, todo en la misma invocación (así no se borra sin poder
@@ -41,6 +46,9 @@ import {
   columnasIdentificador,
   condicionSqlCampo,
   exigirSoloFilasCampo,
+  exigirSoloAuditoriaCampo,
+  idsAuditoriaCampo,
+  TABLA_AUDITORIA_CAMPO,
   motivoAbortoPorDependientes,
   resumenLimpieza,
   validarOrdenBorrado,
@@ -435,6 +443,44 @@ async function limpiarCampo(modo: ModoSeedCampo): Promise<void> {
       }
     }
 
+    // Auditoría: ids exactos de las filas CAMPO- (también las de tablas hijas
+    // con columna id) y empresas de las raíces CAMPO-; sin condiciones amplias.
+    const conId = await cliente.query<{ table_name: string }>(
+      `SELECT table_name FROM information_schema.columns
+        WHERE table_schema = current_schema() AND column_name = 'id'
+          AND data_type = 'uuid' AND table_name = ANY($1)`,
+      [ORDEN_BORRADO_CAMPO.map((t) => t.tabla)],
+    );
+    const idsAudit: Record<string, string[] | null> = { ...ids };
+    for (const { table_name } of conId.rows) {
+      if (idsAudit[table_name] != null) continue;
+      const r = await cliente.query(
+        `SELECT id FROM ${table_name} WHERE ${condicionSqlCampo(table_name)}`,
+      );
+      idsAudit[table_name] = r.rows.map((x) => String(x.id));
+    }
+    const idsEntidad = idsAuditoriaCampo(idsAudit);
+    const empresas = new Set<string>();
+    for (const raiz of ['projects', 'contacts', 'users']) {
+      const r = await cliente.query(
+        `SELECT DISTINCT company_id FROM ${raiz} WHERE ${condicionSqlCampo(raiz)}`,
+      );
+      for (const x of r.rows) empresas.add(String(x.company_id));
+    }
+    const idsEmpresa = [...empresas];
+    const auditoria =
+      idsEntidad.length === 0 || idsEmpresa.length === 0
+        ? []
+        : (
+            await cliente.query<{ entity_id: string; company_id: string }>(
+              `SELECT entity_id, company_id FROM ${TABLA_AUDITORIA_CAMPO}
+                WHERE entity_id = ANY($1::uuid[]) AND company_id = ANY($2::uuid[])`,
+              [idsEntidad, idsEmpresa],
+            )
+          ).rows;
+    exigirSoloAuditoriaCampo(auditoria, idsEntidad, idsEmpresa);
+    conteos[TABLA_AUDITORIA_CAMPO] = auditoria.length;
+
     // Filas ajenas que dependen de filas de campo (cualquier tabla de la BD).
     const nombres = ORDEN_BORRADO_CAMPO.map((t) => t.tabla);
     const fks = await cliente.query<{
@@ -496,6 +542,19 @@ async function limpiarCampo(modo: ModoSeedCampo): Promise<void> {
     for (const l of lineas) console.log(`  ${l}`);
 
     if (modo === 'escribir') {
+      // Primero la auditoría (orden seguro: antes de borrar las entidades).
+      if (conteos[TABLA_AUDITORIA_CAMPO] > 0) {
+        const res = await cliente.query(
+          `DELETE FROM ${TABLA_AUDITORIA_CAMPO}
+            WHERE entity_id = ANY($1::uuid[]) AND company_id = ANY($2::uuid[])`,
+          [idsEntidad, idsEmpresa],
+        );
+        if (res.rowCount !== conteos[TABLA_AUDITORIA_CAMPO]) {
+          throw new Error(
+            `${TABLA_AUDITORIA_CAMPO}: se esperaban ${conteos[TABLA_AUDITORIA_CAMPO]} borrados y fueron ${res.rowCount}.`,
+          );
+        }
+      }
       for (const t of ORDEN_BORRADO_CAMPO) {
         if ((conteos[t.tabla] ?? 0) === 0) continue;
         const porIds = ids[t.tabla];
