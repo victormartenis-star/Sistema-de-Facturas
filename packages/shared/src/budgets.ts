@@ -125,6 +125,8 @@ export const budgetItemUpdateSchema = budgetItemCreateSchema
 
 export interface BudgetItemDto {
   id: string;
+  /** Versión optimista (If-Match): +1 en cada mutación. */
+  version: number;
   budgetId: string;
   code: string;
   name: string;
@@ -143,6 +145,8 @@ export interface BudgetItemDto {
 /** Resumen de presupuesto (sin items). */
 export interface BudgetDto {
   id: string;
+  /** Versión optimista (If-Match): +1 en cada mutación. */
+  version: number;
   projectId: string;
   name: string;
   status: BudgetStatus;

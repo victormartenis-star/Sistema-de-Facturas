@@ -17,12 +17,18 @@ import {
   CertificationLineUpdateInput,
   canEditCertification,
 } from '@erp/shared';
+import {
+  condicionVersion,
+  falloActualizacion,
+  incrementarVersion,
+} from '../common/version';
 import { ChangeOrdersService } from '../modules/change-orders/change-orders.service';
 import { DbService } from '../db/db.service';
 
 function toDto(row: CertificationLine): CertificationLineDto {
   return {
     id: row.id,
+    version: row.version,
     certificationId: row.certificationId,
     budgetItemId: row.budgetItemId,
     cumulativePct: Number(row.cumulativePct),
@@ -151,8 +157,12 @@ export class CertificationLinesService {
     certId: string,
     lineId: string,
     input: CertificationLineUpdateInput,
+    versionEsperada?: number,
   ): Promise<CertificationLineDto> {
-    const values: Record<string, unknown> = { updatedAt: new Date() };
+    const values: Record<string, unknown> = {
+      updatedAt: new Date(),
+      version: incrementarVersion(certificationLines),
+    };
     if (input.cumulativePct !== undefined)
       values['cumulativePct'] = String(input.cumulativePct);
     if (input.cumulativeAmount !== undefined)
@@ -169,15 +179,29 @@ export class CertificationLinesService {
           and(
             eq(certificationLines.id, lineId),
             eq(certificationLines.certificationId, certId),
+            condicionVersion(certificationLines, versionEsperada),
           ),
         )
         .returning();
-      if (!row) throw new NotFoundException(`Línea ${lineId} no encontrada`);
+      if (!row) {
+        return falloActualizacion(
+          tx,
+          certificationLines,
+          lineId,
+          versionEsperada,
+          () => new NotFoundException(`Línea ${lineId} no encontrada`),
+          `Línea ${lineId} no encontrada`,
+        );
+      }
       return toDto(row);
     });
   }
 
-  async remove(certId: string, lineId: string): Promise<void> {
+  async remove(
+    certId: string,
+    lineId: string,
+    versionEsperada?: number,
+  ): Promise<void> {
     await this.withEditableCert(certId, async (tx) => {
       const [row] = await tx
         .delete(certificationLines)
@@ -185,10 +209,20 @@ export class CertificationLinesService {
           and(
             eq(certificationLines.id, lineId),
             eq(certificationLines.certificationId, certId),
+            condicionVersion(certificationLines, versionEsperada),
           ),
         )
         .returning({ id: certificationLines.id });
-      if (!row) throw new NotFoundException(`Línea ${lineId} no encontrada`);
+      if (!row) {
+        await falloActualizacion(
+          tx,
+          certificationLines,
+          lineId,
+          versionEsperada,
+          () => new NotFoundException(`Línea ${lineId} no encontrada`),
+          `Línea ${lineId} no encontrada`,
+        );
+      }
     });
   }
 }

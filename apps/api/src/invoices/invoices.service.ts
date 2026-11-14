@@ -78,6 +78,12 @@ import {
   MENSAJE_ESTADO_CAMBIADO,
 } from '../common/cambiar-estado';
 import { DbService } from '../db/db.service';
+import {
+  condicionVersion,
+  falloActualizacion,
+  incrementarVersion,
+  verificarVersion,
+} from '../common/version';
 
 type InvoiceCreateData = ReturnType<typeof invoiceCreateSchema.parse>;
 type InvoiceAmounts = ReturnType<typeof computeInvoiceAmounts>;
@@ -316,8 +322,13 @@ export class InvoicesService {
   }
 
   /** Solo se puede editar una factura en borrador. */
-  async update(id: string, input: InvoiceUpdateInput): Promise<InvoiceDto> {
+  async update(
+    id: string,
+    input: InvoiceUpdateInput,
+    versionEsperada?: number,
+  ): Promise<InvoiceDto> {
     const { invoice } = await this.findWithContact(id);
+    verificarVersion(invoice.version, versionEsperada);
     if (invoice.status !== 'borrador') {
       throw new ConflictException(
         'Solo se pueden editar facturas en borrador; anúlala si necesitas corregirla',
@@ -397,17 +408,31 @@ export class InvoicesService {
             totalAmount: amounts.totalAmount.toFixed(2),
             retentionAmount: amounts.retentionAmount.toFixed(2),
             updatedAt: new Date(),
+            version: incrementarVersion(invoices),
           })
           // Solo un borrador admite edición. La condición va en el propio
           // UPDATE: si una aprobación concurrente ganó la carrera, no se toca
           // ninguna fila y se responde 409 (los importes no cambian).
-          .where(and(eq(invoices.id, id), eq(invoices.status, 'borrador')))
+          .where(
+            and(
+              eq(invoices.id, id),
+              eq(invoices.status, 'borrador'),
+              condicionVersion(invoices, versionEsperada),
+            ),
+          )
           .returning({ id: invoices.id });
       } catch (err) {
         this.rethrowDuplicateNumber(err, data.invoiceNumber ?? '');
       }
       if (editadas.length === 0) {
-        throw new ConflictException(MENSAJE_ESTADO_CAMBIADO);
+        await falloActualizacion(
+          tx,
+          invoices,
+          id,
+          versionEsperada,
+          () => new ConflictException(MENSAJE_ESTADO_CAMBIADO),
+          'Factura no encontrada',
+        );
       }
       if (data.lines) {
         await tx.delete(invoiceLines).where(eq(invoiceLines.invoiceId, id));
@@ -428,7 +453,11 @@ export class InvoicesService {
         // Relink completo: soltar los actuales y vincular los nuevos
         await tx
           .update(deliveryNotes)
-          .set({ invoiceId: null, updatedAt: new Date() })
+          .set({
+            invoiceId: null,
+            updatedAt: new Date(),
+            version: incrementarVersion(deliveryNotes),
+          })
           .where(eq(deliveryNotes.invoiceId, id));
         if (data.deliveryNoteIds.length > 0) {
           await this.linkDeliveryNotes(
@@ -450,8 +479,9 @@ export class InvoicesService {
    * - Genera los vencimientos: ordinario (total - retención) y, si hay
    *   retención de garantía, uno diferido a la fecha de liberación.
    */
-  async approve(id: string): Promise<InvoiceDto> {
+  async approve(id: string, versionEsperada?: number): Promise<InvoiceDto> {
     const { invoice } = await this.findWithContact(id);
+    verificarVersion(invoice.version, versionEsperada);
     if (invoice.status !== 'borrador') {
       throw new ConflictException('Solo se aprueban facturas en borrador');
     }
@@ -476,7 +506,7 @@ export class InvoicesService {
     }
 
     await this.dbs.db.transaction((tx) =>
-      this.aprobarEnTx(tx, invoice, contact),
+      this.aprobarEnTx(tx, invoice, contact, versionEsperada),
     );
     void this.audit.log({
       entityType: 'invoice',
@@ -497,6 +527,7 @@ export class InvoicesService {
     tx: Tx,
     invoiceLeida: Invoice,
     contact: Contact,
+    versionEsperada?: number,
   ): Promise<void> {
     const id = invoiceLeida.id;
     // Se relee con bloqueo: dos aprobaciones simultáneas se serializan y la
@@ -515,6 +546,7 @@ export class InvoicesService {
     ) {
       throw new ConflictException('Solo se aprueban facturas en borrador');
     }
+    verificarVersion(locked.version, versionEsperada);
     const invoice = locked;
 
     if (invoice.rectifiesInvoiceId) {
@@ -553,7 +585,16 @@ export class InvoicesService {
       );
     }
 
-    await cambiarEstado(tx, invoices, 'invoice', id, 'borrador', 'aprobada');
+    await cambiarEstado(
+      tx,
+      invoices,
+      'invoice',
+      id,
+      'borrador',
+      'aprobada',
+      {},
+      versionEsperada,
+    );
 
     await this.insertMilestones(tx, invoice, contact);
   }
@@ -710,9 +751,14 @@ export class InvoicesService {
    * pagada. Total: líneas derivadas con el signo cambiado. Por diferencias:
    * las líneas del delta que se reciben. Serie automática `R-AAAA-NNNN`.
    */
-  async rectify(id: string, input: InvoiceRectifyInput): Promise<InvoiceDto> {
+  async rectify(
+    id: string,
+    input: InvoiceRectifyInput,
+    versionEsperada?: number,
+  ): Promise<InvoiceDto> {
     const data = invoiceRectifySchema.parse(input);
     const { invoice } = await this.findWithContact(id);
+    verificarVersion(invoice.version, versionEsperada);
     const allowed = await this.dbs.getObrasAccesibles();
     if (
       data.lines &&
@@ -911,14 +957,24 @@ export class InvoicesService {
   }
 
   /** Marca la factura como pagada/cobrada y liquida sus vencimientos. */
-  async markPaid(id: string): Promise<InvoiceDto> {
+  async markPaid(id: string, versionEsperada?: number): Promise<InvoiceDto> {
     const { invoice } = await this.findWithContact(id);
+    verificarVersion(invoice.version, versionEsperada);
     if (invoice.status !== 'aprobada') {
       throw new ConflictException('Solo se pueden liquidar facturas aprobadas');
     }
     await this.dbs.db.transaction(async (tx) => {
       // WHERE status = 'aprobada': si una anulación concurrente ganó, 409.
-      await cambiarEstado(tx, invoices, 'invoice', id, 'aprobada', 'pagada');
+      await cambiarEstado(
+        tx,
+        invoices,
+        'invoice',
+        id,
+        'aprobada',
+        'pagada',
+        {},
+        versionEsperada,
+      );
       await cambiarEstadoMasivo(
         tx,
         paymentMilestones,
@@ -940,9 +996,11 @@ export class InvoicesService {
   async cancel(
     id: string,
     input: InvoiceCancelInput = {},
+    versionEsperada?: number,
   ): Promise<InvoiceDto> {
     const data = invoiceCancelSchema.parse(input ?? {});
     const { invoice } = await this.findWithContact(id);
+    verificarVersion(invoice.version, versionEsperada);
     if (invoice.status === 'anulada') {
       return this.get(id);
     }
@@ -974,10 +1032,11 @@ export class InvoicesService {
     }
     await this.dbs.db.transaction(async (tx) => {
       const [locked] = await tx
-        .select({ status: invoices.status })
+        .select({ status: invoices.status, version: invoices.version })
         .from(invoices)
         .where(eq(invoices.id, id))
         .for('update');
+      if (locked) verificarVersion(locked.version, versionEsperada);
       if (!locked || locked.status !== invoice.status) {
         throw new ConflictException(
           'La factura ha cambiado de estado: recarga e inténtalo de nuevo',
@@ -999,7 +1058,11 @@ export class InvoicesService {
       );
       await tx
         .update(deliveryNotes)
-        .set({ invoiceId: null, updatedAt: new Date() })
+        .set({
+          invoiceId: null,
+          updatedAt: new Date(),
+          version: incrementarVersion(deliveryNotes),
+        })
         .where(eq(deliveryNotes.invoiceId, id));
       await cambiarEstado(
         tx,
@@ -1009,6 +1072,7 @@ export class InvoicesService {
         locked.status as InvoiceStatus,
         'anulada',
         { cancelReason: data.motivo ?? null },
+        versionEsperada,
       );
     });
     void this.audit.log({
@@ -1021,25 +1085,47 @@ export class InvoicesService {
   }
 
   /** Borrado lógico; solo borradores (lo demás se anula, no se borra). */
-  async remove(id: string): Promise<void> {
+  async remove(id: string, versionEsperada?: number): Promise<void> {
     const { invoice } = await this.findWithContact(id);
+    verificarVersion(invoice.version, versionEsperada);
     if (invoice.status !== 'borrador') {
       throw new ConflictException('Solo se pueden eliminar borradores');
     }
     await this.dbs.db.transaction(async (tx) => {
       await tx
         .update(deliveryNotes)
-        .set({ invoiceId: null, updatedAt: new Date() })
+        .set({
+          invoiceId: null,
+          updatedAt: new Date(),
+          version: incrementarVersion(deliveryNotes),
+        })
         .where(eq(deliveryNotes.invoiceId, id));
       // Borrado lógico solo de borradores: la condición va en el UPDATE para
       // que una aprobación concurrente no deje una factura aprobada borrada.
       const borradas = await tx
         .update(invoices)
-        .set({ deletedAt: new Date(), updatedAt: new Date() })
-        .where(and(eq(invoices.id, id), eq(invoices.status, 'borrador')))
+        .set({
+          deletedAt: new Date(),
+          updatedAt: new Date(),
+          version: incrementarVersion(invoices),
+        })
+        .where(
+          and(
+            eq(invoices.id, id),
+            eq(invoices.status, 'borrador'),
+            condicionVersion(invoices, versionEsperada),
+          ),
+        )
         .returning({ id: invoices.id });
       if (borradas.length === 0) {
-        throw new ConflictException(MENSAJE_ESTADO_CAMBIADO);
+        await falloActualizacion(
+          tx,
+          invoices,
+          id,
+          versionEsperada,
+          () => new ConflictException(MENSAJE_ESTADO_CAMBIADO),
+          'Factura no encontrada',
+        );
       }
     });
   }
@@ -1200,7 +1286,11 @@ export class InvoicesService {
     }
     await tx
       .update(deliveryNotes)
-      .set({ invoiceId, updatedAt: new Date() })
+      .set({
+        invoiceId,
+        updatedAt: new Date(),
+        version: incrementarVersion(deliveryNotes),
+      })
       .where(inArray(deliveryNotes.id, noteIds));
   }
 
@@ -1313,6 +1403,7 @@ export class InvoicesService {
       const retention = Number(invoice.retentionAmount);
       return {
         id: invoice.id,
+        version: invoice.version,
         kind: invoice.kind as InvoiceDto['kind'],
         status: invoice.status as InvoiceDto['status'],
         contactId: invoice.contactId,

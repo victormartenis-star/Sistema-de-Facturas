@@ -1,3 +1,4 @@
+import { incrementarVersion } from '../common/version';
 import { createHash } from 'node:crypto';
 import {
   BadRequestException,
@@ -337,6 +338,7 @@ export class FacturaeService {
             verifactuHash: hash,
             verifactuPreviousHash: previousHash,
             verifactuGeneratedAt: new Date(generatedAt),
+            version: incrementarVersion(invoices),
           })
           .where(
             and(

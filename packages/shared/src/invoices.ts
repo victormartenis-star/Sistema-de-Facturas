@@ -373,6 +373,8 @@ export interface InvoiceDeliveryNoteRef {
 
 export interface InvoiceDto {
   id: string;
+  /** Versión optimista (If-Match): +1 en cada mutación. */
+  version: number;
   kind: InvoiceKind;
   status: InvoiceStatus;
   contactId: string;

@@ -32,6 +32,7 @@ import {
   paginacionQuerySchema,
   type PaginacionQuery,
 } from '@erp/shared';
+import { VersionEsperada } from '../common/version';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { BudgetsService } from './budgets.service';
 
@@ -102,8 +103,9 @@ export class BudgetsController {
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: BudgetUpdateInput,
+    @VersionEsperada({ exigible: true }) version?: number,
   ): Promise<BudgetDto> {
-    return this.svc.update(id, body);
+    return this.svc.update(id, body, version);
   }
 
   /**
@@ -121,8 +123,11 @@ export class BudgetsController {
   /** DELETE /budgets/:id → 204 */
   @Delete('budgets/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
-    return this.svc.remove(id);
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @VersionEsperada({ exigible: true }) version?: number,
+  ): Promise<void> {
+    return this.svc.remove(id, version);
   }
 
   // ── Partidas ──────────────────────────────────────────────────────────────
@@ -141,15 +146,19 @@ export class BudgetsController {
   updateItem(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: BudgetItemUpdateInput,
+    @VersionEsperada({ exigible: true }) version?: number,
   ): Promise<BudgetItemDto> {
-    return this.svc.updateItem(id, body);
+    return this.svc.updateItem(id, body, version);
   }
 
   /** DELETE /budget-items/:id → 204 */
   @Delete('budget-items/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  removeItem(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
-    return this.svc.removeItem(id);
+  removeItem(
+    @Param('id', ParseUUIDPipe) id: string,
+    @VersionEsperada({ exigible: true }) version?: number,
+  ): Promise<void> {
+    return this.svc.removeItem(id, version);
   }
 }
 

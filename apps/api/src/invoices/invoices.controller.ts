@@ -31,6 +31,7 @@ import {
   type PaginacionQuery,
 } from '@erp/shared';
 import { Roles } from '../auth/roles';
+import { VersionEsperada } from '../common/version';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { FacturaeService } from './facturae.service';
 import { InvoicesService } from './invoices.service';
@@ -119,22 +120,29 @@ export class InvoicesController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(invoiceUpdateSchema))
     body: InvoiceUpdateInput,
+    @VersionEsperada({ exigible: true }) version?: number,
   ) {
-    return this.service.update(id, body);
+    return this.service.update(id, body, version);
   }
 
   /** Aprueba la factura (con matching de albaranes si es de compra). */
   @Post(':id/aprobar')
   @Roles('admin', 'gerente', 'administracion')
-  approve(@Param('id', ParseUUIDPipe) id: string) {
-    return this.service.approve(id);
+  approve(
+    @Param('id', ParseUUIDPipe) id: string,
+    @VersionEsperada() version?: number,
+  ) {
+    return this.service.approve(id, version);
   }
 
   /** Marca como pagada/cobrada y liquida sus vencimientos. */
   @Post(':id/pagar')
   @Roles('admin', 'gerente', 'administracion')
-  markPaid(@Param('id', ParseUUIDPipe) id: string) {
-    return this.service.markPaid(id);
+  markPaid(
+    @Param('id', ParseUUIDPipe) id: string,
+    @VersionEsperada() version?: number,
+  ) {
+    return this.service.markPaid(id, version);
   }
 
   /**
@@ -147,8 +155,9 @@ export class InvoicesController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(invoiceCancelSchema))
     body: InvoiceCancelInput,
+    @VersionEsperada() version?: number,
   ) {
-    return this.service.cancel(id, body);
+    return this.service.cancel(id, body, version);
   }
 
   /** Crea la rectificativa (total o por diferencias) en borrador. */
@@ -158,14 +167,18 @@ export class InvoicesController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(invoiceRectifySchema))
     body: InvoiceRectifyInput,
+    @VersionEsperada() version?: number,
   ) {
-    return this.service.rectify(id, body);
+    return this.service.rectify(id, body, version);
   }
 
   @Delete(':id')
   @Roles('admin', 'gerente', 'administracion')
   @HttpCode(204)
-  async remove(@Param('id', ParseUUIDPipe) id: string) {
-    await this.service.remove(id);
+  async remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @VersionEsperada({ exigible: true }) version?: number,
+  ) {
+    await this.service.remove(id, version);
   }
 }

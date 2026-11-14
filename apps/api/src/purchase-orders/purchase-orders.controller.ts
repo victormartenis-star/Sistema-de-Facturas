@@ -18,6 +18,7 @@ import {
   purchaseOrderCreateSchema,
   purchaseOrderUpdateSchema,
 } from '@erp/shared';
+import { VersionEsperada } from '../common/version';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { PurchaseOrdersService } from './purchase-orders.service';
 
@@ -74,24 +75,34 @@ export class PurchaseOrdersController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(purchaseOrderUpdateSchema))
     body: PurchaseOrderUpdateInput,
+    @VersionEsperada({ exigible: true }) version?: number,
   ) {
-    return this.service.update(id, body);
+    return this.service.update(id, body, version);
   }
 
   /** Liquidación del pedido: ningún pedido debe quedar sin factura. */
   @Post(':id/cerrar')
-  close(@Param('id', ParseUUIDPipe) id: string) {
-    return this.service.close(id);
+  close(
+    @Param('id', ParseUUIDPipe) id: string,
+    @VersionEsperada() version?: number,
+  ) {
+    return this.service.close(id, version);
   }
 
   @Post(':id/anular')
-  cancel(@Param('id', ParseUUIDPipe) id: string) {
-    return this.service.cancel(id);
+  cancel(
+    @Param('id', ParseUUIDPipe) id: string,
+    @VersionEsperada() version?: number,
+  ) {
+    return this.service.cancel(id, version);
   }
 
   @Delete(':id')
   @HttpCode(204)
-  async remove(@Param('id', ParseUUIDPipe) id: string) {
-    await this.service.remove(id);
+  async remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @VersionEsperada({ exigible: true }) version?: number,
+  ) {
+    await this.service.remove(id, version);
   }
 }

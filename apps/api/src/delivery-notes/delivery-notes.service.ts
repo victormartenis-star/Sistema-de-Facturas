@@ -46,6 +46,12 @@ import {
 import { AuditService } from '../audit/audit.service';
 import { cambiarEstado } from '../common/cambiar-estado';
 import { DbService } from '../db/db.service';
+import {
+  condicionVersion,
+  falloActualizacion,
+  incrementarVersion,
+  verificarVersion,
+} from '../common/version';
 import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
 
 const UNIQUE_VIOLATION = '23505';
@@ -63,6 +69,7 @@ function toDto(row: Row, alreadyDelivered?: number | null): DeliveryNoteDto {
   const { note } = row;
   return {
     id: note.id,
+    version: note.version,
     contactId: note.contactId,
     contactName: row.contactName,
     projectId: note.projectId,
@@ -225,6 +232,7 @@ export class DeliveryNotesService {
   async update(
     id: string,
     input: DeliveryNoteUpdateInput,
+    versionEsperada?: number,
   ): Promise<DeliveryNoteDto> {
     const previa = await this.find(id);
     const data = deliveryNoteUpdateSchema.parse(input);
@@ -237,6 +245,7 @@ export class DeliveryNotesService {
         // bloqueo para aplicar las reglas de estado sobre el estado real.
         await this.orders.bloquearPedidos(tx, [previa.orderId, data.orderId]);
         const note = await this.lockNote(tx, id);
+        verificarVersion(note.version, versionEsperada);
         if (note.orderId !== previa.orderId) {
           throw new ConflictException('El albarán ha cambiado: recarga');
         }
@@ -249,7 +258,7 @@ export class DeliveryNotesService {
         );
         if (bloqueo) throw new ConflictException(bloqueo);
 
-        await tx
+        const editados = await tx
           .update(deliveryNotes)
           .set({
             ...(data.contactId !== undefined && { contactId: data.contactId }),
@@ -273,8 +282,25 @@ export class DeliveryNotesService {
               amount: data.amount.toFixed(2),
             }),
             updatedAt: new Date(),
+            version: incrementarVersion(deliveryNotes),
           })
-          .where(eq(deliveryNotes.id, id));
+          .where(
+            and(
+              eq(deliveryNotes.id, id),
+              condicionVersion(deliveryNotes, versionEsperada),
+            ),
+          )
+          .returning({ id: deliveryNotes.id });
+        if (editados.length === 0) {
+          await falloActualizacion(
+            tx,
+            deliveryNotes,
+            id,
+            versionEsperada,
+            () => new ConflictException('El albarán ha cambiado: recarga'),
+            'Albarán no encontrado',
+          );
+        }
 
         // El pedido (el de antes y el de ahora) puede quedar desfasado.
         const pedidos = new Set<string>();
@@ -298,8 +324,12 @@ export class DeliveryNotesService {
    * puede parar una compra no controlada —antes de que el material se dé por
    * bueno—, y no cuando la factura ya está registrada.
    */
-  async validate(id: string): Promise<DeliveryNoteDto> {
+  async validate(
+    id: string,
+    versionEsperada?: number,
+  ): Promise<DeliveryNoteDto> {
     const note = await this.find(id);
+    verificarVersion(note.version, versionEsperada);
     if (note.status !== 'pendiente') {
       throw new ConflictException('Solo se validan albaranes pendientes');
     }
@@ -310,11 +340,16 @@ export class DeliveryNotesService {
     await this.dbs.db.transaction(async (tx) => {
       await this.orders.bloquearPedidos(tx, [note.orderId]);
       const [locked] = await tx
-        .select({ status: deliveryNotes.status })
+        .select({
+          status: deliveryNotes.status,
+          version: deliveryNotes.version,
+        })
         .from(deliveryNotes)
         .where(and(eq(deliveryNotes.id, id), isNull(deliveryNotes.deletedAt)))
         .for('update');
-      if (!locked || locked.status !== 'pendiente') {
+      if (!locked) throw new NotFoundException('Albarán no encontrado');
+      verificarVersion(locked.version, versionEsperada);
+      if (locked.status !== 'pendiente') {
         throw new ConflictException('Solo se validan albaranes pendientes');
       }
 
@@ -332,6 +367,7 @@ export class DeliveryNotesService {
         'pendiente',
         'validado',
         { validatedAt: new Date() },
+        versionEsperada,
       );
       if (note.orderId) await this.orders.refreshStatus(note.orderId, tx);
     });
@@ -346,14 +382,17 @@ export class DeliveryNotesService {
   async returnToPending(
     id: string,
     input: DeliveryNoteReturnInput,
+    versionEsperada?: number,
   ): Promise<DeliveryNoteDto> {
     const { motivo } = deliveryNoteReturnSchema.parse(input);
     const note = await this.find(id);
+    verificarVersion(note.version, versionEsperada);
 
     await this.dbs.db.transaction(async (tx) => {
       // Mismo orden de bloqueo que `validate`: pedido -> albarán.
       await this.orders.bloquearPedidos(tx, [note.orderId]);
       const locked = await this.lockNote(tx, id);
+      verificarVersion(locked.version, versionEsperada);
       if (
         !canReturnDeliveryNote({
           status: locked.status as DeliveryNoteStatus,
@@ -374,6 +413,7 @@ export class DeliveryNotesService {
         'validado',
         'pendiente',
         { validatedAt: null },
+        versionEsperada,
       );
       if (locked.orderId) await this.orders.refreshStatus(locked.orderId, tx);
     });
@@ -389,11 +429,12 @@ export class DeliveryNotesService {
     return this.get(id);
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, versionEsperada?: number): Promise<void> {
     const previa = await this.find(id);
     await this.dbs.db.transaction(async (tx) => {
       await this.orders.bloquearPedidos(tx, [previa.orderId]);
       const note = await this.lockNote(tx, id);
+      verificarVersion(note.version, versionEsperada);
       if (note.orderId !== previa.orderId) {
         throw new ConflictException('El albarán ha cambiado: recarga');
       }
@@ -410,7 +451,11 @@ export class DeliveryNotesService {
       }
       await tx
         .update(deliveryNotes)
-        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .set({
+          deletedAt: new Date(),
+          updatedAt: new Date(),
+          version: incrementarVersion(deliveryNotes),
+        })
         .where(eq(deliveryNotes.id, id));
       if (note.orderId) await this.orders.refreshStatus(note.orderId, tx);
     });

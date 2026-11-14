@@ -27,6 +27,12 @@ import {
   MENSAJE_ESTADO_CAMBIADO,
 } from '../common/cambiar-estado';
 import { DbService } from '../db/db.service';
+import {
+  condicionVersion,
+  incrementarVersion,
+  verificarVersion,
+  falloActualizacion,
+} from '../common/version';
 import { InvoicesService } from '../invoices/invoices.service';
 
 const UNIQUE_VIOLATION = '23505';
@@ -36,6 +42,7 @@ function toDto(row: Certification): CertificationDto {
   const period = Number(row.periodAmount);
   return {
     id: row.id,
+    version: row.version,
     projectId: row.projectId,
     seq: row.seq,
     certDate: row.certDate,
@@ -216,10 +223,12 @@ export class CertificationsService {
   async rectify(
     id: string,
     input: CertificationRectifyInput,
+    versionEsperada?: number,
   ): Promise<CertificationDto> {
     const companyId = await this.dbs.getCompanyId();
     const data = certificationRectifySchema.parse(input);
     const orig = await this.find(id);
+    verificarVersion(orig.version, versionEsperada);
     if (orig.status !== 'facturada' || !orig.invoiceId) {
       throw new ConflictException(
         'Solo se rectifica una certificación facturada',
@@ -326,6 +335,7 @@ export class CertificationsService {
   private async invoiceRectification(
     cert: Certification,
     data: ReturnType<typeof certificationInvoiceSchema.parse>,
+    versionEsperada?: number,
   ): Promise<CertificationDto> {
     const id = cert.id;
     const [origCert] = await this.dbs.db
@@ -359,11 +369,16 @@ export class CertificationsService {
 
     const { row, invoiceId } = await this.dbs.db.transaction(async (tx) => {
       const [locked] = await tx
-        .select({ status: certifications.status })
+        .select({
+          status: certifications.status,
+          version: certifications.version,
+        })
         .from(certifications)
         .where(and(eq(certifications.id, id), isNull(certifications.deletedAt)))
         .for('update');
-      if (!locked || locked.status !== 'borrador') {
+      if (!locked) throw new NotFoundException('Certificación no encontrada');
+      verificarVersion(locked.version, versionEsperada);
+      if (locked.status !== 'borrador') {
         throw new ConflictException('La certificación ya está facturada');
       }
       const { row: invoice, contact } =
@@ -398,6 +413,7 @@ export class CertificationsService {
         'borrador',
         'facturada',
         { invoiceId: invoice.id },
+        versionEsperada,
       );
       return { row: updated, invoiceId: invoice.id };
     });
@@ -429,14 +445,16 @@ export class CertificationsService {
   async invoice(
     id: string,
     input: CertificationInvoiceInput,
+    versionEsperada?: number,
   ): Promise<CertificationDto> {
     const cert = await this.find(id);
+    verificarVersion(cert.version, versionEsperada);
     if (cert.status !== 'borrador') {
       throw new ConflictException('La certificación ya está facturada');
     }
     const data = certificationInvoiceSchema.parse(input);
     if (cert.rectifiesCertificationId) {
-      return this.invoiceRectification(cert, data);
+      return this.invoiceRectification(cert, data, versionEsperada);
     }
     const project = await this.findProject(cert.projectId);
 
@@ -473,11 +491,16 @@ export class CertificationsService {
     // de la certificación impide facturarla dos veces en paralelo.
     const { row, invoiceId } = await this.dbs.db.transaction(async (tx) => {
       const [locked] = await tx
-        .select({ status: certifications.status })
+        .select({
+          status: certifications.status,
+          version: certifications.version,
+        })
         .from(certifications)
         .where(and(eq(certifications.id, id), isNull(certifications.deletedAt)))
         .for('update');
-      if (!locked || locked.status !== 'borrador') {
+      if (!locked) throw new NotFoundException('Certificación no encontrada');
+      verificarVersion(locked.version, versionEsperada);
+      if (locked.status !== 'borrador') {
         throw new ConflictException('La certificación ya está facturada');
       }
       const invoice = await this.invoicesService.crearEnTx(
@@ -495,6 +518,7 @@ export class CertificationsService {
         'borrador',
         'facturada',
         { invoiceId: invoice.id },
+        versionEsperada,
       );
       return { row: updated, invoiceId: invoice.id };
     });
@@ -520,8 +544,9 @@ export class CertificationsService {
     return toDto(row);
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, versionEsperada?: number): Promise<void> {
     const cert = await this.find(id);
+    verificarVersion(cert.version, versionEsperada);
     if (cert.status !== 'borrador') {
       throw new ConflictException(
         'No se puede eliminar una certificación facturada: rectifica antes su factura',
@@ -551,13 +576,28 @@ export class CertificationsService {
       // concurrente no deja una certificación facturada borrada).
       const borradas = await tx
         .update(certifications)
-        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .set({
+          deletedAt: new Date(),
+          updatedAt: new Date(),
+          version: incrementarVersion(certifications),
+        })
         .where(
-          and(eq(certifications.id, id), eq(certifications.status, 'borrador')),
+          and(
+            eq(certifications.id, id),
+            eq(certifications.status, 'borrador'),
+            condicionVersion(certifications, versionEsperada),
+          ),
         )
         .returning({ id: certifications.id });
       if (borradas.length === 0) {
-        throw new ConflictException(MENSAJE_ESTADO_CAMBIADO);
+        await falloActualizacion(
+          tx,
+          certifications,
+          id,
+          versionEsperada,
+          () => new ConflictException(MENSAJE_ESTADO_CAMBIADO),
+          'Certificación no encontrada',
+        );
       }
     });
     void this.audit.log({

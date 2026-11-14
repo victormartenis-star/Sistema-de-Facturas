@@ -16,6 +16,7 @@ import {
   type CertificationLineCreateInput,
   type CertificationLineUpdateInput,
 } from '@erp/shared';
+import { VersionEsperada } from '../common/version';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 
 @Controller('certifications/:certId/lines')
@@ -42,8 +43,9 @@ export class CertificationLinesController {
     @Param('lineId', ParseUUIDPipe) lineId: string,
     @Body(new ZodValidationPipe(certificationLineUpdateSchema))
     body: CertificationLineUpdateInput,
+    @VersionEsperada({ exigible: true }) version?: number,
   ) {
-    return this.service.update(certId, lineId, body);
+    return this.service.update(certId, lineId, body, version);
   }
 
   @Delete(':lineId')
@@ -51,7 +53,8 @@ export class CertificationLinesController {
   remove(
     @Param('certId', ParseUUIDPipe) certId: string,
     @Param('lineId', ParseUUIDPipe) lineId: string,
+    @VersionEsperada({ exigible: true }) version?: number,
   ) {
-    return this.service.remove(certId, lineId);
+    return this.service.remove(certId, lineId, version);
   }
 }

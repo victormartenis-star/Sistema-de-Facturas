@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { SQL, and, eq, sql } from 'drizzle-orm';
 import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
 import type { DbOrTx } from '@erp/db';
@@ -7,6 +7,7 @@ import {
   type EstadoPorEntidad,
   transicion,
 } from '@erp/shared';
+import { conflictoVersion } from './version';
 
 /**
  * ÚNICO punto de escritura de `status` de la API.
@@ -28,6 +29,16 @@ export type TablaConEstado = PgTable & {
   updatedAt: PgColumn;
 };
 
+/**
+ * `version = version + 1` si la tabla tiene columna `version` (concurrencia
+ * optimista): toda transición de estado cuenta como mutación. Para tablas sin
+ * esa columna no se añade nada.
+ */
+function incrementoVersion(tabla: object): Record<string, unknown> {
+  const col = (tabla as { version?: PgColumn }).version;
+  return col ? { version: sql`${col} + 1` } : {};
+}
+
 export const MENSAJE_ESTADO_CAMBIADO =
   'El documento ha cambiado de estado: recarga e inténtalo de nuevo';
 
@@ -43,15 +54,57 @@ export async function cambiarEstado<
   de: EstadoPorEntidad[E],
   a: EstadoPorEntidad[E],
   extra: Record<string, unknown> = {},
+  /** Versión esperada (If-Match); solo se valida si llega. */
+  versionEsperada?: number,
 ): Promise<T['$inferSelect']> {
   transicion(entidad, de, a);
   const rows = (await tx
     .update(tabla)
-    .set({ ...extra, status: a, updatedAt: sql`now()` } as never)
-    .where(and(eq(tabla.id, id), eq(tabla.status, de)))
+    .set({
+      ...extra,
+      ...incrementoVersion(tabla),
+      status: a,
+      updatedAt: sql`now()`,
+    } as never)
+    .where(
+      and(
+        eq(tabla.id, id),
+        eq(tabla.status, de),
+        versionEsperada === undefined
+          ? undefined
+          : eq(
+              (tabla as unknown as { version: PgColumn }).version,
+              versionEsperada,
+            ),
+      ),
+    )
     .returning()) as T['$inferSelect'][];
-  if (rows.length === 0) throw new ConflictException(MENSAJE_ESTADO_CAMBIADO);
+  if (rows.length === 0) {
+    await fallarCambioEstado(tx, tabla, id, versionEsperada);
+  }
   return rows[0];
+}
+
+/** 0 filas: 404 si no existe, VERSION_CONFLICT si la versión no coincide, 409 de estado si no. */
+async function fallarCambioEstado(
+  tx: DbOrTx,
+  tabla: TablaConEstado,
+  id: string,
+  versionEsperada: number | undefined,
+): Promise<never> {
+  const col = (tabla as unknown as { version?: PgColumn }).version;
+  if (versionEsperada !== undefined && col) {
+    const [fila] = (await tx
+      .select({ version: col })
+      .from(tabla as PgTable)
+      .where(eq(tabla.id, id))
+      .limit(1)) as { version: number }[];
+    if (!fila) throw new NotFoundException('Recurso no encontrado');
+    if (Number(fila.version) !== versionEsperada) {
+      throw conflictoVersion(Number(fila.version));
+    }
+  }
+  throw new ConflictException(MENSAJE_ESTADO_CAMBIADO);
 }
 
 /**
@@ -75,7 +128,12 @@ export async function cambiarEstadoMasivo<
   transicion(entidad, de, a);
   return (await tx
     .update(tabla)
-    .set({ ...extra, status: a, updatedAt: sql`now()` } as never)
+    .set({
+      ...extra,
+      ...incrementoVersion(tabla),
+      status: a,
+      updatedAt: sql`now()`,
+    } as never)
     .where(and(donde, eq(tabla.status, de)))
     .returning()) as T['$inferSelect'][];
 }

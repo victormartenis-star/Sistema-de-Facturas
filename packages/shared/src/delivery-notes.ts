@@ -122,6 +122,8 @@ export type DeliveryNoteUpdateInput = z.input<typeof deliveryNoteUpdateSchema>;
 
 export interface DeliveryNoteDto {
   id: string;
+  /** Versión optimista (If-Match): +1 en cada mutación. */
+  version: number;
   contactId: string;
   contactName: string;
   projectId: string | null;

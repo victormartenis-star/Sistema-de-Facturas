@@ -24,6 +24,7 @@ import {
   type PaginacionQuery,
 } from '@erp/shared';
 import { Roles } from '../auth/roles';
+import { VersionEsperada } from '../common/version';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { CertificationsService } from './certifications.service';
 
@@ -64,8 +65,9 @@ export class CertificationsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(certificationRectifySchema))
     body: CertificationRectifyInput,
+    @VersionEsperada() version?: number,
   ) {
-    return this.service.rectify(id, body);
+    return this.service.rectify(id, body, version);
   }
 
   /** Genera y aprueba la factura de venta de la certificación. */
@@ -75,13 +77,17 @@ export class CertificationsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(certificationInvoiceSchema))
     body: CertificationInvoiceInput,
+    @VersionEsperada() version?: number,
   ) {
-    return this.service.invoice(id, body);
+    return this.service.invoice(id, body, version);
   }
 
   @Delete(':id')
   @HttpCode(204)
-  async remove(@Param('id', ParseUUIDPipe) id: string) {
-    await this.service.remove(id);
+  async remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @VersionEsperada({ exigible: true }) version?: number,
+  ) {
+    await this.service.remove(id, version);
   }
 }

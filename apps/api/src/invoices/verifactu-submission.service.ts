@@ -1,3 +1,4 @@
+import { incrementarVersion } from '../common/version';
 import { readFileSync } from 'node:fs';
 import { request as httpsRequest } from 'node:https';
 import {
@@ -155,7 +156,11 @@ export class VerifactuSubmissionService {
   ): Promise<void> {
     await this.dbs.db
       .update(invoices)
-      .set({ verifactuStatus: status, verifactuSentAt: sentAt })
+      .set({
+        verifactuStatus: status,
+        verifactuSentAt: sentAt,
+        version: incrementarVersion(invoices),
+      })
       .where(
         and(
           eq(invoices.id, invoiceId),

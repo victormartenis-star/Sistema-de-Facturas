@@ -260,6 +260,13 @@
       "when": 1794691131339,
       "tag": "0036_fase3_codigo_motivo_facturae_certificacion",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794696532515,
+      "tag": "0037_fase1_version_optimista",
+      "breakpoints": true
     }
   ]
 }

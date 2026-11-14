@@ -176,6 +176,8 @@ export type CertificationInvoiceInput = z.input<
 
 export interface CertificationDto {
   id: string;
+  /** Versión optimista (If-Match): +1 en cada mutación. */
+  version: number;
   projectId: string;
   seq: number;
   certDate: string;
@@ -231,6 +233,8 @@ export type CertificationLineUpdateInput = z.input<
 
 export interface CertificationLineDto {
   id: string;
+  /** Versión optimista (If-Match): +1 en cada mutación. */
+  version: number;
   certificationId: string;
   budgetItemId: string;
   cumulativePct: number;

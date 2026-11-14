@@ -214,6 +214,8 @@ export type PurchaseOrderUpdateInput = z.input<
 
 export interface PurchaseOrderDto {
   id: string;
+  /** Versión optimista (If-Match): +1 en cada mutación. */
+  version: number;
   orderNumber: string;
   seq: number;
   projectId: string;

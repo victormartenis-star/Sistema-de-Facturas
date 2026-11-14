@@ -42,6 +42,12 @@ import {
 } from '@erp/shared';
 import { cambiarEstado } from '../common/cambiar-estado';
 import { DbService } from '../db/db.service';
+import {
+  condicionVersion,
+  falloActualizacion,
+  incrementarVersion,
+  verificarVersion,
+} from '../common/version';
 import { ProveedoresService } from '../modules/proveedores/proveedores.service';
 
 /** Importes servidos y facturados de un pedido, sacados de sus albaranes. */
@@ -190,8 +196,10 @@ export class PurchaseOrdersService {
   async update(
     id: string,
     input: PurchaseOrderUpdateInput,
+    versionEsperada?: number,
   ): Promise<PurchaseOrderDto> {
     const order = await this.find(id);
+    verificarVersion(order.version, versionEsperada);
     if (order.status === 'cerrado' || order.status === 'anulado') {
       throw new ConflictException(
         `No se puede editar un pedido ${order.status}`,
@@ -202,7 +210,7 @@ export class PurchaseOrdersService {
 
     await this.dbs.db.transaction(async (tx) => {
       await this.bloquearPedidos(tx, [id]);
-      await tx
+      const editados = await tx
         .update(purchaseOrders)
         .set({
           ...(data.contactId !== undefined && { contactId: data.contactId }),
@@ -224,8 +232,25 @@ export class PurchaseOrdersService {
           ...(data.urgent !== undefined && { urgent: data.urgent }),
           ...(data.notes !== undefined && { notes: data.notes ?? null }),
           updatedAt: new Date(),
+          version: incrementarVersion(purchaseOrders),
         })
-        .where(eq(purchaseOrders.id, id));
+        .where(
+          and(
+            eq(purchaseOrders.id, id),
+            condicionVersion(purchaseOrders, versionEsperada),
+          ),
+        )
+        .returning({ id: purchaseOrders.id });
+      if (editados.length === 0) {
+        await falloActualizacion(
+          tx,
+          purchaseOrders,
+          id,
+          versionEsperada,
+          () => new ConflictException('El pedido ha cambiado: recarga'),
+          'Pedido no encontrado',
+        );
+      }
       await this.refreshStatus(id, tx);
     });
     return this.get(id);
@@ -236,7 +261,7 @@ export class PurchaseOrdersService {
    * factura"). Se avisa de lo recibido sin facturar en lugar de cerrarlo en
    * silencio, porque ese importe es coste que se perdería.
    */
-  async close(id: string): Promise<PurchaseOrderDto> {
+  async close(id: string, versionEsperada?: number): Promise<PurchaseOrderDto> {
     await this.find(id); // 404 / empresa
     await this.dbs.db.transaction(async (tx) => {
       // Bloqueo ANTES de leer el estado: cerrar y anular a la vez se
@@ -249,6 +274,7 @@ export class PurchaseOrdersService {
           and(eq(purchaseOrders.id, id), isNull(purchaseOrders.deletedAt)),
         );
       if (!order) throw new NotFoundException('Pedido no encontrado');
+      verificarVersion(order.version, versionEsperada);
       if (order.status === 'anulado') {
         throw new ConflictException('El pedido está anulado');
       }
@@ -270,6 +296,7 @@ export class PurchaseOrdersService {
         order.status as PurchaseOrderStatus,
         'cerrado',
         { closedAt: new Date() },
+        versionEsperada,
       );
     });
     return this.get(id);
@@ -281,7 +308,10 @@ export class PurchaseOrdersService {
    * `cerrado` y `anulado` son terminales. Anular un pedido ya anulado sigue
    * siendo idempotente.
    */
-  async cancel(id: string): Promise<PurchaseOrderDto> {
+  async cancel(
+    id: string,
+    versionEsperada?: number,
+  ): Promise<PurchaseOrderDto> {
     await this.find(id); // 404 / empresa
     await this.dbs.db.transaction(async (tx) => {
       await this.bloquearPedidos(tx, [id]);
@@ -292,6 +322,7 @@ export class PurchaseOrdersService {
           and(eq(purchaseOrders.id, id), isNull(purchaseOrders.deletedAt)),
         );
       if (!order) throw new NotFoundException('Pedido no encontrado');
+      verificarVersion(order.version, versionEsperada);
       const delivered = (await this.deliveredByOrder([id], tx)).get(id);
       if ((delivered?.count ?? 0) > 0) {
         throw new ConflictException(
@@ -306,13 +337,16 @@ export class PurchaseOrdersService {
         id,
         order.status as PurchaseOrderStatus,
         'anulado',
+        {},
+        versionEsperada,
       );
     });
     return this.get(id);
   }
 
-  async remove(id: string): Promise<void> {
-    await this.find(id);
+  async remove(id: string, versionEsperada?: number): Promise<void> {
+    const previa = await this.find(id);
+    verificarVersion(previa.version, versionEsperada);
     await this.dbs.db.transaction(async (tx) => {
       // Con el pedido bloqueado, un albarán que se imputa a la vez no se cuela
       // entre la comprobación y el borrado (el alta de albaranes lo bloquea).
@@ -325,8 +359,17 @@ export class PurchaseOrdersService {
       }
       await tx
         .update(purchaseOrders)
-        .set({ deletedAt: new Date(), updatedAt: new Date() })
-        .where(eq(purchaseOrders.id, id));
+        .set({
+          deletedAt: new Date(),
+          updatedAt: new Date(),
+          version: incrementarVersion(purchaseOrders),
+        })
+        .where(
+          and(
+            eq(purchaseOrders.id, id),
+            condicionVersion(purchaseOrders, versionEsperada),
+          ),
+        );
     });
   }
 
@@ -488,6 +531,7 @@ export class PurchaseOrdersService {
 
     return {
       id: order.id,
+      version: order.version,
       orderNumber: order.orderNumber,
       seq: order.seq,
       projectId: order.projectId,

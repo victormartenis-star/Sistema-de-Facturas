@@ -317,6 +317,8 @@ export const invoices = pgTable(
   'invoices',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    /** Versión optimista: +1 en cada mutación; el cliente la devuelve en If-Match. */
+    version: integer('version').notNull().default(1),
     companyId: uuid('company_id')
       .notNull()
       .references(() => companies.id),
@@ -443,6 +445,8 @@ export const certifications = pgTable(
   'certifications',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    /** Versión optimista: +1 en cada mutación; el cliente la devuelve en If-Match. */
+    version: integer('version').notNull().default(1),
     companyId: uuid('company_id')
       .notNull()
       .references(() => companies.id),
@@ -534,6 +538,8 @@ export const purchaseOrders = pgTable(
   'purchase_orders',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    /** Versión optimista: +1 en cada mutación; el cliente la devuelve en If-Match. */
+    version: integer('version').notNull().default(1),
     companyId: uuid('company_id')
       .notNull()
       .references(() => companies.id),
@@ -589,6 +595,8 @@ export const deliveryNotes = pgTable(
   'delivery_notes',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    /** Versión optimista: +1 en cada mutación; el cliente la devuelve en If-Match. */
+    version: integer('version').notNull().default(1),
     companyId: uuid('company_id')
       .notNull()
       .references(() => companies.id),
@@ -935,6 +943,8 @@ export const budgets = pgTable(
   'budgets',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    /** Versión optimista: +1 en cada mutación; el cliente la devuelve en If-Match. */
+    version: integer('version').notNull().default(1),
     companyId: uuid('company_id')
       .notNull()
       .references(() => companies.id),
@@ -969,6 +979,8 @@ export const budgetItems = pgTable(
   'budget_items',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    /** Versión optimista: +1 en cada mutación; el cliente la devuelve en If-Match. */
+    version: integer('version').notNull().default(1),
     budgetId: uuid('budget_id')
       .notNull()
       .references(() => budgets.id, { onDelete: 'cascade' }),
@@ -1031,6 +1043,8 @@ export const certificationLines = pgTable(
   'certification_lines',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    /** Versión optimista: +1 en cada mutación; el cliente la devuelve en If-Match. */
+    version: integer('version').notNull().default(1),
     certificationId: uuid('certification_id')
       .notNull()
       .references(() => certifications.id, { onDelete: 'cascade' }),

@@ -25,6 +25,7 @@ import {
   type PaginacionQuery,
 } from '@erp/shared';
 import { Roles } from '../auth/roles';
+import { VersionEsperada } from '../common/version';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { DeliveryNotesService } from './delivery-notes.service';
 
@@ -72,14 +73,18 @@ export class DeliveryNotesController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(deliveryNoteUpdateSchema))
     body: DeliveryNoteUpdateInput,
+    @VersionEsperada({ exigible: true }) version?: number,
   ) {
-    return this.service.update(id, body);
+    return this.service.update(id, body, version);
   }
 
   /** Validación del jefe de obra (pendiente → validado). */
   @Post(':id/validar')
-  validate(@Param('id', ParseUUIDPipe) id: string) {
-    return this.service.validate(id);
+  validate(
+    @Param('id', ParseUUIDPipe) id: string,
+    @VersionEsperada() version?: number,
+  ) {
+    return this.service.validate(id, version);
   }
 
   /** Devuelve un albarán validado (sin factura) a pendiente, con motivo. */
@@ -89,13 +94,17 @@ export class DeliveryNotesController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(deliveryNoteReturnSchema))
     body: DeliveryNoteReturnInput,
+    @VersionEsperada() version?: number,
   ) {
-    return this.service.returnToPending(id, body);
+    return this.service.returnToPending(id, body, version);
   }
 
   @Delete(':id')
   @HttpCode(204)
-  async remove(@Param('id', ParseUUIDPipe) id: string) {
-    await this.service.remove(id);
+  async remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @VersionEsperada({ exigible: true }) version?: number,
+  ) {
+    await this.service.remove(id, version);
   }
 }

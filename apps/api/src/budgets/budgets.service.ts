@@ -46,6 +46,12 @@ import {
 } from '@erp/shared';
 import { cambiarEstado, cambiarEstadoMasivo } from '../common/cambiar-estado';
 import { DbService } from '../db/db.service';
+import {
+  condicionVersion,
+  falloActualizacion,
+  incrementarVersion,
+  verificarVersion,
+} from '../common/version';
 import { parseBc3 } from './bc3-parser';
 
 const UNIQUE_VIOLATION = '23505';
@@ -55,6 +61,7 @@ const UNIQUE_VIOLATION = '23505';
 function itemToDto(row: BudgetItem): BudgetItemDto {
   return {
     id: row.id,
+    version: row.version,
     budgetId: row.budgetId,
     code: row.code,
     name: row.name,
@@ -78,6 +85,7 @@ function budgetToDto(
 ): BudgetDto {
   return {
     id: row.id,
+    version: row.version,
     projectId: row.projectId,
     name: row.name,
     status: row.status as BudgetStatus,
@@ -192,7 +200,11 @@ export class BudgetsService {
     return budgetToDto(row, 0, 0);
   }
 
-  async update(id: string, input: BudgetUpdateInput): Promise<BudgetDto> {
+  async update(
+    id: string,
+    input: BudgetUpdateInput,
+    versionEsperada?: number,
+  ): Promise<BudgetDto> {
     const found = await this.findBudget(id);
     const data = budgetUpdateSchema.parse(input);
 
@@ -210,6 +222,7 @@ export class BudgetsService {
       }
       // Las reglas de estado se comprueban releyendo la fila con bloqueo.
       const budget = await this.lockBudget(tx, id);
+      verificarVersion(budget.version, versionEsperada);
 
       const campos = (['name', 'notes'] as const).filter(
         (c) => data[c] !== undefined,
@@ -264,13 +277,30 @@ export class BudgetsService {
           budget.status as BudgetStatus,
           data.status,
           valores,
+          versionEsperada,
         );
       }
       const [row] = await tx
         .update(budgets)
-        .set({ ...valores, updatedAt: new Date() })
-        .where(eq(budgets.id, id))
+        .set({
+          ...valores,
+          updatedAt: new Date(),
+          version: incrementarVersion(budgets),
+        })
+        .where(
+          and(eq(budgets.id, id), condicionVersion(budgets, versionEsperada)),
+        )
         .returning();
+      if (!row) {
+        return falloActualizacion(
+          tx,
+          budgets,
+          id,
+          versionEsperada,
+          () => new ConflictException('El presupuesto ha cambiado: recarga'),
+          'Presupuesto no encontrado',
+        );
+      }
       return row;
     });
 
@@ -289,10 +319,11 @@ export class BudgetsService {
     );
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, versionEsperada?: number): Promise<void> {
     await this.findBudget(id);
     await this.dbs.db.transaction(async (tx) => {
       const budget = await this.lockBudget(tx, id);
+      verificarVersion(budget.version, versionEsperada);
       if (!canDeleteBudget(budget.status as BudgetStatus)) {
         throw new ConflictException(
           `Solo se puede borrar un presupuesto en borrador (este está ${budget.status}). Ciérralo en lugar de borrarlo`,
@@ -300,7 +331,11 @@ export class BudgetsService {
       }
       await tx
         .update(budgets)
-        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .set({
+          deletedAt: new Date(),
+          updatedAt: new Date(),
+          version: incrementarVersion(budgets),
+        })
         .where(eq(budgets.id, id));
     });
   }
@@ -484,6 +519,7 @@ export class BudgetsService {
   async updateItem(
     itemId: string,
     input: BudgetItemUpdateInput,
+    versionEsperada?: number,
   ): Promise<BudgetItemDto> {
     const found = await this.findItem(itemId);
     const data = budgetItemUpdateSchema.parse(input);
@@ -506,6 +542,7 @@ export class BudgetsService {
         .where(eq(budgetItems.id, itemId))
         .limit(1);
       if (!existing) throw new NotFoundException('Partida no encontrada');
+      verificarVersion(existing.version, versionEsperada);
 
       const totalAmount = centsToNumeric(
         lineAmountCents(
@@ -532,16 +569,32 @@ export class BudgetsService {
           ...(data.sortOrder !== undefined && { sortOrder: data.sortOrder }),
           totalAmount,
           updatedAt: new Date(),
+          version: incrementarVersion(budgetItems),
         })
-        .where(eq(budgetItems.id, itemId))
+        .where(
+          and(
+            eq(budgetItems.id, itemId),
+            condicionVersion(budgetItems, versionEsperada),
+          ),
+        )
         .returning();
+      if (!updated) {
+        return falloActualizacion(
+          tx,
+          budgetItems,
+          itemId,
+          versionEsperada,
+          () => new ConflictException('La partida ha cambiado: recarga'),
+          'Partida no encontrada',
+        );
+      }
       return updated;
     });
 
     return itemToDto(row);
   }
 
-  async removeItem(itemId: string): Promise<void> {
+  async removeItem(itemId: string, versionEsperada?: number): Promise<void> {
     const found = await this.findItem(itemId);
     await this.dbs.db.transaction(async (tx) => {
       const budget = await this.lockBudget(tx, found.budgetId);
@@ -549,7 +602,25 @@ export class BudgetsService {
         budget.status as BudgetStatus,
       );
       if (bloqueo) throw new ConflictException(bloqueo);
-      await tx.delete(budgetItems).where(eq(budgetItems.id, itemId));
+      const borradas = await tx
+        .delete(budgetItems)
+        .where(
+          and(
+            eq(budgetItems.id, itemId),
+            condicionVersion(budgetItems, versionEsperada),
+          ),
+        )
+        .returning({ id: budgetItems.id });
+      if (borradas.length === 0) {
+        await falloActualizacion(
+          tx,
+          budgetItems,
+          itemId,
+          versionEsperada,
+          () => new NotFoundException('Partida no encontrada'),
+          'Partida no encontrada',
+        );
+      }
     });
   }
 
