@@ -44,6 +44,9 @@ import {
   calcularOffset,
   construirPagina,
   RectificationKind,
+  RectificationMotive,
+  RectificationType,
+  rectificationClassificationErrors,
   amountsMatch,
   buildRectificationLines,
   canTransitionInvoice,
@@ -77,6 +80,8 @@ interface RectificacionEnlace {
   invoiceId: string;
   kind: RectificationKind;
   reason: string;
+  motive: RectificationMotive | null;
+  type: RectificationType | null;
 }
 
 const UNIQUE_VIOLATION = '23505';
@@ -170,6 +175,7 @@ export class InvoicesService {
   }
 
   async create(input: InvoiceCreateInput): Promise<InvoiceDto> {
+    this.rechazarClasificacionRectificativa(input);
     const { companyId, data, amounts } = await this.prepararCreacion(input);
     const invoiceId = await this.dbs.db.transaction(
       async (tx) => (await this.crearEnTx(tx, companyId, data, amounts)).id,
@@ -182,6 +188,19 @@ export class InvoicesService {
       newData: { invoiceId, kind: dto.kind, status: dto.status },
     });
     return dto;
+  }
+
+  /** Motivo/tipo de rectificación no se aceptan al crear/editar facturas ordinarias (400). */
+  private rechazarClasificacionRectificativa(input: {
+    rectificationMotive?: string | null;
+    rectificationType?: string | null;
+  }): void {
+    const errores = rectificationClassificationErrors({
+      esRectificativa: false,
+      motive: input.rectificationMotive,
+      type: input.rectificationType,
+    });
+    if (errores.length > 0) throw new BadRequestException(errores[0]);
   }
 
   /**
@@ -256,6 +275,8 @@ export class InvoicesService {
             rectifiesInvoiceId: rectificacion.invoiceId,
             rectificationKind: rectificacion.kind,
             rectificationReason: rectificacion.reason,
+            rectificationMotive: rectificacion.motive,
+            rectificationType: rectificacion.type,
           }),
         })
         .returning();
@@ -293,6 +314,7 @@ export class InvoicesService {
         'Solo se pueden editar facturas en borrador; anúlala si necesitas corregirla',
       );
     }
+    this.rechazarClasificacionRectificativa(input);
     const data = invoiceUpdateSchema.parse(input);
 
     const lines =
@@ -630,6 +652,8 @@ export class InvoicesService {
             clase: data.clase,
             issueDate: data.issueDate,
             motivo: data.motivo,
+            rectificationMotive: data.rectificationMotive,
+            rectificationType: data.rectificationType,
             lines: data.lines,
           })
         ).row.id,
@@ -642,6 +666,8 @@ export class InvoicesService {
         invoiceId: newId,
         rectifies: id,
         clase: data.clase,
+        rectificationMotive: data.rectificationMotive,
+        rectificationType: data.rectificationType,
         status: 'borrador',
       },
     });
@@ -661,6 +687,9 @@ export class InvoicesService {
       clase: RectificationKind;
       issueDate: string;
       motivo: string;
+      /** Obligatorios al rectificar vía API; null en flujos internos (certificaciones). */
+      rectificationMotive?: RectificationMotive | null;
+      rectificationType?: RectificationType | null;
       lines?: InvoiceCreateInput['lines'];
     },
   ): Promise<{ row: Invoice; contact: Contact }> {
@@ -756,6 +785,8 @@ export class InvoicesService {
       invoiceId: orig.id,
       kind: p.clase,
       reason: p.motivo,
+      motive: p.rectificationMotive ?? null,
+      type: p.rectificationType ?? null,
     });
     const [contact] = await tx
       .select()
@@ -1110,6 +1141,10 @@ export class InvoicesService {
         rectificationKind:
           invoice.rectificationKind as InvoiceDto['rectificationKind'],
         rectificationReason: invoice.rectificationReason,
+        rectificationMotive:
+          invoice.rectificationMotive as InvoiceDto['rectificationMotive'],
+        rectificationType:
+          invoice.rectificationType as InvoiceDto['rectificationType'],
         rectifiedByInvoiceIds: rectifiedByRows
           .filter((r) => r.rectifiesInvoiceId === invoice.id)
           .map((r) => r.id),

@@ -372,6 +372,8 @@ describe('Certifications (integración) — creación, facturación y RBAC por o
         .post(`/invoices/${c1.invoiceId}/rectificar`)
         .send({
           clase: 'total',
+          rectificationMotive: 'R4',
+          rectificationType: 'S',
           issueDate: '2026-10-01',
           motivo: 'Cliente equivocado',
         })

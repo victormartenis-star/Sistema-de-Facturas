@@ -275,6 +275,17 @@ export const rectificationKindEnum = pgEnum('rectification_kind', [
   'diferencias',
 ]);
 
+/** Motivo oficial de rectificación: R1 derecho, R2 concurso, R3 incobrables, R4 resto. */
+export const rectificationMotiveEnum = pgEnum('rectification_motive', [
+  'R1',
+  'R2',
+  'R3',
+  'R4',
+]);
+
+/** Tipo oficial de rectificativa: S sustitución, I diferencias. */
+export const rectificationTypeEnum = pgEnum('rectification_type', ['S', 'I']);
+
 export const invoiceStatusEnum = pgEnum('invoice_status', [
   'borrador',
   'aprobada',
@@ -356,6 +367,10 @@ export const invoices = pgTable(
     ),
     rectificationKind: rectificationKindEnum('rectification_kind'),
     rectificationReason: text('rectification_reason'),
+    /** Motivo oficial R1-R4 (null en rectificativas legadas). */
+    rectificationMotive: rectificationMotiveEnum('rectification_motive'),
+    /** Tipo oficial S/I (null en rectificativas legadas). */
+    rectificationType: rectificationTypeEnum('rectification_type'),
     /** Motivo de anulación (obligatorio fuera de borrador). */
     cancelReason: text('cancel_reason'),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

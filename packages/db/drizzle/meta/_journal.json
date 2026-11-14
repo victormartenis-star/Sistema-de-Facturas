@@ -225,6 +225,13 @@
       "when": 1794583117258,
       "tag": "0031_fase3_rectificativas",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1794584000000,
+      "tag": "0032_fase3_motivo_tipo_rectificativa",
+      "breakpoints": true
     }
   ]
 }

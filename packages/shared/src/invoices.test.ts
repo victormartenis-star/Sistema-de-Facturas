@@ -3,6 +3,11 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   RECTIFICATION_KINDS,
+  RECTIFICATION_MOTIVES,
+  RECTIFICATION_MOTIVE_LABELS,
+  RECTIFICATION_TYPES,
+  RECTIFICATION_TYPE_LABELS,
+  rectificationClassificationErrors,
   invoiceRectifyBlockReason,
   invoiceRectifySchema,
   INVOICE_STATUSES,
@@ -222,7 +227,12 @@ describe('invoiceRectifyBlockReason', () => {
 });
 
 describe('invoiceRectifySchema', () => {
-  const base = { issueDate: '2026-10-01', motivo: 'Error en la medición' };
+  const base = {
+    issueDate: '2026-10-01',
+    motivo: 'Error en la medición',
+    rectificationMotive: 'R4',
+    rectificationType: 'S',
+  };
   const linea = { description: 'Ajuste', baseAmount: -50, vatPct: 21 };
   it('total no admite líneas', () => {
     expect(
@@ -254,6 +264,126 @@ describe('invoiceRectifySchema', () => {
         clase: 'total',
         issueDate: '2026-10-01',
         motivo: 'abc',
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('motivo y tipo oficiales de rectificativa', () => {
+  it('constantes y etiquetas', () => {
+    expect([...RECTIFICATION_MOTIVES]).toEqual(['R1', 'R2', 'R3', 'R4']);
+    expect([...RECTIFICATION_TYPES]).toEqual(['S', 'I']);
+    for (const m of RECTIFICATION_MOTIVES) {
+      expect(RECTIFICATION_MOTIVE_LABELS[m]).toContain(m);
+    }
+    expect(RECTIFICATION_TYPE_LABELS).toEqual({
+      S: 'Sustitución',
+      I: 'Diferencias',
+    });
+  });
+
+  it('rectification_kind sigue siendo independiente (total/diferencias)', () => {
+    expect([...RECTIFICATION_KINDS]).toEqual(['total', 'diferencias']);
+  });
+
+  const check = (
+    clase: 'total' | 'diferencias',
+    motive: string,
+    type: string,
+  ) =>
+    rectificationClassificationErrors({
+      esRectificativa: true,
+      clase,
+      motive,
+      type,
+    });
+
+  it('casos válidos', () => {
+    expect(check('total', 'R1', 'S')).toEqual([]);
+    expect(check('diferencias', 'R4', 'S')).toEqual([]);
+    expect(check('diferencias', 'R3', 'I')).toEqual([]);
+  });
+
+  it('motivo obligatorio y dentro de R1-R4', () => {
+    expect(
+      rectificationClassificationErrors({
+        esRectificativa: true,
+        clase: 'total',
+        type: 'S',
+      }),
+    ).toHaveLength(1);
+    expect(check('total', 'R5', 'S')).toHaveLength(1);
+    expect(check('total', 'r1', 'S')).toHaveLength(1);
+  });
+
+  it('tipo obligatorio y dentro de S/I', () => {
+    expect(
+      rectificationClassificationErrors({
+        esRectificativa: true,
+        clase: 'total',
+        motive: 'R1',
+      }),
+    ).toHaveLength(1);
+    expect(check('total', 'R1', 'X')).toHaveLength(1);
+  });
+
+  it("tipo 'I' exige clase diferencias", () => {
+    expect(check('total', 'R1', 'I')).toHaveLength(1);
+  });
+
+  it('no se aceptan en facturas que no son rectificativas', () => {
+    expect(
+      rectificationClassificationErrors({
+        esRectificativa: false,
+        motive: 'R1',
+      }),
+    ).toHaveLength(1);
+    expect(
+      rectificationClassificationErrors({ esRectificativa: false, type: 'S' }),
+    ).toHaveLength(1);
+    expect(
+      rectificationClassificationErrors({
+        esRectificativa: false,
+        motive: null,
+        type: undefined,
+      }),
+    ).toEqual([]);
+  });
+
+  it('invoiceRectifySchema exige motivo y tipo, y valida coherencia', () => {
+    const base = {
+      clase: 'total',
+      issueDate: '2026-10-01',
+      motivo: 'Error en la medición',
+    };
+    expect(invoiceRectifySchema.safeParse(base).success).toBe(false);
+    expect(
+      invoiceRectifySchema.safeParse({ ...base, rectificationMotive: 'R1' })
+        .success,
+    ).toBe(false);
+    expect(
+      invoiceRectifySchema.safeParse({ ...base, rectificationType: 'S' })
+        .success,
+    ).toBe(false);
+    expect(
+      invoiceRectifySchema.safeParse({
+        ...base,
+        rectificationMotive: 'R1',
+        rectificationType: 'S',
+      }).success,
+    ).toBe(true);
+    expect(
+      invoiceRectifySchema.safeParse({
+        ...base,
+        rectificationMotive: 'R9',
+        rectificationType: 'S',
+      }).success,
+    ).toBe(false);
+    expect(
+      invoiceRectifySchema.safeParse({
+        ...base,
+        rectificationMotive: 'R1',
+        rectificationType: 'I',
       }).success,
     ).toBe(false);
   });

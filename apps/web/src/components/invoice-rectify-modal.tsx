@@ -3,9 +3,16 @@
 import { useEffect, useState } from 'react';
 import {
   RECTIFICATION_KINDS,
+  RECTIFICATION_MOTIVES,
+  RECTIFICATION_MOTIVE_LABELS,
+  RECTIFICATION_TYPES,
+  RECTIFICATION_TYPE_LABELS,
+  rectificationClassificationErrors,
   type InvoiceDto,
   type InvoiceRectifyInput,
   type RectificationKind,
+  type RectificationMotive,
+  type RectificationType,
 } from '@erp/shared';
 import { IconLoader } from './icons';
 import { MOTIVO_MAX, MOTIVO_MIN } from './reason-dialog';
@@ -53,6 +60,8 @@ export function InvoiceRectifyModal({
   const [clase, setClase] = useState<RectificationKind>('total');
   const [issueDate, setIssueDate] = useState(hoy());
   const [motivo, setMotivo] = useState('');
+  const [rectMotive, setRectMotive] = useState<RectificationMotive>('R4');
+  const [rectType, setRectType] = useState<RectificationType>('S');
   const [lines, setLines] = useState<DeltaLine[]>([]);
 
   useEffect(() => {
@@ -60,6 +69,8 @@ export function InvoiceRectifyModal({
     setClase('total');
     setIssueDate(hoy());
     setMotivo('');
+    setRectMotive('R4');
+    setRectType('S');
     setLines(
       invoice.lines.map((l) => ({
         description: l.description,
@@ -76,6 +87,13 @@ export function InvoiceRectifyModal({
 
   const deltas = lines.filter((l) => Number(l.baseAmount) !== 0);
   const motivoOk = motivo.trim().length >= MOTIVO_MIN;
+  const clasifOk =
+    rectificationClassificationErrors({
+      esRectificativa: true,
+      clase,
+      motive: rectMotive,
+      type: rectType,
+    }).length === 0;
   const lineasOk =
     clase === 'total' ||
     (deltas.length > 0 &&
@@ -84,11 +102,19 @@ export function InvoiceRectifyModal({
   function enviar() {
     onSave(
       clase === 'total'
-        ? { clase, issueDate, motivo: motivo.trim() }
+        ? {
+            clase,
+            issueDate,
+            motivo: motivo.trim(),
+            rectificationMotive: rectMotive,
+            rectificationType: rectType,
+          }
         : {
             clase,
             issueDate,
             motivo: motivo.trim(),
+            rectificationMotive: rectMotive,
+            rectificationType: rectType,
             lines: deltas.map((l) => ({
               description: l.description,
               baseAmount: Number(l.baseAmount),
@@ -130,6 +156,48 @@ export function InvoiceRectifyModal({
                 </option>
               ))}
             </select>
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="rect-motive">
+              Motivo oficial
+            </label>
+            <select
+              id="rect-motive"
+              value={rectMotive}
+              onChange={(e) =>
+                setRectMotive(e.target.value as RectificationMotive)
+              }
+              className={fieldCls}
+            >
+              {RECTIFICATION_MOTIVES.map((m) => (
+                <option key={m} value={m}>
+                  {RECTIFICATION_MOTIVE_LABELS[m]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="rect-type">
+              Tipo oficial
+            </label>
+            <select
+              id="rect-type"
+              value={rectType}
+              onChange={(e) => setRectType(e.target.value as RectificationType)}
+              className={fieldCls}
+            >
+              {RECTIFICATION_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {RECTIFICATION_TYPE_LABELS[t]}
+                </option>
+              ))}
+            </select>
+            {!clasifOk && (
+              <p className="mt-1 text-xs text-red-600">
+                El tipo Diferencias solo es válido en una rectificativa por
+                diferencias.
+              </p>
+            )}
           </div>
           <div>
             <label className={labelCls} htmlFor="rect-fecha">
@@ -211,7 +279,9 @@ export function InvoiceRectifyModal({
           </button>
           <button
             onClick={enviar}
-            disabled={saving || !motivoOk || !lineasOk || !issueDate}
+            disabled={
+              saving || !motivoOk || !lineasOk || !clasifOk || !issueDate
+            }
             className={`${btnPrimaryCls} disabled:opacity-60`}
           >
             {saving && <IconLoader size={14} className="animate-spin" />}

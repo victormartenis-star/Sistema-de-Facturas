@@ -216,6 +216,8 @@ describe('Facturas rectificativas y anulación (integración)', () => {
         .post(`/invoices/${id}/rectificar`)
         .send({
           clase: 'total',
+          rectificationMotive: 'R4',
+          rectificationType: 'S',
           issueDate: '2026-10-01',
           motivo: 'Cliente equivocado en la factura',
         })
@@ -239,6 +241,8 @@ describe('Facturas rectificativas y anulación (integración)', () => {
         .post(`/invoices/${id}/rectificar`)
         .send({
           clase: 'total',
+          rectificationMotive: 'R4',
+          rectificationType: 'S',
           issueDate: '2026-10-01',
           motivo: 'Otra vez la misma',
         })
@@ -257,6 +261,8 @@ describe('Facturas rectificativas y anulación (integración)', () => {
         .post(`/invoices/${id}/rectificar`)
         .send({
           clase: 'total',
+          rectificationMotive: 'R4',
+          rectificationType: 'S',
           issueDate: '2026-10-01',
           motivo: 'Importe mal facturado',
         })
@@ -279,6 +285,8 @@ describe('Facturas rectificativas y anulación (integración)', () => {
         .post(`/invoices/${id}/rectificar`)
         .send({
           clase: 'total',
+          rectificationMotive: 'R4',
+          rectificationType: 'S',
           issueDate: '2026-10-02',
           motivo: 'Ya estaba rectificada',
         })
@@ -306,6 +314,8 @@ describe('Facturas rectificativas y anulación (integración)', () => {
         .post(`/invoices/${id}/rectificar`)
         .send({
           clase: 'total',
+          rectificationMotive: 'R4',
+          rectificationType: 'S',
           issueDate: '2026-10-01',
           motivo: 'Devolución tras cobro',
         })
@@ -346,6 +356,8 @@ describe('Facturas rectificativas y anulación (integración)', () => {
         .post(`/invoices/${invoiceId}/rectificar`)
         .send({
           clase: 'total',
+          rectificationMotive: 'R4',
+          rectificationType: 'S',
           issueDate: '2026-10-01',
           motivo: 'El proveedor se equivocó',
         })
@@ -365,6 +377,8 @@ describe('Facturas rectificativas y anulación (integración)', () => {
         .post(`/invoices/${id}/rectificar`)
         .send({
           clase: 'diferencias',
+          rectificationMotive: 'R4',
+          rectificationType: 'S',
           issueDate: '2026-10-01',
           motivo: 'Descuento pactado',
         })
@@ -373,6 +387,8 @@ describe('Facturas rectificativas y anulación (integración)', () => {
         .post(`/invoices/${id}/rectificar`)
         .send({
           clase: 'diferencias',
+          rectificationMotive: 'R4',
+          rectificationType: 'S',
           issueDate: '2026-10-01',
           motivo: 'Descuento pactado',
           lines: [
@@ -438,6 +454,8 @@ describe('Facturas rectificativas y anulación (integración)', () => {
         .post(`/invoices/${borrador.body.id}/rectificar`)
         .send({
           clase: 'total',
+          rectificationMotive: 'R4',
+          rectificationType: 'S',
           issueDate: '2026-10-01',
           motivo: 'Es un borrador',
         })
@@ -447,11 +465,23 @@ describe('Facturas rectificativas y anulación (integración)', () => {
       const b = await ventaAprobada(token, cliente.id, project.id);
       const ra = await authed(app, token)
         .post(`/invoices/${a}/rectificar`)
-        .send({ clase: 'total', issueDate: '2026-10-01', motivo: 'Primera' })
+        .send({
+          clase: 'total',
+          rectificationMotive: 'R4',
+          rectificationType: 'S',
+          issueDate: '2026-10-01',
+          motivo: 'Primera',
+        })
         .expect(201);
       const rb = await authed(app, token)
         .post(`/invoices/${b}/rectificar`)
-        .send({ clase: 'total', issueDate: '2026-10-01', motivo: 'Segunda' })
+        .send({
+          clase: 'total',
+          rectificationMotive: 'R4',
+          rectificationType: 'S',
+          issueDate: '2026-10-01',
+          motivo: 'Segunda',
+        })
         .expect(201);
       expect(ra.body.invoiceNumber).toBe('R-2026-0001');
       expect(rb.body.invoiceNumber).toBe('R-2026-0002');
@@ -462,7 +492,13 @@ describe('Facturas rectificativas y anulación (integración)', () => {
       const id = await ventaAprobada(token, cliente.id, project.id);
       const rect = await authed(app, token)
         .post(`/invoices/${id}/rectificar`)
-        .send({ clase: 'total', issueDate: '2026-10-01', motivo: 'Listado' })
+        .send({
+          clase: 'total',
+          rectificationMotive: 'R4',
+          rectificationType: 'S',
+          issueDate: '2026-10-01',
+          motivo: 'Listado',
+        })
         .expect(201);
       await authed(app, token)
         .post(`/invoices/${rect.body.id}/aprobar`)
@@ -486,6 +522,8 @@ describe('Facturas rectificativas y anulación (integración)', () => {
         .post(`/invoices/${id}/rectificar`)
         .send({
           clase: 'diferencias',
+          rectificationMotive: 'R4',
+          rectificationType: 'S',
           issueDate: '2026-10-01',
           motivo: 'Ajuste de precio',
           lines: [
@@ -509,6 +547,94 @@ describe('Facturas rectificativas y anulación (integración)', () => {
         .expect(409);
     });
 
+    it('motivo y tipo oficiales: obligatorios, se devuelven en el DTO y no abren Facturae/VeriFactu', async () => {
+      const { token, project, cliente } = await entorno();
+      const id = await ventaAprobada(token, cliente.id, project.id);
+      const base = {
+        clase: 'total',
+        issueDate: '2026-10-01',
+        motivo: 'Cliente equivocado en la factura',
+      };
+      await authed(app, token)
+        .post(`/invoices/${id}/rectificar`)
+        .send({ ...base, rectificationType: 'S' })
+        .expect(400);
+      await authed(app, token)
+        .post(`/invoices/${id}/rectificar`)
+        .send({ ...base, rectificationMotive: 'R1' })
+        .expect(400);
+      await authed(app, token)
+        .post(`/invoices/${id}/rectificar`)
+        .send({ ...base, rectificationMotive: 'R9', rectificationType: 'S' })
+        .expect(400);
+      await authed(app, token)
+        .post(`/invoices/${id}/rectificar`)
+        .send({ ...base, rectificationMotive: 'R1', rectificationType: 'I' })
+        .expect(400);
+      const res = await authed(app, token)
+        .post(`/invoices/${id}/rectificar`)
+        .send({ ...base, rectificationMotive: 'R1', rectificationType: 'S' })
+        .expect(201);
+      expect(res.body.rectificationMotive).toBe('R1');
+      expect(res.body.rectificationType).toBe('S');
+      expect(res.body.rectificationKind).toBe('total');
+      const leida = await authed(app, token)
+        .get(`/invoices/${res.body.id}`)
+        .expect(200);
+      expect(leida.body.rectificationMotive).toBe('R1');
+      expect(leida.body.rectificationType).toBe('S');
+      const orig = await authed(app, token).get(`/invoices/${id}`).expect(200);
+      expect(orig.body.rectificationMotive).toBeNull();
+      expect(orig.body.rectificationType).toBeNull();
+
+      await authed(app, token)
+        .post(`/invoices/${res.body.id}/aprobar`)
+        .expect(201);
+      await authed(app, token)
+        .get(`/invoices/${res.body.id}/facturae`)
+        .expect(409);
+      await authed(app, token)
+        .post(`/invoices/${res.body.id}/verifactu/enviar`)
+        .expect(409);
+    });
+
+    it('motivo o tipo en una factura que no es rectificativa: 400', async () => {
+      const { token, project, cliente } = await entorno();
+      const cuerpo = (numero: string, extra: Record<string, string>) => ({
+        kind: 'venta',
+        contactId: cliente.id,
+        invoiceNumber: numero,
+        issueDate: '2026-10-01',
+        lines: [
+          {
+            description: 'Obra',
+            baseAmount: 100,
+            vatPct: 21,
+            projectId: project.id,
+          },
+        ],
+        ...extra,
+      });
+      await authed(app, token)
+        .post('/invoices')
+        .send(cuerpo('F-NO-RECT-1', { rectificationMotive: 'R1' }))
+        .expect(400);
+      await authed(app, token)
+        .post('/invoices')
+        .send(cuerpo('F-NO-RECT-2', { rectificationType: 'S' }))
+        .expect(400);
+      const ok = await authed(app, token)
+        .post('/invoices')
+        .send(cuerpo('F-NO-RECT-3', {}))
+        .expect(201);
+      expect(ok.body.rectificationMotive).toBeNull();
+      expect(ok.body.rectificationType).toBeNull();
+      await authed(app, token)
+        .patch(`/invoices/${ok.body.id}`)
+        .send({ rectificationMotive: 'R1' })
+        .expect(400);
+    });
+
     it('RBAC: el rol obra no puede rectificar (403)', async () => {
       const { token, project, cliente } = await entorno();
       const id = await ventaAprobada(token, cliente.id, project.id);
@@ -517,6 +643,8 @@ describe('Facturas rectificativas y anulación (integración)', () => {
         .post(`/invoices/${id}/rectificar`)
         .send({
           clase: 'total',
+          rectificationMotive: 'R4',
+          rectificationType: 'S',
           issueDate: '2026-10-01',
           motivo: 'Sin permiso',
         })

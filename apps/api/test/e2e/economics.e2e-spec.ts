@@ -109,6 +109,8 @@ describe('Economía de obra (integración) — GET /projects/:id/economics', () 
       .post(`/invoices/${rectificada}/rectificar`)
       .send({
         clase: 'total',
+        rectificationMotive: 'R4',
+        rectificationType: 'S',
         issueDate: '2026-10-01',
         motivo: 'Cliente equivocado',
       })

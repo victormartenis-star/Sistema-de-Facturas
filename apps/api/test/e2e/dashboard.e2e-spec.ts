@@ -193,6 +193,8 @@ describe('Dashboard (integración) — KPIs globales y por obra', () => {
       .post(`/invoices/${rectificada}/rectificar`)
       .send({
         clase: 'total',
+        rectificationMotive: 'R4',
+        rectificationType: 'S',
         issueDate: '2026-10-01',
         motivo: 'Error de importe',
       })

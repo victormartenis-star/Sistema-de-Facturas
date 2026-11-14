@@ -61,6 +61,78 @@ export const RECTIFICATION_KIND_LABELS: Record<RectificationKind, string> = {
 };
 
 /**
+ * Motivo oficial de la rectificación (Facturae/VeriFactu). Solo se modela
+ * internamente: no se envía a ningún sistema externo todavía.
+ * R1 error fundado en derecho; R2 concurso del destinatario; R3 créditos
+ * incobrables; R4 resto.
+ */
+export const RECTIFICATION_MOTIVES = ['R1', 'R2', 'R3', 'R4'] as const;
+export type RectificationMotive = (typeof RECTIFICATION_MOTIVES)[number];
+
+export const RECTIFICATION_MOTIVE_LABELS: Record<RectificationMotive, string> =
+  {
+    R1: 'R1 - Error fundado en derecho',
+    R2: 'R2 - Concurso del destinatario',
+    R3: 'R3 - Créditos incobrables',
+    R4: 'R4 - Resto de causas',
+  };
+
+/**
+ * Tipo oficial de rectificativa: S sustitución, I diferencias. Es un concepto
+ * distinto de `RectificationKind` (total/diferencias) y no se deriva de él.
+ */
+export const RECTIFICATION_TYPES = ['S', 'I'] as const;
+export type RectificationType = (typeof RECTIFICATION_TYPES)[number];
+
+export const RECTIFICATION_TYPE_LABELS: Record<RectificationType, string> = {
+  S: 'Sustitución',
+  I: 'Diferencias',
+};
+
+/**
+ * Coherencia interna de motivo y tipo oficiales. Devuelve la lista de errores
+ * (vacía si es válida). `esRectificativa = false` exige que no vengan.
+ * Un tipo 'I' exige clase 'diferencias' (rectificativa con líneas de delta).
+ */
+export function rectificationClassificationErrors(i: {
+  esRectificativa: boolean;
+  clase?: RectificationKind | null;
+  motive?: string | null;
+  type?: string | null;
+}): string[] {
+  const errors: string[] = [];
+  const hasMotive = i.motive !== undefined && i.motive !== null;
+  const hasType = i.type !== undefined && i.type !== null;
+  if (!i.esRectificativa) {
+    if (hasMotive || hasType) {
+      errors.push(
+        'El motivo y el tipo de rectificación solo se aceptan en facturas rectificativas',
+      );
+    }
+    return errors;
+  }
+  if (!hasMotive) {
+    errors.push('El motivo de rectificación (R1-R4) es obligatorio');
+  } else if (
+    !(RECTIFICATION_MOTIVES as readonly string[]).includes(i.motive as string)
+  ) {
+    errors.push('Motivo de rectificación no válido: use R1, R2, R3 o R4');
+  }
+  if (!hasType) {
+    errors.push('El tipo de rectificación (S o I) es obligatorio');
+  } else if (
+    !(RECTIFICATION_TYPES as readonly string[]).includes(i.type as string)
+  ) {
+    errors.push('Tipo de rectificación no válido: use S o I');
+  } else if (i.type === 'I' && i.clase !== 'diferencias') {
+    errors.push(
+      "El tipo 'I' (diferencias) exige una rectificativa por diferencias con líneas de delta",
+    );
+  }
+  return errors;
+}
+
+/**
  * ¿Se puede rectificar? `null` si sí; si no, el motivo para el 409.
  * Solo se rectifica una factura aprobada o pagada. Una rectificativa no se
  * rectifica en total (se emitiría otra por diferencias).
@@ -173,10 +245,30 @@ export const invoiceRectifySchema = z
     clase: z.enum(RECTIFICATION_KINDS),
     issueDate: isoDate,
     motivo: z.string().trim().min(5).max(500),
+    /** Motivo oficial R1-R4 (obligatorio). */
+    rectificationMotive: z.enum(RECTIFICATION_MOTIVES, {
+      required_error: 'El motivo de rectificación (R1-R4) es obligatorio',
+    }),
+    /** Tipo oficial S/I (obligatorio). */
+    rectificationType: z.enum(RECTIFICATION_TYPES, {
+      required_error: 'El tipo de rectificación (S o I) es obligatorio',
+    }),
     /** Obligatorias si clase = 'diferencias'; prohibidas si clase = 'total' (se derivan). */
     lines: z.array(invoiceLineSchema).min(1).optional(),
   })
   .superRefine((v, ctx) => {
+    for (const message of rectificationClassificationErrors({
+      esRectificativa: true,
+      clase: v.clase,
+      motive: v.rectificationMotive,
+      type: v.rectificationType,
+    })) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['rectificationType'],
+        message,
+      });
+    }
     if (v.clase === 'diferencias' && !v.lines) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -212,6 +304,9 @@ export const invoiceCreateSchema = z.object({
     .default(0),
   retentionReleaseDate: isoDate.nullish(),
   notes: z.string().trim().max(1000).nullish(),
+  /** No se aceptan en facturas ordinarias: el servicio responde 400 si llegan. */
+  rectificationMotive: z.string().nullish(),
+  rectificationType: z.string().nullish(),
   lines: z.array(invoiceLineSchema).min(1, 'Añade al menos una línea'),
   /** Solo compra: albaranes validados que soportan esta factura. */
   deliveryNoteIds: z.array(z.string().uuid()).default([]),
@@ -266,6 +361,8 @@ export interface InvoiceDto {
   rectifiesInvoiceNumber: string | null;
   rectificationKind: RectificationKind | null;
   rectificationReason: string | null;
+  rectificationMotive: RectificationMotive | null;
+  rectificationType: RectificationType | null;
   /** Rectificativas activas (no anuladas) de esta factura. */
   rectifiedByInvoiceIds: string[];
   cancelReason: string | null;
