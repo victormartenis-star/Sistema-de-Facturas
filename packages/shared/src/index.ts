@@ -1,4 +1,5 @@
 export * from './access';
+export * from './json-canonico';
 export * from './auth';
 export * from './audit';
 export * from './bim';

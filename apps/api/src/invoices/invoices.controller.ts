@@ -31,6 +31,7 @@ import {
   type PaginacionQuery,
 } from '@erp/shared';
 import { Roles } from '../auth/roles';
+import { Idempotente } from '../common/idempotencia/idempotente.decorator';
 import { VersionEsperada } from '../common/version';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { FacturaeService } from './facturae.service';
@@ -107,6 +108,7 @@ export class InvoicesController {
   }
 
   @Post()
+  @Idempotente()
   create(
     @Body(new ZodValidationPipe(invoiceCreateSchema))
     body: InvoiceCreateInput,
@@ -162,6 +164,7 @@ export class InvoicesController {
 
   /** Crea la rectificativa (total o por diferencias) en borrador. */
   @Post(':id/rectificar')
+  @Idempotente()
   @Roles('admin', 'gerente', 'administracion')
   rectify(
     @Param('id', ParseUUIDPipe) id: string,

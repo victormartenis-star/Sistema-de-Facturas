@@ -24,6 +24,7 @@ import {
   type PaginacionQuery,
 } from '@erp/shared';
 import { Roles } from '../auth/roles';
+import { Idempotente } from '../common/idempotencia/idempotente.decorator';
 import { VersionEsperada } from '../common/version';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { CertificationsService } from './certifications.service';
@@ -51,6 +52,7 @@ export class CertificationsController {
   }
 
   @Post()
+  @Idempotente()
   create(
     @Body(new ZodValidationPipe(certificationCreateSchema))
     body: CertificationCreateInput,

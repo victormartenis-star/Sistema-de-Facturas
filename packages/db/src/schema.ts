@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   AnyPgColumn,
   boolean,
+  char,
   check,
   date,
   index,
@@ -3153,3 +3154,39 @@ export const bankTransactions = pgTable(
 
 export type BankTransaction = typeof bankTransactions.$inferSelect;
 export type NewBankTransaction = typeof bankTransactions.$inferInsert;
+
+/**
+ * Claves de idempotencia (cabecera `Idempotency-Key`): una clave repetida en
+ * 24 h devuelve la respuesta original guardada. Única por empresa. Ver
+ * `apps/api/src/common/idempotencia/`.
+ */
+export const idempotencyKeys = pgTable(
+  'idempotency_keys',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id'),
+    key: varchar('key', { length: 255 }).notNull(),
+    method: varchar('method', { length: 10 }).notNull(),
+    path: text('path').notNull(),
+    /** SHA-256 hex del JSON canónico del cuerpo. */
+    requestHash: char('request_hash', { length: 64 }).notNull(),
+    /** 'procesando' | 'completada'. */
+    status: varchar('status', { length: 12 }).notNull(),
+    responseStatus: integer('response_status'),
+    responseBody: jsonb('response_body'),
+    lockedUntil: timestamp('locked_until', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    unique('idempotency_keys_company_key_unique').on(t.companyId, t.key),
+    index('idempotency_keys_expires_at_idx').on(t.expiresAt),
+  ],
+);
+
+export type IdempotencyKey = typeof idempotencyKeys.$inferSelect;
