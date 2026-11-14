@@ -14,3 +14,6 @@
 *.woff binary
 *.woff2 binary
 *.zip binary
+
+# Fixtures XSD oficiales: bytes exactos (el test comprueba su sha256).
+packages/shared/test-fixtures/xsd/** -text

@@ -239,6 +239,13 @@
       "when": 1794680242489,
       "tag": "0033_fase3_motivo_tipo_rectificativa_certificacion",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1794684515144,
+      "tag": "0034_fase3_codigo_motivo_facturae",
+      "breakpoints": true
     }
   ]
 }

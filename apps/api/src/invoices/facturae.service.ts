@@ -8,11 +8,17 @@ import {
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import { companies, contacts, invoices } from '@erp/db';
 import {
+  FACTURAE_REASON_CODES,
   FACTURAE_UNKNOWN_ADDRESS,
   VERIFACTU_GENESIS_HASH,
   buildFacturaeXml,
+  correctionMethodFromType,
+  facturaeTaxPeriodOf,
   verifactuCanonicalString,
+  type FacturaeCorrectiveInput,
   type FacturaeParty,
+  type FacturaeReasonCode,
+  type InvoiceDto,
   type FacturaeVerifactuInfo,
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
@@ -45,8 +51,9 @@ function sanitizeFileName(value: string): string {
  *   (generación y firma estándar; no se reenvían registros ya notificados).
  * - Rectificativas: la clase (`total` o `diferencias`) se elige de forma
  *   EXPLÍCITA al rectificar (`RECTIFICATION_KINDS`); no existe valor por
- *   defecto. Hoy Facturae/VeriFactu de una rectificativa responden 409
- *   (registros R1-R4 pendientes).
+ *   defecto. La descarga Facturae de una rectificativa funciona (con código
+ *   de motivo Facturae elegido por el titular); el envío VeriFactu de una
+ *   rectificativa responde 409 (registros R1-R4 pendientes).
  *
  * Ver la cabecera de `packages/shared/src/facturae.ts` para el resto del
  * alcance deliberadamente preliminar (sin validar contra el XSD oficial,
@@ -70,11 +77,6 @@ export class FacturaeService {
         'Facturae solo se genera para facturas de venta (el documento que emite la propia empresa)',
       );
     }
-    if (invoice.rectifiesInvoiceId) {
-      throw new ConflictException(
-        'Facturae de facturas rectificativas no soportada todavía: no se emite como F1',
-      );
-    }
     if (invoice.status === 'borrador') {
       throw new BadRequestException(
         'No se puede generar Facturae de una factura en borrador: apruébala primero',
@@ -85,6 +87,10 @@ export class FacturaeService {
         'No se puede generar Facturae de una factura anulada',
       );
     }
+
+    const corrective = invoice.rectifiesInvoiceId
+      ? await this.correctiveOf(invoice)
+      : undefined;
 
     const companyId = await this.dbs.getCompanyId();
     const [company] = await this.dbs.db
@@ -152,6 +158,7 @@ export class FacturaeService {
       retentionAmount: invoice.retentionAmount,
       totalAmount: invoice.totalAmount,
       verifactu,
+      corrective,
     });
 
     const signed = this.signingService.enabled;
@@ -161,6 +168,53 @@ export class FacturaeService {
       xml,
       fileName: `facturae-${sanitizeFileName(invoice.invoiceNumber)}.xml`,
       signed,
+    };
+  }
+
+  /**
+   * Bloque Corrective de una rectificativa. Todo lo que falte es 409: las
+   * rectificativas anteriores a la regla del código de motivo y las de
+   * certificación no lo tienen (el titular lo elige solo al rectificar una
+   * factura vía API).
+   */
+  private async correctiveOf(
+    invoice: InvoiceDto,
+  ): Promise<FacturaeCorrectiveInput> {
+    const reasonCode = invoice.facturaeReasonCode;
+    if (!reasonCode || !Object.hasOwn(FACTURAE_REASON_CODES, reasonCode)) {
+      throw new ConflictException(
+        'La rectificativa no tiene código de motivo Facturae (rectificativa anterior a esta regla o generada desde una certificación): no se puede generar su Facturae',
+      );
+    }
+    if (!invoice.rectificationType) {
+      throw new ConflictException(
+        'La rectificativa no tiene tipo de rectificación (S/I): no se puede generar su Facturae',
+      );
+    }
+    const [original] = await this.dbs.db
+      .select({
+        invoiceNumber: invoices.invoiceNumber,
+        issueDate: invoices.issueDate,
+      })
+      .from(invoices)
+      .where(eq(invoices.id, invoice.rectifiesInvoiceId as string))
+      .limit(1);
+    if (!original) {
+      throw new ConflictException(
+        'No se encuentra la factura original que rectifica: no se puede generar su Facturae',
+      );
+    }
+    if (original.invoiceNumber.length > 20) {
+      throw new ConflictException(
+        'El número de la factura original supera los 20 caracteres que admite Facturae en el bloque Corrective',
+      );
+    }
+    return {
+      originalNumber: original.invoiceNumber,
+      originalIssueDate: original.issueDate,
+      reasonCode: reasonCode as FacturaeReasonCode,
+      correctionMethod: correctionMethodFromType(invoice.rectificationType),
+      taxPeriod: facturaeTaxPeriodOf(original.issueDate),
     };
   }
 

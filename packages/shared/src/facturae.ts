@@ -1,5 +1,9 @@
 import { round2 } from './calculo';
 import { ISP_LEGEND, type RectificationType } from './invoices';
+import {
+  FACTURAE_REASON_CODES,
+  type FacturaeReasonCode,
+} from './facturae-reason';
 import { periodoIvaDeFecha, rangoPeriodoIva } from './periodo-iva';
 
 /**
@@ -21,7 +25,8 @@ import { periodoIvaDeFecha, rangoPeriodoIva } from './periodo-iva';
  *   admite contenido de otro namespace), no como sustituto del registro
  *   real.
  * - Rectificativas: con `corrective` se genera `InvoiceClass=OR` y el bloque
- *   `<Corrective>`; la API aún no lo usa (responde 409).
+ *   `<Corrective>`; la API los usa en la descarga Facturae de rectificativas
+ *   (el envío VeriFactu de rectificativas sigue en 409).
  * - Emisor y receptor se asumen personas jurídicas residentes en España
  *   (`PersonTypeCode=J`, `ResidenceTypeCode=R`): el esquema no modela esa
  *   distinción para contactos ni empresa.
@@ -38,8 +43,11 @@ import { periodoIvaDeFecha, rangoPeriodoIva } from './periodo-iva';
  *   (generación y firma estándar; no se reenvían registros ya notificados).
  * - Rectificativas: la clase (`total` o `diferencias`) se elige de forma
  *   EXPLÍCITA al rectificar (`RECTIFICATION_KINDS`); no existe valor por
- *   defecto. Hoy Facturae/VeriFactu de una rectificativa responden 409
- *   (registros R1-R4 pendientes).
+ *   defecto. El código de motivo Facturae (ReasonCode) también lo elige el
+ *   titular, acotado por el motivo R1-R4 (`allowedFacturaeReasonCodes`). La
+ *   descarga Facturae de una rectificativa con esos datos funciona; si falta
+ *   el código (legadas y de certificación) responde 409, y el envío VeriFactu
+ *   de rectificativas responde 409 (registros R1-R4 pendientes).
  *
  * Solo aplica a facturas de **venta**: Facturae describe una factura emitida
  * por el vendedor (nuestra empresa) al comprador (el contacto cliente).
@@ -88,39 +96,14 @@ export interface FacturaeVerifactuInfo {
 }
 
 /* ───────────────────── Factura rectificativa (bloque Corrective) ───────────────────── *
- *
- * Literales copiados del XSD oficial 3.2.2 (`ReasonCodeType`,
- * `ReasonDescriptionType`, `CorrectionMethodType` y
- * `CorrectionMethodDescriptionType`). El XSD exige que la descripción sea
- * uno de los literales de su enumeración `ReasonDescriptionType`, que difiere
- * en mayúsculas y espacios de las anotaciones de `ReasonCodeType`.
+ * Códigos de motivo (ReasonCode): ver `facturae-reason.ts` (reexportados aquí).
  */
-
-export const FACTURAE_REASON_CODES = {
-  '01': 'Número de la factura',
-  '02': 'Serie de la factura',
-  '03': 'Fecha expedición',
-  '04': 'Nombre y apellidos/Razón Social-Emisor',
-  '05': 'Nombre y apellidos/Razón Social-Receptor',
-  '06': 'Identificación fiscal Emisor/obligado',
-  '07': 'Identificación fiscal Receptor',
-  '08': 'Domicilio Emisor/Obligado',
-  '09': 'Domicilio Receptor',
-  '10': 'Detalle Operación',
-  '11': 'Porcentaje impositivo a aplicar',
-  '12': 'Cuota tributaria a aplicar',
-  '13': 'Fecha/Periodo a aplicar',
-  '14': 'Clase de factura',
-  '15': 'Literales legales',
-  '16': 'Base imponible',
-  '80': 'Cálculo de cuotas repercutidas',
-  '81': 'Cálculo de cuotas retenidas',
-  '82': 'Base imponible modificada por devolución de envases / embalajes',
-  '83': 'Base imponible modificada por descuentos y bonificaciones',
-  '84': 'Base imponible modificada por resolución firme, judicial o administrativa',
-  '85': 'Base imponible modificada cuotas repercutidas no satisfechas. Auto de declaración de concurso',
-} as const;
-export type FacturaeReasonCode = keyof typeof FACTURAE_REASON_CODES;
+export {
+  FACTURAE_REASON_CODES,
+  allowedFacturaeReasonCodes,
+  facturaeReasonCodeErrors,
+  type FacturaeReasonCode,
+} from './facturae-reason';
 
 /** Criterios de rectificación del XSD. Este generador solo usa '01' y '02'. */
 export const FACTURAE_CORRECTION_METHODS = {

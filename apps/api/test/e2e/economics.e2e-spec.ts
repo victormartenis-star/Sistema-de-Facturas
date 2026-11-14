@@ -111,6 +111,7 @@ describe('Economía de obra (integración) — GET /projects/:id/economics', () 
         clase: 'total',
         rectificationMotive: 'R4',
         rectificationType: 'S',
+        facturaeReasonCode: '16',
         issueDate: '2026-10-01',
         motivo: 'Cliente equivocado',
       })

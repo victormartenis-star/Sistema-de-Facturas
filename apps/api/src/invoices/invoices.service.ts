@@ -82,6 +82,7 @@ interface RectificacionEnlace {
   reason: string;
   motive: RectificationMotive | null;
   type: RectificationType | null;
+  facturaeReasonCode?: string | null;
 }
 
 const UNIQUE_VIOLATION = '23505';
@@ -277,6 +278,7 @@ export class InvoicesService {
             rectificationReason: rectificacion.reason,
             rectificationMotive: rectificacion.motive,
             rectificationType: rectificacion.type,
+            facturaeReasonCode: rectificacion.facturaeReasonCode ?? null,
           }),
         })
         .returning();
@@ -654,6 +656,7 @@ export class InvoicesService {
             motivo: data.motivo,
             rectificationMotive: data.rectificationMotive,
             rectificationType: data.rectificationType,
+            facturaeReasonCode: data.facturaeReasonCode,
             lines: data.lines,
           })
         ).row.id,
@@ -668,6 +671,7 @@ export class InvoicesService {
         clase: data.clase,
         rectificationMotive: data.rectificationMotive,
         rectificationType: data.rectificationType,
+        facturaeReasonCode: data.facturaeReasonCode,
         status: 'borrador',
       },
     });
@@ -690,6 +694,8 @@ export class InvoicesService {
       /** Obligatorios al rectificar vía API; null en flujos internos (certificaciones). */
       rectificationMotive?: RectificationMotive | null;
       rectificationType?: RectificationType | null;
+      /** Solo vía API; null en certificaciones (su Facturae responde 409). */
+      facturaeReasonCode?: string | null;
       lines?: InvoiceCreateInput['lines'];
     },
   ): Promise<{ row: Invoice; contact: Contact }> {
@@ -787,6 +793,7 @@ export class InvoicesService {
       reason: p.motivo,
       motive: p.rectificationMotive ?? null,
       type: p.rectificationType ?? null,
+      facturaeReasonCode: p.facturaeReasonCode ?? null,
     });
     const [contact] = await tx
       .select()
@@ -1145,6 +1152,7 @@ export class InvoicesService {
           invoice.rectificationMotive as InvoiceDto['rectificationMotive'],
         rectificationType:
           invoice.rectificationType as InvoiceDto['rectificationType'],
+        facturaeReasonCode: invoice.facturaeReasonCode,
         rectifiedByInvoiceIds: rectifiedByRows
           .filter((r) => r.rectifiesInvoiceId === invoice.id)
           .map((r) => r.id),

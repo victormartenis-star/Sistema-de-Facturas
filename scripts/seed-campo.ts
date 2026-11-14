@@ -922,6 +922,7 @@ async function escribirTodo(
         // Dato de prueba: la API exige motivo/tipo coherentes (total ⇔ S, diferencias ⇔ I).
         rectificationMotive: 'R4',
         rectificationType: r.clase === 'total' ? 'S' : 'I',
+        facturaeReasonCode: '16', // Base imponible (R4 admite cualquier código)
         issueDate: fechaDesdeHoy(-1),
         motivo: r.motivo,
         ...(r.delta !== undefined && r.obra

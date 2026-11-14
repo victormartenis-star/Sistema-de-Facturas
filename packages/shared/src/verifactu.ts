@@ -21,8 +21,9 @@
  *   (generación y firma estándar; no se reenvían registros ya notificados).
  * - Rectificativas: la clase (`total` o `diferencias`) se elige de forma
  *   EXPLÍCITA al rectificar (`RECTIFICATION_KINDS`); no existe valor por
- *   defecto. Hoy Facturae/VeriFactu de una rectificativa responden 409
- *   (registros R1-R4 pendientes).
+ *   defecto. La descarga Facturae de una rectificativa funciona (con código
+ *   de motivo Facturae elegido por el titular); el envío VeriFactu de una
+ *   rectificativa responde 409 (registros R1-R4 pendientes).
  */
 
 export const VERIFACTU_STATUSES = [

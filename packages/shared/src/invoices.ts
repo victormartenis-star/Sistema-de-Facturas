@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import { type Transiciones, puedeTransitar } from './maquina-estados';
+import {
+  FACTURAE_REASON_CODES,
+  facturaeReasonCodeErrors,
+} from './facturae-reason';
 import type { VerifactuStatus } from './verifactu';
 
 /**
@@ -258,6 +262,18 @@ export const invoiceRectifySchema = z
     rectificationType: z.enum(RECTIFICATION_TYPES, {
       required_error: 'El tipo de rectificación (S o I) es obligatorio',
     }),
+    /**
+     * Código de motivo Facturae (ReasonCode), elegido por el titular y acotado
+     * por el motivo R1-R4 (`allowedFacturaeReasonCodes`). Obligatorio: sin
+     * valor por defecto ni mapeo automático.
+     */
+    facturaeReasonCode: z
+      .string({
+        required_error: 'El código de motivo Facturae es obligatorio',
+      })
+      .refine((c) => Object.hasOwn(FACTURAE_REASON_CODES, c), {
+        message: 'Código de motivo Facturae no válido',
+      }),
     /** Obligatorias si clase = 'diferencias'; prohibidas si clase = 'total' (se derivan). */
     lines: z.array(invoiceLineSchema).min(1).optional(),
   })
@@ -273,6 +289,18 @@ export const invoiceRectifySchema = z
         path: ['rectificationType'],
         message,
       });
+    }
+    if (RECTIFICATION_MOTIVES.includes(v.rectificationMotive)) {
+      for (const message of facturaeReasonCodeErrors(
+        v.rectificationMotive,
+        v.facturaeReasonCode,
+      )) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['facturaeReasonCode'],
+          message,
+        });
+      }
     }
     if (v.clase === 'diferencias' && !v.lines) {
       ctx.addIssue({
@@ -368,6 +396,8 @@ export interface InvoiceDto {
   rectificationReason: string | null;
   rectificationMotive: RectificationMotive | null;
   rectificationType: RectificationType | null;
+  /** Código de motivo Facturae (null en rectificativas legadas y de certificación). */
+  facturaeReasonCode: string | null;
   /** Rectificativas activas (no anuladas) de esta factura. */
   rectifiedByInvoiceIds: string[];
   cancelReason: string | null;

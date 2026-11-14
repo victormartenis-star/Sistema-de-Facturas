@@ -1,0 +1,1 @@
+ALTER TABLE "invoices" ADD COLUMN "facturae_reason_code" varchar(2);

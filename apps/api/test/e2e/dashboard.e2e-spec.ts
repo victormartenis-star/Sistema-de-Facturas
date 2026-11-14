@@ -195,6 +195,7 @@ describe('Dashboard (integración) — KPIs globales y por obra', () => {
         clase: 'total',
         rectificationMotive: 'R4',
         rectificationType: 'S',
+        facturaeReasonCode: '16',
         issueDate: '2026-10-01',
         motivo: 'Error de importe',
       })

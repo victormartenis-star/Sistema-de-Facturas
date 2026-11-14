@@ -20,6 +20,10 @@ import {
   invoiceCancelSchema,
   invoiceStatusFromMilestones,
 } from './invoices';
+import {
+  FACTURAE_REASON_CODES,
+  allowedFacturaeReasonCodes,
+} from './facturae-reason';
 
 // Matriz completa (plan §2.4).
 const ESPERADO: Record<InvoiceStatus, Record<InvoiceStatus, boolean>> = {
@@ -232,6 +236,7 @@ describe('invoiceRectifySchema', () => {
     motivo: 'Error en la medición',
     rectificationMotive: 'R4',
     rectificationType: 'S',
+    facturaeReasonCode: '16',
   };
   // Total ⇔ S; diferencias ⇔ I.
   const dif = { ...base, rectificationType: 'I' };
@@ -362,6 +367,7 @@ describe('motivo y tipo oficiales de rectificativa', () => {
       clase: 'total',
       issueDate: '2026-10-01',
       motivo: 'Error en la medición',
+      facturaeReasonCode: '16',
     };
     expect(invoiceRectifySchema.safeParse(base).success).toBe(false);
     expect(
@@ -393,5 +399,72 @@ describe('motivo y tipo oficiales de rectificativa', () => {
         rectificationType: 'I',
       }).success,
     ).toBe(false);
+  });
+  describe('código de motivo Facturae', () => {
+    const base = {
+      clase: 'total',
+      issueDate: '2026-10-01',
+      motivo: 'Error en la medición',
+      rectificationType: 'S',
+    };
+    const parse = (rectificationMotive: string, code?: string) =>
+      invoiceRectifySchema.safeParse({
+        ...base,
+        rectificationMotive,
+        ...(code !== undefined && { facturaeReasonCode: code }),
+      });
+
+    it('es obligatorio', () => {
+      for (const m of RECTIFICATION_MOTIVES) {
+        expect(parse(m).success).toBe(false);
+      }
+    });
+
+    it('listas por motivo', () => {
+      expect(allowedFacturaeReasonCodes('R1')).toEqual([
+        '80',
+        '82',
+        '83',
+        '84',
+        '11',
+        '12',
+        '16',
+      ]);
+      expect(allowedFacturaeReasonCodes('R2')).toEqual(['85']);
+      expect(allowedFacturaeReasonCodes('R3')).toEqual(['85']);
+      expect(allowedFacturaeReasonCodes('R4')).toEqual(
+        Object.keys(FACTURAE_REASON_CODES),
+      );
+    });
+
+    it('cada motivo acepta solo sus códigos', () => {
+      for (const m of RECTIFICATION_MOTIVES) {
+        const allowed = allowedFacturaeReasonCodes(m);
+        for (const code of Object.keys(FACTURAE_REASON_CODES)) {
+          expect(parse(m, code).success, m + ' ' + code).toBe(
+            allowed.includes(code as never),
+          );
+        }
+      }
+    });
+
+    it('código fuera de lista da un error claro', () => {
+      const r = parse('R2', '80');
+      expect(r.success).toBe(false);
+      expect(JSON.stringify(r)).toContain(
+        'no es válido para el motivo R2: use 85',
+      );
+    });
+
+    it('código inexistente o heredado del prototipo se rechaza', () => {
+      expect(parse('R4', '99').success).toBe(false);
+      expect(parse('R4', 'toString').success).toBe(false);
+    });
+
+    it('R4 acepta cualquier código válido', () => {
+      for (const code of Object.keys(FACTURAE_REASON_CODES)) {
+        expect(parse('R4', code).success).toBe(true);
+      }
+    });
   });
 });

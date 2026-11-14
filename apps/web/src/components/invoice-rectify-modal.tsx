@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import {
+  FACTURAE_REASON_CODES,
   RECTIFICATION_KINDS,
   RECTIFICATION_MOTIVES,
   RECTIFICATION_MOTIVE_LABELS,
   RECTIFICATION_TYPES,
   RECTIFICATION_TYPE_LABELS,
+  allowedFacturaeReasonCodes,
   rectificationClassificationErrors,
   type InvoiceDto,
   type InvoiceRectifyInput,
@@ -62,6 +64,8 @@ export function InvoiceRectifyModal({
   const [motivo, setMotivo] = useState('');
   const [rectMotive, setRectMotive] = useState<RectificationMotive>('R4');
   const [rectType, setRectType] = useState<RectificationType>('S');
+  // Sin valor por defecto: lo elige el titular, acotado por el motivo.
+  const [reasonCode, setReasonCode] = useState('');
   const [lines, setLines] = useState<DeltaLine[]>([]);
 
   useEffect(() => {
@@ -71,6 +75,7 @@ export function InvoiceRectifyModal({
     setMotivo('');
     setRectMotive('R4');
     setRectType('S');
+    setReasonCode('');
     setLines(
       invoice.lines.map((l) => ({
         description: l.description,
@@ -94,6 +99,8 @@ export function InvoiceRectifyModal({
       motive: rectMotive,
       type: rectType,
     }).length === 0;
+  const codigosPermitidos = allowedFacturaeReasonCodes(rectMotive);
+  const codigoOk = (codigosPermitidos as string[]).includes(reasonCode);
   const lineasOk =
     clase === 'total' ||
     (deltas.length > 0 &&
@@ -108,6 +115,7 @@ export function InvoiceRectifyModal({
             motivo: motivo.trim(),
             rectificationMotive: rectMotive,
             rectificationType: rectType,
+            facturaeReasonCode: reasonCode,
           }
         : {
             clase,
@@ -115,6 +123,7 @@ export function InvoiceRectifyModal({
             motivo: motivo.trim(),
             rectificationMotive: rectMotive,
             rectificationType: rectType,
+            facturaeReasonCode: reasonCode,
             lines: deltas.map((l) => ({
               description: l.description,
               baseAmount: Number(l.baseAmount),
@@ -169,9 +178,10 @@ export function InvoiceRectifyModal({
             <select
               id="rect-motive"
               value={rectMotive}
-              onChange={(e) =>
-                setRectMotive(e.target.value as RectificationMotive)
-              }
+              onChange={(e) => {
+                setRectMotive(e.target.value as RectificationMotive);
+                setReasonCode('');
+              }}
               className={fieldCls}
             >
               {RECTIFICATION_MOTIVES.map((m) => (
@@ -180,6 +190,29 @@ export function InvoiceRectifyModal({
                 </option>
               ))}
             </select>
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="rect-code">
+              Código de motivo Facturae
+            </label>
+            <select
+              id="rect-code"
+              value={reasonCode}
+              onChange={(e) => setReasonCode(e.target.value)}
+              className={fieldCls}
+            >
+              <option value="">Selecciona un código…</option>
+              {codigosPermitidos.map((c) => (
+                <option key={c} value={c}>
+                  {c} - {FACTURAE_REASON_CODES[c]}
+                </option>
+              ))}
+            </select>
+            {rectMotive === 'R3' && (
+              <p className="mt-1 text-xs text-gray-500">
+                Para R3 el código es una aproximación pendiente de confirmar.
+              </p>
+            )}
           </div>
           <div>
             <label className={labelCls} htmlFor="rect-type">
@@ -285,7 +318,12 @@ export function InvoiceRectifyModal({
           <button
             onClick={enviar}
             disabled={
-              saving || !motivoOk || !lineasOk || !clasifOk || !issueDate
+              saving ||
+              !motivoOk ||
+              !lineasOk ||
+              !clasifOk ||
+              !codigoOk ||
+              !issueDate
             }
             className={`${btnPrimaryCls} disabled:opacity-60`}
           >

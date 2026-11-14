@@ -371,6 +371,8 @@ export const invoices = pgTable(
     rectificationMotive: rectificationMotiveEnum('rectification_motive'),
     /** Tipo oficial S/I (null en rectificativas legadas). */
     rectificationType: rectificationTypeEnum('rectification_type'),
+    /** Código de motivo Facturae (ReasonCode) elegido por el titular; null en rectificativas legadas y de certificación. */
+    facturaeReasonCode: varchar('facturae_reason_code', { length: 2 }),
     /** Motivo de anulación (obligatorio fuera de borrador). */
     cancelReason: text('cancel_reason'),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

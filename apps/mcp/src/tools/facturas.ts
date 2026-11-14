@@ -141,8 +141,13 @@ export function registrarFacturas(server: McpServer) {
         'vencimientos previstos, los albaranes quedan libres y, si venia de ' +
         'una certificacion, esta vuelve a borrador; NO se envian lineas. ' +
         'clase="diferencias" exige lines con el delta (positivo o negativo) y ' +
-        'no cambia la original. Los importes los calcula la API. La Facturae ' +
-        'y VeriFactu de rectificativas aun no estan soportados (409).',
+        'no cambia la original. Los importes los calcula la API. ' +
+        'facturaeReasonCode (codigo de motivo Facturae) es OBLIGATORIO, sin ' +
+        'valor por defecto, y debe ser uno de los admitidos por el motivo: ' +
+        'R1 80/82/83/84/11/12/16; R2 85; R3 85 (aproximacion pendiente de ' +
+        'confirmar); R4 cualquier codigo valido. La Facturae de la ' +
+        'rectificativa se descarga con ese codigo; el envio VeriFactu de ' +
+        'rectificativas aun no esta soportado (409).',
       inputSchema: {
         id: z.string().uuid().describe('Factura que se rectifica'),
         ...invoiceRectifySchema.innerType().shape,

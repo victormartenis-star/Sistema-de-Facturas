@@ -313,6 +313,12 @@ describe('Certifications (integración) — creación, facturación y RBAC por o
       expect(inv.body.rectificationKind).toBe('diferencias');
       expect(inv.body.rectificationMotive).toBe('R4');
       expect(inv.body.rectificationType).toBe('I');
+      // Las de certificación no llevan código de motivo Facturae: 409 claro.
+      expect(inv.body.facturaeReasonCode).toBeNull();
+      const fx = await authed(app, token)
+        .get(`/invoices/${facturada.body.invoiceId}/facturae`)
+        .expect(409);
+      expect(fx.body.message).toContain('código de motivo Facturae');
       expect(inv.body.baseAmount).toBe(-5000);
       expect(inv.body.invoiceNumber).toMatch(/^R-\d{4}-\d{4}$/);
 
@@ -433,6 +439,7 @@ describe('Certifications (integración) — creación, facturación y RBAC por o
           clase: 'total',
           rectificationMotive: 'R4',
           rectificationType: 'S',
+          facturaeReasonCode: '16',
           issueDate: '2026-10-01',
           motivo: 'Cliente equivocado',
         })
