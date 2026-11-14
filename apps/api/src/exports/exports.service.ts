@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
@@ -42,6 +43,7 @@ import {
   computeIvaObra,
   EXPORT_MAX_FILAS,
   EXPORT_RECURSOS,
+  EXPORT_RECURSOS_EMPRESA,
   ExportColumn,
   ExportJsonRow,
   ExportQuery,
@@ -149,6 +151,15 @@ export class ExportsService {
   ): Promise<ExportResult> {
     if (!(EXPORT_RECURSOS as readonly string[]).includes(recurso)) {
       throw new NotFoundException('Recurso de exportación no encontrado');
+    }
+    // Defensa independiente del enrutado: los recursos de empresa no los ve el rol obra.
+    if (
+      EXPORT_RECURSOS_EMPRESA.includes(recurso) &&
+      (await this.dbs.getObrasAccesibles()) !== null
+    ) {
+      throw new ForbiddenException(
+        'Este recurso es de visión de empresa y no está disponible para tu rol',
+      );
     }
     const ds = await this.cargar(recurso, q);
     if (ds.total > EXPORT_MAX_FILAS) {

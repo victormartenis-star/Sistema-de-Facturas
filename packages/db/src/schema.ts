@@ -404,6 +404,11 @@ export const invoices = pgTable(
     uniqueIndex('invoices_contact_number_unique')
       .on(t.companyId, t.kind, t.contactId, t.invoiceNumber)
       .where(sql`deleted_at IS NULL`),
+    // La numeración de venta es de la empresa (la emite ella): un número no
+    // puede repetirse aunque cambie el cliente.
+    uniqueIndex('invoices_company_venta_number_unique')
+      .on(t.companyId, t.invoiceNumber)
+      .where(sql`kind = 'venta' AND deleted_at IS NULL`),
   ],
 );
 

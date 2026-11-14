@@ -50,7 +50,8 @@ export class InvoicesController {
     @Query('status') status?: string,
     @Query('search') search?: string,
     @Query('rectificativas') rectificativas?: string,
-    @Query('projectId') projectId?: string,
+    @Query('projectId', new ParseUUIDPipe({ optional: true }))
+    projectId?: string,
     @Query(new ZodValidationPipe(paginacionQuerySchema))
     paginacion: PaginacionQuery = {},
   ) {
@@ -113,6 +114,7 @@ export class InvoicesController {
   }
 
   @Patch(':id')
+  @Roles('admin', 'gerente', 'administracion')
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(invoiceUpdateSchema))
@@ -123,12 +125,14 @@ export class InvoicesController {
 
   /** Aprueba la factura (con matching de albaranes si es de compra). */
   @Post(':id/aprobar')
+  @Roles('admin', 'gerente', 'administracion')
   approve(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.approve(id);
   }
 
   /** Marca como pagada/cobrada y liquida sus vencimientos. */
   @Post(':id/pagar')
+  @Roles('admin', 'gerente', 'administracion')
   markPaid(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.markPaid(id);
   }
@@ -138,6 +142,7 @@ export class InvoicesController {
    * Fuera de borrador exige motivo; una venta aprobada no se anula (se rectifica).
    */
   @Post(':id/anular')
+  @Roles('admin', 'gerente', 'administracion')
   cancel(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(invoiceCancelSchema))
@@ -158,6 +163,7 @@ export class InvoicesController {
   }
 
   @Delete(':id')
+  @Roles('admin', 'gerente', 'administracion')
   @HttpCode(204)
   async remove(@Param('id', ParseUUIDPipe) id: string) {
     await this.service.remove(id);

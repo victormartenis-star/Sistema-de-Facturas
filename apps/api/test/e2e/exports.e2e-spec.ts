@@ -411,6 +411,23 @@ describe('Exportaciones (integración) — GET /exports/:recurso', () => {
         .expect(403);
     });
 
+    it('obra: 403 en recursos de empresa también por la ruta genérica (path codificado)', async () => {
+      const admin = await registerUser(app);
+      const propia = await sembrar(admin.accessToken);
+      const obra = await createObraUser(app, admin.accessToken, [
+        propia.project.id,
+      ]);
+      const t = obra.tokens.accessToken;
+      for (const path of [
+        '/exports/economia-iva?from=2026-01-01&to=2026-12-31',
+        '/exports/economia%2Diva?from=2026-01-01&to=2026-12-31',
+        '/exports/economia-resumen',
+        '/exports/economia%2Dresumen',
+      ]) {
+        await authed(app, t).get(path).expect(403);
+      }
+    });
+
     it('subcontrata y cliente de portal: 403', async () => {
       const admin = await registerUser(app);
       const cliente = await createUserWithRole(

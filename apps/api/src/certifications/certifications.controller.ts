@@ -33,7 +33,8 @@ export class CertificationsController {
 
   @Get()
   list(
-    @Query('projectId') projectId?: string,
+    @Query('projectId', new ParseUUIDPipe({ optional: true }))
+    projectId?: string,
     @Query('status') status?: string,
     @Query(new ZodValidationPipe(paginacionQuerySchema))
     paginacion: PaginacionQuery = {},
@@ -69,6 +70,7 @@ export class CertificationsController {
 
   /** Genera y aprueba la factura de venta de la certificación. */
   @Post(':id/facturar')
+  @Roles('admin', 'gerente', 'administracion')
   invoice(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(certificationInvoiceSchema))

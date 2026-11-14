@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "invoices_company_venta_number_unique" ON "invoices" USING btree ("company_id","invoice_number") WHERE kind = 'venta' AND deleted_at IS NULL;

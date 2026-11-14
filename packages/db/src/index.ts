@@ -58,7 +58,17 @@ export function getDb(): Db {
     if (!url) {
       throw new Error('DATABASE_URL no está definida');
     }
-    pool = new Pool({ connectionString: url });
+    pool = new Pool({
+      connectionString: url,
+      max: 10,
+      connectionTimeoutMillis: 5000,
+    });
+    // Un error en un cliente inactivo (reinicio de Postgres, corte de red)
+    // se emite en el Pool; sin manejador Node lo trata como excepción no
+    // capturada y tumba el proceso. El pool descarta ese cliente y abre otro.
+    pool.on('error', (err) => {
+      console.error('[db] error en un cliente inactivo del pool:', err.message);
+    });
     instrumentPool(pool);
     db = drizzle(pool, { schema });
   }

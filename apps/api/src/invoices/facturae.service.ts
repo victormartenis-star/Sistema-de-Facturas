@@ -5,8 +5,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, eq, isNull } from 'drizzle-orm';
-import { companies, contacts, invoices } from '@erp/db';
+import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { companies, contacts, invoices, Tx } from '@erp/db';
 import {
   FACTURAE_REASON_CODES,
   FACTURAE_UNKNOWN_ADDRESS,
@@ -111,7 +111,11 @@ export class FacturaeService {
       .select()
       .from(contacts)
       .where(
-        and(eq(contacts.id, invoice.contactId), isNull(contacts.deletedAt)),
+        and(
+          eq(contacts.id, invoice.contactId),
+          eq(contacts.companyId, companyId),
+          isNull(contacts.deletedAt),
+        ),
       )
       .limit(1);
     if (!contact) {
@@ -197,7 +201,12 @@ export class FacturaeService {
         issueDate: invoices.issueDate,
       })
       .from(invoices)
-      .where(eq(invoices.id, invoice.rectifiesInvoiceId as string))
+      .where(
+        and(
+          eq(invoices.id, invoice.rectifiesInvoiceId as string),
+          eq(invoices.companyId, await this.dbs.getCompanyId()),
+        ),
+      )
       .limit(1);
     if (!original) {
       throw new ConflictException(
@@ -245,7 +254,27 @@ export class FacturaeService {
     issuerTaxId: string,
     targetInvoiceId: string,
   ): Promise<FacturaeVerifactuInfo> {
-    const rows = await this.dbs.db
+    // Cálculo + persistencia en una sola transacción, serializada por
+    // empresa: dos peticiones simultáneas no pueden escribir huellas
+    // encadenadas sobre una cola distinta. Si algo falla (p. ej. el 409 de
+    // integridad) no queda ninguna huella a medias.
+    return this.dbs.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${'verifactu:' + companyId}))`,
+      );
+      return this.recorrerCadena(tx, companyId, issuerTaxId, targetInvoiceId);
+    });
+  }
+
+  private async recorrerCadena(
+    tx: Tx,
+    companyId: string,
+    issuerTaxId: string,
+    targetInvoiceId: string,
+  ): Promise<FacturaeVerifactuInfo> {
+    // Solo estados emitidos: un borrador (editable/borrable) o una anulada
+    // no pueden formar parte de una cadena que debe ser inmutable.
+    const rows = await tx
       .select({
         id: invoices.id,
         invoiceNumber: invoices.invoiceNumber,
@@ -253,6 +282,7 @@ export class FacturaeService {
         vatAmount: invoices.vatAmount,
         totalAmount: invoices.totalAmount,
         createdAt: invoices.createdAt,
+        verifactuStatus: invoices.verifactuStatus,
         verifactuHash: invoices.verifactuHash,
         verifactuPreviousHash: invoices.verifactuPreviousHash,
         verifactuGeneratedAt: invoices.verifactuGeneratedAt,
@@ -263,6 +293,7 @@ export class FacturaeService {
           eq(invoices.companyId, companyId),
           eq(invoices.kind, 'venta'),
           isNull(invoices.deletedAt),
+          inArray(invoices.status, ['aprobada', 'pagada', 'rectificada']),
         ),
       )
       .orderBy(asc(invoices.issueDate), asc(invoices.createdAt));
@@ -280,6 +311,13 @@ export class FacturaeService {
         hash = row.verifactuHash!;
         generatedAt = row.verifactuGeneratedAt!.toISOString();
       } else {
+        if (row.verifactuStatus === 'enviado') {
+          // La huella de un registro ya notificado a la AEAT es inmutable:
+          // recalcularla rompería la cadena que la AEAT ya tiene.
+          throw new ConflictException(
+            `Integridad VeriFactu: la factura ${row.invoiceNumber} ya fue enviada a la AEAT y su huella no coincide con la cadena actual (se añadió o cambió una factura anterior). No se recalcula; revisa la cadena antes de continuar`,
+          );
+        }
         generatedAt = row.createdAt.toISOString();
         const canonical = verifactuCanonicalString(
           {
@@ -293,14 +331,19 @@ export class FacturaeService {
           previousHash,
         );
         hash = createHash('sha256').update(canonical, 'utf8').digest('hex');
-        await this.dbs.db
+        await tx
           .update(invoices)
           .set({
             verifactuHash: hash,
             verifactuPreviousHash: previousHash,
             verifactuGeneratedAt: new Date(generatedAt),
           })
-          .where(eq(invoices.id, row.id));
+          .where(
+            and(
+              eq(invoices.id, row.id),
+              ne(invoices.verifactuStatus, 'enviado'),
+            ),
+          );
       }
 
       if (row.id === targetInvoiceId) {
@@ -310,7 +353,6 @@ export class FacturaeService {
       previousHash = hash;
     }
     if (!target) {
-      // No debería ocurrir: `generate()` ya comprobó que es una factura de venta.
       throw new NotFoundException(
         'Factura no encontrada al reconstruir la cadena VeriFactu',
       );

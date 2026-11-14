@@ -246,6 +246,13 @@
       "when": 1794684515144,
       "tag": "0034_fase3_codigo_motivo_facturae",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1794688157854,
+      "tag": "0035_fase3_numero_venta_unico",
+      "breakpoints": true
     }
   ]
 }

@@ -20,6 +20,7 @@ import {
   sql,
 } from 'drizzle-orm';
 import {
+  categories,
   Contact,
   Invoice,
   certifications,
@@ -233,6 +234,7 @@ export class InvoicesService {
       // pertenece a una obra a la que tiene acceso.
       throw new NotFoundException('Obra no encontrada');
     }
+    await this.validarImputaciones(companyId, data.lines);
     const amounts = computeInvoiceAmounts(
       data.lines,
       data.isp,
@@ -318,6 +320,26 @@ export class InvoicesService {
     }
     this.rechazarClasificacionRectificativa(input);
     const data = invoiceUpdateSchema.parse(input);
+    this.rechazarEdicionRectificativa(invoice, data);
+
+    // Mismas validaciones que `prepararCreacion`: contacto de la empresa y
+    // obras de las líneas accesibles / pertenecientes a la empresa.
+    if (data.contactId !== undefined) {
+      await this.findContact(data.contactId);
+    }
+    if (data.lines) {
+      const allowed = await this.dbs.getObrasAccesibles();
+      if (
+        allowed !== null &&
+        !hasAllowedProject(
+          allowed,
+          data.lines.map((l) => l.projectId ?? null),
+        )
+      ) {
+        throw new NotFoundException('Obra no encontrada');
+      }
+      await this.validarImputaciones(invoice.companyId, data.lines);
+    }
 
     const lines =
       data.lines ??
@@ -357,6 +379,11 @@ export class InvoicesService {
               retentionReleaseDate: data.retentionReleaseDate ?? null,
             }),
             ...(data.notes !== undefined && { notes: data.notes ?? null }),
+            // Un borrador no forma parte de la cadena VeriFactu: si por lo que
+            // sea conservara una huella, editarlo la invalida.
+            verifactuHash: null,
+            verifactuPreviousHash: null,
+            verifactuGeneratedAt: null,
             isp,
             retentionPct: retentionPct.toFixed(2),
             baseAmount: amounts.baseAmount.toFixed(2),
@@ -646,6 +673,9 @@ export class InvoicesService {
       )
     ) {
       throw new NotFoundException('Obra no encontrada');
+    }
+    if (data.lines) {
+      await this.validarImputaciones(invoice.companyId, data.lines);
     }
     const newId = await this.dbs.db.transaction(
       async (tx) =>
@@ -980,18 +1010,110 @@ export class InvoicesService {
     }
   }
 
+  /**
+   * Una rectificativa en borrador no se reescribe a mano: contacto, número,
+   * ISP y retención se heredan de la original, y en las totales las líneas
+   * son el espejo de la original (solo las de diferencias admiten líneas).
+   */
+  private rechazarEdicionRectificativa(
+    invoice: Invoice,
+    data: ReturnType<typeof invoiceUpdateSchema.parse>,
+  ): void {
+    if (!invoice.rectifiesInvoiceId) return;
+    const prohibidos: string[] = [];
+    if (data.contactId !== undefined) prohibidos.push('el contacto');
+    if (data.invoiceNumber !== undefined) prohibidos.push('el número');
+    if (data.isp !== undefined)
+      prohibidos.push('la inversión del sujeto pasivo');
+    if (data.retentionPct !== undefined) prohibidos.push('la retención');
+    if (data.lines !== undefined && invoice.rectificationKind === 'total') {
+      prohibidos.push('las líneas de una rectificativa total');
+    }
+    if (prohibidos.length > 0) {
+      throw new BadRequestException(
+        `En una factura rectificativa no se puede modificar ${prohibidos.join(', ')}: se heredan de la original`,
+      );
+    }
+  }
+
+  /**
+   * Obra, fase y categoría de las líneas deben ser de la empresa (404 si
+   * alguna no existe en ella). Las FK solas no distinguen empresas.
+   */
+  private async validarImputaciones(
+    companyId: string,
+    lines: ReadonlyArray<{
+      projectId?: string | null;
+      phaseId?: string | null;
+      categoryId?: string | null;
+    }>,
+  ): Promise<void> {
+    const unicos = (xs: Array<string | null | undefined>) => [
+      ...new Set(xs.filter((x): x is string => !!x)),
+    ];
+    const obras = unicos(lines.map((l) => l.projectId));
+    const fases = unicos(lines.map((l) => l.phaseId));
+    const cats = unicos(lines.map((l) => l.categoryId));
+    if (obras.length > 0) {
+      const found = await this.dbs.db
+        .select({ id: projects.id })
+        .from(projects)
+        .where(
+          and(
+            inArray(projects.id, obras),
+            eq(projects.companyId, companyId),
+            isNull(projects.deletedAt),
+          ),
+        );
+      if (found.length !== obras.length) {
+        throw new NotFoundException('Obra no encontrada');
+      }
+    }
+    if (fases.length > 0) {
+      const found = await this.dbs.db
+        .select({ id: projectPhases.id })
+        .from(projectPhases)
+        .where(
+          and(
+            inArray(projectPhases.id, fases),
+            eq(projectPhases.companyId, companyId),
+            isNull(projectPhases.deletedAt),
+          ),
+        );
+      if (found.length !== fases.length) {
+        throw new NotFoundException('Fase no encontrada');
+      }
+    }
+    if (cats.length > 0) {
+      const found = await this.dbs.db
+        .select({ id: categories.id })
+        .from(categories)
+        .where(
+          and(
+            inArray(categories.id, cats),
+            eq(categories.companyId, companyId),
+          ),
+        );
+      if (found.length !== cats.length) {
+        throw new NotFoundException('Categoría no encontrada');
+      }
+    }
+  }
+
   private async linkDeliveryNotes(
     tx: Tx,
     invoiceId: string,
     contactId: string,
     noteIds: string[],
   ): Promise<void> {
+    const companyId = await this.dbs.getCompanyId();
     const notes = await tx
       .select()
       .from(deliveryNotes)
       .where(
         and(
           inArray(deliveryNotes.id, noteIds),
+          eq(deliveryNotes.companyId, companyId),
           isNull(deliveryNotes.deletedAt),
         ),
       );

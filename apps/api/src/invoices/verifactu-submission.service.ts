@@ -7,7 +7,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import { companies, invoices } from '@erp/db';
 import {
   RegistroAltaInput,
@@ -20,6 +20,8 @@ import { InvoicesService } from './invoices.service';
 
 const SOFTWARE_NAME = 'ERP Dintel';
 const SOFTWARE_VERSION = '1.0';
+/** Tiempo máximo sin actividad en el socket al hablar con la AEAT. */
+const AEAT_TIMEOUT_MS = 15_000;
 
 export interface VerifactuSubmissionResultDto {
   status: VerifactuStatus;
@@ -80,6 +82,11 @@ export class VerifactuSubmissionService {
     if (invoice.rectifiesInvoiceId) {
       throw new ConflictException(
         'VeriFactu de facturas rectificativas no soportado todavía: no se emite como F1',
+      );
+    }
+    if (invoice.verifactuStatus === 'enviado') {
+      throw new ConflictException(
+        'El registro VeriFactu de esta factura ya fue enviado a la AEAT: no se reenvía',
       );
     }
     if (invoice.status === 'borrador' || invoice.status === 'anulada') {
@@ -149,7 +156,12 @@ export class VerifactuSubmissionService {
     await this.dbs.db
       .update(invoices)
       .set({ verifactuStatus: status, verifactuSentAt: sentAt })
-      .where(eq(invoices.id, invoiceId));
+      .where(
+        and(
+          eq(invoices.id, invoiceId),
+          ne(invoices.verifactuStatus, 'enviado'),
+        ),
+      );
   }
 
   /**
@@ -161,7 +173,22 @@ export class VerifactuSubmissionService {
     const url = new URL(process.env.AEAT_ENDPOINT_URL!);
     const body = Buffer.from(xml, 'utf-8');
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolveOk, rejectErr) => {
+      // Plazo total (conexión + handshake TLS + respuesta): el `timeout` del
+      // socket no cubre un handshake TLS que nunca avanza.
+      const limite = setTimeout(() => {
+        req.destroy(
+          new Error(`AEAT no respondió en ${AEAT_TIMEOUT_MS / 1000} s`),
+        );
+      }, AEAT_TIMEOUT_MS);
+      const resolve = () => {
+        clearTimeout(limite);
+        resolveOk();
+      };
+      const reject = (err: Error) => {
+        clearTimeout(limite);
+        rejectErr(err);
+      };
       const req = httpsRequest(
         {
           hostname: url.hostname,
@@ -170,6 +197,7 @@ export class VerifactuSubmissionService {
           method: 'POST',
           pfx,
           passphrase: process.env.AEAT_CERT_PASSWORD,
+          timeout: AEAT_TIMEOUT_MS,
           headers: {
             'Content-Type': 'application/xml; charset=utf-8',
             'Content-Length': body.length,
@@ -181,10 +209,16 @@ export class VerifactuSubmissionService {
             res.resume();
             return;
           }
+          res.on('error', reject);
           res.resume();
           res.on('end', () => resolve());
         },
       );
+      req.on('timeout', () => {
+        req.destroy(
+          new Error(`AEAT no respondió en ${AEAT_TIMEOUT_MS / 1000} s`),
+        );
+      });
       req.on('error', reject);
       req.write(body);
       req.end();
