@@ -106,3 +106,42 @@ export function query(params: Record<string, unknown>): string {
   const s = p.toString();
   return s ? `?${s}` : '';
 }
+
+/**
+ * PATCH/DELETE de una entidad versionada con control optimista.
+ *
+ * Lee la version actual con `leerVersion` (GET) y la envia como
+ * `If-Match: "<version>"`. Entre ese GET y el PATCH/DELETE hay una ventana de
+ * carrera: otro usuario puede modificar la entidad en medio. No hace falta
+ * cerrarla aqui, porque la API la cubre: si la version cambio responde 409
+ * `VERSION_CONFLICT` y este helper lo traduce a un error claro para el agente,
+ * que debe volver a leer la entidad y reintentar con datos frescos.
+ */
+export async function pedirVersionado<T>(
+  ruta: string,
+  init: RequestInit,
+  leerVersion: () => Promise<number>,
+  entidad: string,
+): Promise<T> {
+  const version = await leerVersion();
+  try {
+    return await pedir<T>(ruta, {
+      ...init,
+      headers: { ...(init.headers ?? {}), 'If-Match': `"${version}"` },
+    });
+  } catch (e) {
+    if (
+      e instanceof ErrorApi &&
+      e.estado === 409 &&
+      (e.cuerpo as { code?: string } | null)?.code === 'VERSION_CONFLICT'
+    ) {
+      throw new ErrorApi(
+        409,
+        e.cuerpo,
+        `versión obsoleta: vuelve a leer el ${entidad} y reintenta ` +
+          `(otro usuario lo modificó entre tu lectura y este cambio)`,
+      );
+    }
+    throw e;
+  }
+}

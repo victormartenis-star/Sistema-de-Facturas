@@ -28,7 +28,7 @@ import { Autorizado } from '@/components/autorizado';
 import { StatusBadge } from '@/components/status-badge';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { CostControlDashboard } from '@/components/cost-control-dashboard';
-import { useToast } from '@/components/toast';
+import { useAvisarError, useToast } from '@/components/toast';
 import {
   IconChart,
   IconCube,
@@ -495,6 +495,7 @@ export default function ObraDetallePage() {
   const { id } = useParams<{ id: string }>();
   const qc = useQueryClient();
   const toast = useToast();
+  const avisarError = useAvisarError();
 
   const projectQuery = useQuery({
     queryKey: ['project', id],
@@ -592,14 +593,15 @@ export default function ObraDetallePage() {
   });
 
   const removeCert = useMutation({
-    mutationFn: (certId: string) => certificationsApi.remove(certId),
+    mutationFn: (cert: CertificationDto) =>
+      certificationsApi.remove(cert.id, cert.version),
     onSuccess: () => {
       toast('Certificación eliminada');
       invalidate();
       setDeleteCert(null);
     },
     onError: (e) => {
-      toast(errText(e), 'error');
+      avisarError(e, invalidate);
       setDeleteCert(null);
     },
   });
@@ -1072,7 +1074,7 @@ export default function ObraDetallePage() {
         title={`¿Eliminar la certificación nº ${deleteCert?.seq ?? ''}?`}
         description="Solo se puede eliminar la última certificación y en borrador."
         loading={removeCert.isPending}
-        onConfirm={() => deleteCert && removeCert.mutate(deleteCert.id)}
+        onConfirm={() => deleteCert && removeCert.mutate(deleteCert)}
         onCancel={() => setDeleteCert(null)}
       />
     </div>

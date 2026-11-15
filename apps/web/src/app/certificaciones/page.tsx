@@ -35,7 +35,7 @@ import {
   formatDate,
   formatEur,
 } from '@/lib/api';
-import { useToast } from '@/components/toast';
+import { useAvisarError, useToast } from '@/components/toast';
 import { useListadoPaginado } from '@/lib/use-listado-paginado';
 import { usePermisos } from '@/lib/permisos';
 import {
@@ -554,6 +554,7 @@ function LinesPanel({
   editable: boolean;
 }) {
   const toast = useToast();
+  const avisarError = useAvisarError();
   const qc = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
 
@@ -563,13 +564,16 @@ function LinesPanel({
   });
 
   const removeLine = useMutation({
-    mutationFn: (lineId: string) =>
-      certificationLinesApi.remove(certId, lineId),
+    mutationFn: (ln: CertificationLineDto) =>
+      certificationLinesApi.remove(certId, ln.id, ln.version),
     onSuccess: () => {
       toast('Línea eliminada');
       qc.invalidateQueries({ queryKey: ['cert-lines', certId] });
     },
-    onError: (e) => toast(errText(e), 'error'),
+    onError: (e) =>
+      avisarError(e, () =>
+        qc.invalidateQueries({ queryKey: ['cert-lines', certId] }),
+      ),
   });
 
   const lines: CertificationLineDto[] = linesQuery.data ?? [];
@@ -630,7 +634,7 @@ function LinesPanel({
                 <td className="py-1">
                   {editable && (
                     <button
-                      onClick={() => removeLine.mutate(ln.id)}
+                      onClick={() => removeLine.mutate(ln)}
                       className="rounded p-0.5 text-gray-300 hover:text-red-500"
                       title="Eliminar línea"
                     >
@@ -852,6 +856,7 @@ function RectificarCertModal({
 export default function CertificacionesPage() {
   const qc = useQueryClient();
   const toast = useToast();
+  const avisarError = useAvisarError();
   const { can } = usePermisos();
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -898,13 +903,17 @@ export default function CertificacionesPage() {
   };
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => certificationsApi.remove(id),
+    mutationFn: (c: CertificationDto) =>
+      certificationsApi.remove(c.id, c.version),
     onSuccess: () => {
       toast('Certificación eliminada');
       setDeleteTarget(null);
       invalidate();
     },
-    onError: (e) => toast(errText(e), 'error'),
+    onError: (e) => {
+      avisarError(e, invalidate);
+      setDeleteTarget(null);
+    },
   });
 
   const certs = certsQuery.data ?? [];
@@ -1194,7 +1203,7 @@ export default function CertificacionesPage() {
         description="Se eliminará la certificación. Esta acción no se puede deshacer."
         confirmLabel="Eliminar"
         loading={deleteMutation.isPending}
-        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget)}
         onCancel={() => setDeleteTarget(null)}
       />
     </div>

@@ -22,7 +22,7 @@ import {
   FiltroObra,
   type ColumnaDef,
 } from '@/components/data-table';
-import { useToast } from '@/components/toast';
+import { useAvisarError, useToast } from '@/components/toast';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import {
   IconCalculator,
@@ -388,6 +388,7 @@ function DetallePresupuesto({ budget }: { budget: BudgetDto }) {
 function AccionesPresupuesto({ budget }: { budget: BudgetDto }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const avisarError = useAvisarError();
   const { can } = usePermisos();
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -397,21 +398,23 @@ function AccionesPresupuesto({ budget }: { budget: BudgetDto }) {
   };
 
   const activateMutation = useMutation({
-    mutationFn: () => budgetsApi.update(budget.id, { status: 'activo' }),
+    mutationFn: () =>
+      budgetsApi.update(budget.id, { status: 'activo' }, budget.version),
     onSuccess: () => {
       toast('Presupuesto activado — es ahora la línea base de la obra');
       invalidate();
     },
-    onError: (e) => toast((e as Error).message, 'error'),
+    onError: (e) => avisarError(e, invalidate),
   });
 
   const closeMutation = useMutation({
-    mutationFn: () => budgetsApi.update(budget.id, { status: 'cerrado' }),
+    mutationFn: () =>
+      budgetsApi.update(budget.id, { status: 'cerrado' }, budget.version),
     onSuccess: () => {
       toast('Presupuesto cerrado');
       invalidate();
     },
-    onError: (e) => toast((e as Error).message, 'error'),
+    onError: (e) => avisarError(e, invalidate),
   });
 
   const duplicateMutation = useMutation({
@@ -424,14 +427,14 @@ function AccionesPresupuesto({ budget }: { budget: BudgetDto }) {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: () => budgetsApi.remove(budget.id),
+    mutationFn: () => budgetsApi.remove(budget.id, budget.version),
     onSuccess: () => {
       toast('Presupuesto eliminado');
       invalidate();
       setDeleteOpen(false);
     },
     onError: (e) => {
-      toast((e as Error).message, 'error');
+      avisarError(e, invalidate);
       setDeleteOpen(false);
     },
   });

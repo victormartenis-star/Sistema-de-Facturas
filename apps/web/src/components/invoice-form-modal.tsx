@@ -17,6 +17,8 @@ import {
   formatEur,
   phasesApi,
 } from '@/lib/api';
+import { esConflictoVersion } from '@/lib/api-error';
+import { AvisoConflicto } from '@/components/aviso-conflicto';
 import { IconCheck, IconPlus, IconTrash, IconX } from './icons';
 import { Modal, btnPrimaryCls, fieldCls, labelCls } from './ui';
 
@@ -152,6 +154,8 @@ interface Props {
   saving: boolean;
   error: ApiError | Error | null;
   onSave: (values: InvoiceCreateInput) => void;
+  /** Vuelve a cargar la factura y su versión tras un conflicto 409. */
+  onReload?: () => Promise<unknown> | void;
   onClose: () => void;
 }
 
@@ -164,6 +168,7 @@ export function InvoiceFormModal({
   saving,
   error,
   onSave,
+  onReload,
   onClose,
 }: Props) {
   const [contactId, setContactId] = useState('');
@@ -549,7 +554,8 @@ export function InvoiceFormModal({
             ))}
           </ul>
         )}
-        {error && fieldErrors.length === 0 && (
+        {esConflictoVersion(error) && <AvisoConflicto onReload={onReload} />}
+        {error && fieldErrors.length === 0 && !esConflictoVersion(error) && (
           <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
             {error.message}
           </p>

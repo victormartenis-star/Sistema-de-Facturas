@@ -8,23 +8,59 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { esConflictoVersion, MENSAJE_CONFLICTO_VERSION } from '@/lib/api-error';
+import { textoDeError } from '@/lib/errores';
 import { IconAlertTriangle, IconCheck, IconInfo, IconX } from './icons';
 
 type ToastType = 'success' | 'error' | 'info';
+
+/** Acción opcional del aviso (p. ej. "Recargar"). El aviso no caduca solo. */
+export interface ToastAccion {
+  etiqueta: string;
+  onClick: () => void;
+}
 
 interface ToastItem {
   id: number;
   type: ToastType;
   message: string;
+  accion?: ToastAccion;
 }
 
-type ToastFn = (message: string, type?: ToastType) => void;
+type ToastFn = (
+  message: string,
+  type?: ToastType,
+  accion?: ToastAccion,
+) => void;
 
 const ToastContext = createContext<ToastFn>(() => {});
 
 /** Hook para lanzar notificaciones: `const toast = useToast(); toast('Guardado');` */
 export function useToast(): ToastFn {
   return useContext(ToastContext);
+}
+
+/**
+ * Avisa de un error de una mutación. Si es un conflicto de versión
+ * (409 `VERSION_CONFLICT`) el aviso es persistente y ofrece `recargar`;
+ * cualquier otro error (incluidos los 409 de estado) se muestra tal cual.
+ */
+export function useAvisarError(): (e: unknown, recargar?: () => void) => void {
+  const toast = useToast();
+  return useCallback(
+    (e, recargar) => {
+      if (esConflictoVersion(e)) {
+        toast(
+          MENSAJE_CONFLICTO_VERSION,
+          'error',
+          recargar ? { etiqueta: 'Recargar', onClick: recargar } : undefined,
+        );
+      } else {
+        toast(textoDeError(e), 'error');
+      }
+    },
+    [toast],
+  );
 }
 
 const TONE: Record<ToastType, { chip: string; icon: ReactNode }> = {
@@ -51,11 +87,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const toast = useCallback<ToastFn>(
-    (message, type = 'success') => {
+    (message, type = 'success', accion) => {
       const id = nextId.current++;
       // Máximo 4 visibles a la vez
-      setToasts((prev) => [...prev.slice(-3), { id, type, message }]);
-      window.setTimeout(() => dismiss(id), 4500);
+      setToasts((prev) => [...prev.slice(-3), { id, type, message, accion }]);
+      // Con acción (conflicto de versión) el aviso espera a que el usuario actúe.
+      if (!accion) window.setTimeout(() => dismiss(id), 4500);
     },
     [dismiss],
   );
@@ -74,7 +111,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             >
               {TONE[t.type].icon}
             </span>
-            <p className="flex-1 text-sm text-gray-800">{t.message}</p>
+            <div className="flex-1">
+              <p className="text-sm text-gray-800">{t.message}</p>
+              {t.accion && (
+                <button
+                  onClick={() => {
+                    t.accion?.onClick();
+                    dismiss(t.id);
+                  }}
+                  className="mt-1.5 rounded-md bg-gray-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-gray-700"
+                >
+                  {t.accion.etiqueta}
+                </button>
+              )}
+            </div>
             <button
               onClick={() => dismiss(t.id)}
               className="mt-0.5 shrink-0 rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"

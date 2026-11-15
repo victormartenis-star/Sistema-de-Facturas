@@ -404,7 +404,19 @@ export default function PedidosPage() {
 
       {formOpen && (
         <OrderFormModal
+          key={editing ? `${editing.id}:${editing.version}` : 'nuevo'}
           order={editing}
+          onReload={
+            editing
+              ? () => {
+                  const id = editing.id;
+                  void purchaseOrdersApi.get(id).then((fresco) => {
+                    setEditing(fresco);
+                    invalidate();
+                  });
+                }
+              : undefined
+          }
           projects={projectsQuery.data ?? []}
           contacts={contactsQuery.data ?? []}
           onClose={() => setFormOpen(false)}

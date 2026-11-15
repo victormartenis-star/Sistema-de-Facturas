@@ -22,6 +22,8 @@ import {
 } from '@/lib/api';
 import { useListadoPaginado } from '@/lib/use-listado-paginado';
 import { usePermisos } from '@/lib/permisos';
+import { esConflictoVersion } from '@/lib/api-error';
+import { AvisoConflicto } from '@/components/aviso-conflicto';
 import { textoDeError } from '@/lib/errores';
 import {
   BarraFiltros,
@@ -33,7 +35,7 @@ import {
 import { Autorizado } from '@/components/autorizado';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { ReasonDialog } from '@/components/reason-dialog';
-import { useToast } from '@/components/toast';
+import { useAvisarError, useToast } from '@/components/toast';
 import {
   IconCheck,
   IconInbox,
@@ -65,6 +67,7 @@ function NoteFormModal({
   saving,
   error,
   onSave,
+  onReload,
   onClose,
 }: {
   open: boolean;
@@ -72,6 +75,7 @@ function NoteFormModal({
   saving: boolean;
   error: Error | null;
   onSave: (v: DeliveryNoteCreateInput) => void;
+  onReload?: () => Promise<unknown> | void;
   onClose: () => void;
 }) {
   const [contactId, setContactId] = useState('');
@@ -207,7 +211,8 @@ function NoteFormModal({
             onChange={(e) => setDescription(e.target.value)}
           />
         </div>
-        {error && (
+        {esConflictoVersion(error) && <AvisoConflicto onReload={onReload} />}
+        {error && !esConflictoVersion(error) && (
           <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
             {error.message}
           </p>
@@ -232,6 +237,7 @@ function NoteFormModal({
 export default function AlbaranesPage() {
   const qc = useQueryClient();
   const toast = useToast();
+  const avisarError = useAvisarError();
   const { can } = usePermisos();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<DeliveryNoteDto | null>(null);
@@ -258,7 +264,7 @@ export default function AlbaranesPage() {
   const saveMutation = useMutation({
     mutationFn: (v: DeliveryNoteCreateInput) =>
       editing
-        ? deliveryNotesApi.update(editing.id, v)
+        ? deliveryNotesApi.update(editing.id, v, editing.version)
         : deliveryNotesApi.create(v),
     onSuccess: () => {
       toast(editing ? 'Albarán actualizado' : 'Albarán creado');
@@ -289,17 +295,32 @@ export default function AlbaranesPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => deliveryNotesApi.remove(id),
+    mutationFn: (n: DeliveryNoteDto) =>
+      deliveryNotesApi.remove(n.id, n.version),
     onSuccess: () => {
       toast('Albarán eliminado');
       invalidate();
       setDeleteTarget(null);
     },
     onError: (e) => {
-      toast(errText(e), 'error');
+      avisarError(e, invalidate);
       setDeleteTarget(null);
     },
   });
+
+  /** Refresca el albarán en edición (no hay GET por id: se relee el listado). */
+  const recargarEditing = async () => {
+    if (!editing) return;
+    const lista = await deliveryNotesApi.list({});
+    const fresco = lista.find((n) => n.id === editing.id);
+    saveMutation.reset();
+    invalidate();
+    if (fresco) setEditing(fresco);
+    else {
+      setModalOpen(false);
+      setEditing(null);
+    }
+  };
 
   const abrirNuevo = () => {
     setEditing(null);
@@ -488,6 +509,7 @@ export default function AlbaranesPage() {
         saving={saveMutation.isPending}
         error={(saveMutation.error as ApiError | null) ?? null}
         onSave={(v) => saveMutation.mutate(v)}
+        onReload={editing ? recargarEditing : undefined}
         onClose={() => {
           setModalOpen(false);
           setEditing(null);
@@ -508,7 +530,7 @@ export default function AlbaranesPage() {
         open={deleteTarget !== null}
         title={`¿Eliminar el albarán "${deleteTarget?.noteNumber ?? ''}"?`}
         loading={deleteMutation.isPending}
-        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget)}
         onCancel={() => setDeleteTarget(null)}
       />
     </div>

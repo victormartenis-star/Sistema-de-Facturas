@@ -33,7 +33,7 @@ import {
 } from '@/components/data-table';
 import { Autorizado } from '@/components/autorizado';
 import { ConfirmDialog } from '@/components/confirm-dialog';
-import { useToast } from '@/components/toast';
+import { useAvisarError, useToast } from '@/components/toast';
 import { InvoiceFormModal } from '@/components/invoice-form-modal';
 import { InvoiceRectifyModal } from '@/components/invoice-rectify-modal';
 import { ReasonDialog } from '@/components/reason-dialog';
@@ -157,6 +157,7 @@ function DetalleFactura({ inv, kind }: { inv: InvoiceDto; kind: InvoiceKind }) {
 export default function FacturasPage() {
   const qc = useQueryClient();
   const toast = useToast();
+  const avisarError = useAvisarError();
   const { can } = usePermisos();
   const [kind, setKind] = useState<InvoiceKind>('compra');
   const [modalOpen, setModalOpen] = useState(false);
@@ -193,7 +194,7 @@ export default function FacturasPage() {
   const saveMutation = useMutation({
     mutationFn: (values: InvoiceCreateInput) =>
       editing
-        ? invoicesApi.update(editing.id, values)
+        ? invoicesApi.update(editing.id, values, editing.version)
         : invoicesApi.create(values),
     onSuccess: () => {
       toast(editing ? 'Factura actualizada' : 'Borrador de factura creado');
@@ -245,17 +246,26 @@ export default function FacturasPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => invoicesApi.remove(id),
+    mutationFn: (inv: InvoiceDto) => invoicesApi.remove(inv.id, inv.version),
     onSuccess: () => {
       toast('Borrador eliminado');
       invalidate();
       setDeleteTarget(null);
     },
     onError: (e) => {
-      toast(errText(e), 'error');
+      avisarError(e, invalidate);
       setDeleteTarget(null);
     },
   });
+
+  /** Refresca la factura en edición con su versión vigente. */
+  const recargarEditing = async () => {
+    if (!editing) return;
+    const fresca = await invoicesApi.get(editing.id);
+    saveMutation.reset();
+    setEditing(fresca);
+    invalidate();
+  };
 
   const abrirNueva = () => {
     setEditing(null);
@@ -511,6 +521,7 @@ export default function FacturasPage() {
         saving={saveMutation.isPending}
         error={(saveMutation.error as ApiError | null) ?? null}
         onSave={(values) => saveMutation.mutate(values)}
+        onReload={editing ? recargarEditing : undefined}
         onClose={() => {
           setModalOpen(false);
           setEditing(null);
@@ -522,7 +533,7 @@ export default function FacturasPage() {
         title={`¿Eliminar el borrador "${deleteTarget?.invoiceNumber ?? ''}"?`}
         description="Se desvincularán sus albaranes."
         loading={deleteMutation.isPending}
-        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget)}
         onCancel={() => setDeleteTarget(null)}
       />
       <ReasonDialog

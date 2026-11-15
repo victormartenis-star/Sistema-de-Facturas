@@ -1,4 +1,5 @@
 import { DOCUMENT_MAX_SIZE_MB } from '@erp/shared';
+import { ApiError, errorDeRespuesta, ifMatch } from './api-error';
 import type { ExportRecurso, PaginaDto } from '@erp/shared';
 import type { AuditLogDto, AuditQuery, ComplianceAlertDto } from '@erp/shared';
 import type {
@@ -251,15 +252,7 @@ function filtrosAQuery(
   return qs ? `?${qs}` : '';
 }
 
-export class ApiError extends Error {
-  constructor(
-    message: string,
-    public readonly status: number,
-    public readonly fieldErrors: { field: string; message: string }[] = [],
-  ) {
-    super(message);
-  }
-}
+export { ApiError };
 
 let refreshInFlight: Promise<boolean> | null = null;
 
@@ -315,22 +308,23 @@ async function request<T>(
   }
 
   if (!res.ok) {
-    let message = `Error ${res.status}`;
-    let fieldErrors: { field: string; message: string }[] = [];
+    let body: unknown = null;
     try {
-      const body = await res.json();
-      message = body.message ?? message;
-      if (Array.isArray(body.message)) {
-        message = body.message.join(', ');
-      }
-      fieldErrors = body.errors ?? [];
+      body = await res.json();
     } catch {
       // sin cuerpo JSON
     }
+    const err = errorDeRespuesta(res.status, body);
     if (res.status === 413) {
-      message = `El archivo supera el máximo de ${DOCUMENT_MAX_SIZE_MB} MB`;
+      throw new ApiError(
+        `El archivo supera el máximo de ${DOCUMENT_MAX_SIZE_MB} MB`,
+        res.status,
+        err.fieldErrors,
+        err.code,
+        err.versionActual,
+      );
     }
-    throw new ApiError(message, res.status, fieldErrors);
+    throw err;
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
@@ -653,9 +647,10 @@ export const invoicesApi = {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  update: (id: string, input: InvoiceUpdateInput) =>
+  update: (id: string, input: InvoiceUpdateInput, version?: number) =>
     request<InvoiceDto>(`/invoices/${id}`, {
       method: 'PATCH',
+      headers: ifMatch(version),
       body: JSON.stringify(input),
     }),
   approve: (id: string) =>
@@ -677,8 +672,11 @@ export const invoicesApi = {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  remove: (id: string) =>
-    request<void>(`/invoices/${id}`, { method: 'DELETE' }),
+  remove: (id: string, version?: number) =>
+    request<void>(`/invoices/${id}`, {
+      method: 'DELETE',
+      headers: ifMatch(version),
+    }),
 };
 
 export const certificationsApi = {
@@ -707,8 +705,11 @@ export const certificationsApi = {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  remove: (id: string) =>
-    request<void>(`/certifications/${id}`, { method: 'DELETE' }),
+  remove: (id: string, version?: number) =>
+    request<void>(`/certifications/${id}`, {
+      method: 'DELETE',
+      headers: ifMatch(version),
+    }),
 };
 
 export const certificationLinesApi = {
@@ -723,14 +724,17 @@ export const certificationLinesApi = {
     certId: string,
     lineId: string,
     input: Partial<CertificationLineCreateInput>,
+    version?: number,
   ) =>
     request<CertificationLineDto>(`/certifications/${certId}/lines/${lineId}`, {
       method: 'PATCH',
+      headers: ifMatch(version),
       body: JSON.stringify(input),
     }),
-  remove: (certId: string, lineId: string) =>
+  remove: (certId: string, lineId: string, version?: number) =>
     request<void>(`/certifications/${certId}/lines/${lineId}`, {
       method: 'DELETE',
+      headers: ifMatch(version),
     }),
 };
 
@@ -760,9 +764,11 @@ export const purchaseOrdersApi = {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  update: (id: string, input: PurchaseOrderUpdateInput) =>
+  get: (id: string) => request<PurchaseOrderDto>(`/purchase-orders/${id}`),
+  update: (id: string, input: PurchaseOrderUpdateInput, version?: number) =>
     request<PurchaseOrderDto>(`/purchase-orders/${id}`, {
       method: 'PATCH',
+      headers: ifMatch(version),
       body: JSON.stringify(input),
     }),
   close: (id: string) =>
@@ -773,8 +779,11 @@ export const purchaseOrdersApi = {
     request<PurchaseOrderDto>(`/purchase-orders/${id}/anular`, {
       method: 'POST',
     }),
-  remove: (id: string) =>
-    request<void>(`/purchase-orders/${id}`, { method: 'DELETE' }),
+  remove: (id: string, version?: number) =>
+    request<void>(`/purchase-orders/${id}`, {
+      method: 'DELETE',
+      headers: ifMatch(version),
+    }),
 };
 
 export const deliveryNotesApi = {
@@ -807,9 +816,10 @@ export const deliveryNotesApi = {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  update: (id: string, input: DeliveryNoteUpdateInput) =>
+  update: (id: string, input: DeliveryNoteUpdateInput, version?: number) =>
     request<DeliveryNoteDto>(`/delivery-notes/${id}`, {
       method: 'PATCH',
+      headers: ifMatch(version),
       body: JSON.stringify(input),
     }),
   validate: (id: string) =>
@@ -822,8 +832,11 @@ export const deliveryNotesApi = {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  remove: (id: string) =>
-    request<void>(`/delivery-notes/${id}`, { method: 'DELETE' }),
+  remove: (id: string, version?: number) =>
+    request<void>(`/delivery-notes/${id}`, {
+      method: 'DELETE',
+      headers: ifMatch(version),
+    }),
 };
 
 export const ocrApi = {
@@ -1488,9 +1501,10 @@ export const budgetsApi = {
     }),
 
   /** Actualiza nombre, estado o notas de un presupuesto. */
-  update: (id: string, input: BudgetUpdateInput) =>
+  update: (id: string, input: BudgetUpdateInput, version?: number) =>
     request<BudgetDto>(`/budgets/${id}`, {
       method: 'PATCH',
+      headers: ifMatch(version),
       body: JSON.stringify(input),
     }),
 
@@ -1502,7 +1516,11 @@ export const budgetsApi = {
     }),
 
   /** Borrado lógico del presupuesto. */
-  remove: (id: string) => request<void>(`/budgets/${id}`, { method: 'DELETE' }),
+  remove: (id: string, version?: number) =>
+    request<void>(`/budgets/${id}`, {
+      method: 'DELETE',
+      headers: ifMatch(version),
+    }),
 
   /**
    * Importa un archivo .bc3 (Presto/FIEBDC-3) como nuevo presupuesto.
@@ -1532,14 +1550,22 @@ export const budgetsApi = {
       body: JSON.stringify(input),
     }),
 
-  updateItem: (itemId: string, input: BudgetItemUpdateInput) =>
+  updateItem: (
+    itemId: string,
+    input: BudgetItemUpdateInput,
+    version?: number,
+  ) =>
     request<BudgetItemDto>(`/budget-items/${itemId}`, {
       method: 'PATCH',
+      headers: ifMatch(version),
       body: JSON.stringify(input),
     }),
 
-  removeItem: (itemId: string) =>
-    request<void>(`/budget-items/${itemId}`, { method: 'DELETE' }),
+  removeItem: (itemId: string, version?: number) =>
+    request<void>(`/budget-items/${itemId}`, {
+      method: 'DELETE',
+      headers: ifMatch(version),
+    }),
 };
 
 export interface DashboardResumenDto {

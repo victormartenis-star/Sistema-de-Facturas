@@ -6,7 +6,7 @@ import {
   certificationRectifyBaseSchema,
   type CertificationDto,
 } from '@erp/shared';
-import { pedir, query } from '../api';
+import { ErrorApi, pedir, pedirVersionado, query } from '../api';
 import { ejecutar } from '../comun';
 
 export function registrarCertificaciones(server: McpServer) {
@@ -101,9 +101,19 @@ export function registrarCertificaciones(server: McpServer) {
     },
     async ({ certificationId }) =>
       ejecutar(async () => {
-        await pedir<void>(`/certifications/${certificationId}`, {
-          method: 'DELETE',
-        });
+        await pedirVersionado<void>(
+          `/certifications/${certificationId}`,
+          { method: 'DELETE' },
+          async () => {
+            // La API no expone GET por id: se lee del listado y se filtra.
+            const todas = await pedir<CertificationDto[]>('/certifications');
+            const cert = todas.find((c) => c.id === certificationId);
+            if (!cert)
+              throw new ErrorApi(404, null, 'Certificación no encontrada');
+            return cert.version;
+          },
+          'certificación',
+        );
         return { ok: true, id: certificationId };
       }),
   );

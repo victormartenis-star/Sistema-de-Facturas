@@ -7,8 +7,14 @@ import {
   type BudgetDetailDto,
   type BudgetDto,
 } from '@erp/shared';
-import { pedir } from '../api';
+import { pedir, pedirVersionado } from '../api';
 import { ejecutar } from '../comun';
+
+/** GET del presupuesto solo para conocer su version (If-Match). */
+async function versionDePresupuesto(budgetId: string): Promise<number> {
+  const actual = await pedir<BudgetDto>(`/budgets/${budgetId}`);
+  return actual.version;
+}
 
 export function registrarPresupuestos(server: McpServer) {
   server.registerTool(
@@ -91,10 +97,12 @@ export function registrarPresupuestos(server: McpServer) {
     },
     async ({ budgetId, ...body }) =>
       ejecutar(() =>
-        pedir<BudgetDto>(`/budgets/${budgetId}`, {
-          method: 'PATCH',
-          body: JSON.stringify(body),
-        }),
+        pedirVersionado<BudgetDto>(
+          `/budgets/${budgetId}`,
+          { method: 'PATCH', body: JSON.stringify(body) },
+          () => versionDePresupuesto(budgetId),
+          'presupuesto',
+        ),
       ),
   );
 
@@ -135,7 +143,12 @@ export function registrarPresupuestos(server: McpServer) {
     },
     async ({ budgetId }) =>
       ejecutar(async () => {
-        await pedir<void>(`/budgets/${budgetId}`, { method: 'DELETE' });
+        await pedirVersionado<void>(
+          `/budgets/${budgetId}`,
+          { method: 'DELETE' },
+          () => versionDePresupuesto(budgetId),
+          'presupuesto',
+        );
         return { ok: true, id: budgetId };
       }),
   );

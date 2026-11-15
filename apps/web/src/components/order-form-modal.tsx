@@ -4,7 +4,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import type { ContactDto, ProjectDto, PurchaseOrderDto } from '@erp/shared';
 import { ApiError, purchaseOrdersApi } from '@/lib/api';
-import { useToast } from '@/components/toast';
+import { useAvisarError, useToast } from '@/components/toast';
 import {
   Modal,
   btnGhostCls,
@@ -20,6 +20,8 @@ interface Props {
   contacts: ContactDto[];
   onClose: () => void;
   onSaved: () => void;
+  /** Recarga el pedido y su versión tras un conflicto 409. */
+  onReload?: () => void;
 }
 
 interface FormState {
@@ -63,8 +65,10 @@ export function OrderFormModal({
   contacts,
   onClose,
   onSaved,
+  onReload,
 }: Props) {
   const toast = useToast();
+  const avisarError = useAvisarError();
   const [form, setForm] = useState<FormState>(() => initialState(order));
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
@@ -88,7 +92,7 @@ export function OrderFormModal({
         notes: form.notes || null,
       };
       return order
-        ? purchaseOrdersApi.update(order.id, payload)
+        ? purchaseOrdersApi.update(order.id, payload, order.version)
         : purchaseOrdersApi.create({ ...payload, projectId: form.projectId });
     },
     onSuccess: (saved) => {
@@ -104,7 +108,7 @@ export function OrderFormModal({
         );
         return;
       }
-      toast(e instanceof Error ? e.message : 'Error inesperado', 'error');
+      avisarError(e, onReload);
     },
   });
 
