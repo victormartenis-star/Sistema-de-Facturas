@@ -6,8 +6,8 @@
  * Solo muestra datos que la API devuelve: los campos fiscales vienen del DTO
  * de la entidad (`GET /invoices`, `GET /certifications`), el historial de
  * `GET /audit?entityType&entityId` (admin y gerente) y la integridad de la
- * cadena de `GET /audit/verify-integrity` (solo admin). El estado de la
- * validación XSD de Facturae no se persiste: se indica como no disponible.
+ * cadena de `GET /audit/verify-integrity` (solo admin). La validación XSD de
+ * Facturae se lee de `facturaeXsdStatus` (persistida al generar el XML).
  */
 
 import { useQuery } from '@tanstack/react-query';
@@ -16,21 +16,25 @@ import {
   RECTIFICATION_TYPE_LABELS,
   type AuditAction,
   type AuditLogDto,
+  type FacturaeXsdStatus,
   type RectificationMotive,
   type RectificationType,
 } from '@erp/shared';
 import { auditApi, formatDate } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { textoDeError } from '@/lib/errores';
+import { etiquetaXsd } from '@/lib/trazabilidad';
 
 export interface DatosFiscales {
   /** Etiqueta legible del estado de la entidad. */
   estado: string;
-  /** Referencia a la original si es rectificativa (número o id). */
+  /** Referencia a la original si es rectificativa (nº de factura o "Certificación nº X"). */
   rectificaA: string | null;
   motivo: RectificationMotive | null;
   tipo: RectificationType | null;
   facturaeReasonCode: string | null;
+  /** Validación XSD persistida; null/ausente = no evaluado. */
+  facturaeXsd?: FacturaeXsdStatus | null;
 }
 
 const ACCION: Record<AuditAction, string> = {
@@ -178,7 +182,7 @@ export function TrazabilidadFiscal({
         <Dato etiqueta="Código Facturae" valor={fiscal.facturaeReasonCode} />
       </dl>
       <p className="mt-2 text-xs text-gray-500">
-        Validación XSD Facturae: no disponible (la API no la persiste).
+        Validación XSD Facturae: {etiquetaXsd(fiscal.facturaeXsd)}
       </p>
       <div className="mt-4">
         <p className="mb-2 text-xs font-semibold text-gray-600 uppercase">

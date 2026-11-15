@@ -24,6 +24,7 @@ import {
   phasesApi,
   projectsApi,
 } from '@/lib/api';
+import { useClaveIntento } from '@/lib/clave-intento';
 import { Autorizado } from '@/components/autorizado';
 import { StatusBadge } from '@/components/status-badge';
 import { ConfirmDialog } from '@/components/confirm-dialog';
@@ -562,14 +563,16 @@ export default function ObraDetallePage() {
     },
   });
 
+  const claveCert = useClaveIntento(certModalOpen);
   const createCert = useMutation({
     mutationFn: (v: {
       certDate: string;
       cumulativePct: number;
       retentionPct: number | null;
       notes: string | null;
-    }) => certificationsApi.create({ projectId: id, ...v }),
+    }) => certificationsApi.create({ projectId: id, ...v }, claveCert.actual()),
     onSuccess: () => {
+      claveCert.renovar();
       toast('Certificación creada');
       invalidate();
       setCertModalOpen(false);

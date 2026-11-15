@@ -38,6 +38,8 @@ import {
 import { useAvisarError, useToast } from '@/components/toast';
 import { useListadoPaginado } from '@/lib/use-listado-paginado';
 import { usePermisos } from '@/lib/permisos';
+import { useClaveIntento } from '@/lib/clave-intento';
+import { etiquetaCertificacionOriginal } from '@/lib/trazabilidad';
 import {
   BarraFiltros,
   DataTable,
@@ -117,11 +119,13 @@ function NuevaCertModal({
   const [cumulativePct, setCumulativePct] = useState('');
   const [retentionPct, setRetentionPct] = useState('');
   const [notes, setNotes] = useState('');
+  const clave = useClaveIntento(open);
 
   const mutation = useMutation({
     mutationFn: (input: CertificationCreateInput) =>
-      certificationsApi.create(input),
+      certificationsApi.create(input, clave.actual()),
     onSuccess: () => {
+      clave.renovar();
       toast('Certificación creada');
       setCumulativePct('');
       setRetentionPct('');
@@ -922,8 +926,6 @@ export default function CertificacionesPage() {
   const lastPct = lastCert?.cumulativePct ?? 0;
   const totalCertificado = certs.reduce((s, c) => s + c.periodAmount, 0);
   const totalRetencion = certs.reduce((s, c) => s + c.retentionAmount, 0);
-  const seqDe = (id: string | null) =>
-    certs.find((c) => c.id === id)?.seq ?? null;
 
   const columnas: ColumnaDef<CertificationDto>[] = [
     {
@@ -938,7 +940,7 @@ export default function CertificacionesPage() {
               className="text-[10px] font-medium text-amber-700"
               title={cert.rectificationReason ?? undefined}
             >
-              rectifica nº {seqDe(cert.rectifiesCertificationId) ?? '?'}
+              rectifica nº {cert.rectifiesCertificationSeq ?? '?'}
             </div>
           )}
         </span>
@@ -1140,7 +1142,9 @@ export default function CertificacionesPage() {
                     entityId={cert.id}
                     fiscal={{
                       estado: CERT_STATUS_LABELS[cert.status],
-                      rectificaA: cert.rectifiesCertificationId,
+                      rectificaA: etiquetaCertificacionOriginal(
+                        cert.rectifiesCertificationSeq,
+                      ),
                       motivo: cert.rectificationMotive,
                       tipo: cert.rectificationType,
                       facturaeReasonCode: cert.facturaeReasonCode,

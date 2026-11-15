@@ -194,6 +194,8 @@ export interface CertificationDto {
   status: CertStatus;
   invoiceId: string | null;
   rectifiesCertificationId: string | null;
+  /** Nº (seq) de la certificación original que corrige; null si no es rectificativa. */
+  rectifiesCertificationSeq: number | null;
   rectificationReason: string | null;
   rectificationMotive: RectificationMotive | null;
   rectificationType: RectificationType | null;

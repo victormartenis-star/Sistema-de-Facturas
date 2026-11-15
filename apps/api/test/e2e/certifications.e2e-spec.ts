@@ -306,8 +306,22 @@ describe('Certifications (integración) — creación, facturación y RBAC por o
       expect(rect.body.status).toBe('borrador');
       expect(rect.body.seq).toBe(2);
       expect(rect.body.rectifiesCertificationId).toBe(c1.id);
+      // El DTO trae el número (seq) de la original, no solo su id.
+      expect(rect.body.rectifiesCertificationSeq).toBe(1);
       expect(rect.body.periodAmount).toBe(-5000);
       expect(rect.body.cumulativeAmount).toBe(35_000);
+
+      const lista = await authed(app, token)
+        .get(`/certifications?projectId=${project.id}`)
+        .expect(200);
+      const filas = lista.body as Array<{
+        seq: number;
+        rectifiesCertificationSeq: number | null;
+      }>;
+      expect(
+        filas.find((c) => c.seq === 1)?.rectifiesCertificationSeq,
+      ).toBeNull();
+      expect(filas.find((c) => c.seq === 2)?.rectifiesCertificationSeq).toBe(1);
 
       const facturada = await authed(app, token)
         .post(`/certifications/${rect.body.id}/facturar`)

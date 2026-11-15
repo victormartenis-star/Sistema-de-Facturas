@@ -1450,6 +1450,8 @@ export class InvoicesService {
           })),
         verifactuStatus:
           invoice.verifactuStatus as InvoiceDto['verifactuStatus'],
+        facturaeXsdStatus:
+          invoice.facturaeXsdStatus as InvoiceDto['facturaeXsdStatus'],
         createdAt: invoice.createdAt.toISOString(),
         updatedAt: invoice.updatedAt.toISOString(),
       };

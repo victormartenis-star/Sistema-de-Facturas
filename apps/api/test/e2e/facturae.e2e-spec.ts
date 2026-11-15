@@ -91,6 +91,40 @@ describe('Facturae / VeriFactu (integración) — huella persistida', () => {
     expect(row.verifactuGeneratedAt).not.toBeNull();
   });
 
+  it('persiste la validación XSD: null antes de generar, "valido" después y expuesto en el DTO', async () => {
+    const admin = await registerUser(app, { email: 'admin@test.dintel.es' });
+    const contact = await createContact(app, admin.accessToken, {
+      kind: 'cliente',
+      taxId: 'B33333333',
+    });
+    const invoiceId = await createVentaInvoice(admin.accessToken, contact.id);
+
+    const antes = await authed(app, admin.accessToken)
+      .get(`/invoices/${invoiceId}`)
+      .expect(200);
+    expect(
+      (antes.body as { facturaeXsdStatus: string | null }).facturaeXsdStatus,
+    ).toBeNull();
+
+    await authed(app, admin.accessToken)
+      .get(`/invoices/${invoiceId}/facturae`)
+      .expect(200);
+
+    const [row] = await getDb()
+      .select()
+      .from(invoices)
+      .where(eq(invoices.id, invoiceId));
+    expect(row.facturaeXsdStatus).toBe('valido');
+    expect(row.facturaeXsdErrors).toBeNull();
+
+    const despues = await authed(app, admin.accessToken)
+      .get(`/invoices/${invoiceId}`)
+      .expect(200);
+    expect(
+      (despues.body as { facturaeXsdStatus: string | null }).facturaeXsdStatus,
+    ).toBe('valido');
+  });
+
   it('encadena correctamente: la 2ª factura usa el hash persistido de la 1ª como previousHash', async () => {
     const admin = await registerUser(app, { email: 'admin@test.dintel.es' });
     const contact = await createContact(app, admin.accessToken, {

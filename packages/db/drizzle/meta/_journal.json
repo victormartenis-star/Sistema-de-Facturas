@@ -288,6 +288,13 @@
       "when": 1794752194637,
       "tag": "0040_fase2_indices_listados",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1794758213847,
+      "tag": "0041_facturae_xsd_persistido",
+      "breakpoints": true
     }
   ]
 }

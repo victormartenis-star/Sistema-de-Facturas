@@ -34,6 +34,7 @@ import {
 import { Autorizado } from '@/components/autorizado';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { useAvisarError, useToast } from '@/components/toast';
+import { useClaveIntento } from '@/lib/clave-intento';
 import { InvoiceFormModal } from '@/components/invoice-form-modal';
 import { InvoiceRectifyModal } from '@/components/invoice-rectify-modal';
 import { ReasonDialog } from '@/components/reason-dialog';
@@ -164,6 +165,7 @@ function DetalleFactura({ inv, kind }: { inv: InvoiceDto; kind: InvoiceKind }) {
           motivo: inv.rectificationMotive,
           tipo: inv.rectificationType,
           facturaeReasonCode: inv.facturaeReasonCode,
+          facturaeXsd: inv.facturaeXsdStatus,
         }}
       />
     </div>
@@ -182,6 +184,8 @@ export default function FacturasPage() {
   const [deleteTarget, setDeleteTarget] = useState<InvoiceDto | null>(null);
   const [cancelTarget, setCancelTarget] = useState<InvoiceDto | null>(null);
   const [rectifyTarget, setRectifyTarget] = useState<InvoiceDto | null>(null);
+  const claveAlta = useClaveIntento(modalOpen);
+  const claveRectif = useClaveIntento(rectifyTarget !== null);
 
   const listado = useListadoPaginado({
     clave: 'invoices',
@@ -211,8 +215,9 @@ export default function FacturasPage() {
     mutationFn: (values: InvoiceCreateInput) =>
       editing
         ? invoicesApi.update(editing.id, values, editing.version)
-        : invoicesApi.create(values),
+        : invoicesApi.create(values, claveAlta.actual()),
     onSuccess: () => {
+      claveAlta.renovar();
       toast(editing ? 'Factura actualizada' : 'Borrador de factura creado');
       invalidate();
       setModalOpen(false);
@@ -251,8 +256,9 @@ export default function FacturasPage() {
 
   const rectifyMutation = useMutation({
     mutationFn: ({ id, input }: { id: string; input: InvoiceRectifyInput }) =>
-      invoicesApi.rectify(id, input),
+      invoicesApi.rectify(id, input, claveRectif.actual()),
     onSuccess: (rect) => {
+      claveRectif.renovar();
       toast(
         `Rectificativa ${rect.invoiceNumber} creada en borrador: apruébala para aplicarla`,
       );

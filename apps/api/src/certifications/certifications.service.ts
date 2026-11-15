@@ -37,7 +37,10 @@ import { InvoicesService } from '../invoices/invoices.service';
 
 const UNIQUE_VIOLATION = '23505';
 
-function toDto(row: Certification): CertificationDto {
+function toDto(
+  row: Certification,
+  originalSeq: number | null = null,
+): CertificationDto {
   const cumulative = Number(row.cumulativeAmount);
   const period = Number(row.periodAmount);
   return {
@@ -55,6 +58,9 @@ function toDto(row: Certification): CertificationDto {
     status: row.status as CertificationDto['status'],
     invoiceId: row.invoiceId,
     rectifiesCertificationId: row.rectifiesCertificationId,
+    rectifiesCertificationSeq: row.rectifiesCertificationId
+      ? originalSeq
+      : null,
     rectificationReason: row.rectificationReason,
     rectificationMotive: row.rectificationMotive,
     rectificationType: row.rectificationType,
@@ -72,6 +78,38 @@ export class CertificationsService {
     private readonly invoicesService: InvoicesService,
     private readonly audit: AuditService,
   ) {}
+
+  /** Convierte filas a DTO resolviendo, en una sola consulta, el nº de la certificación original de las rectificativas. */
+  private async toDtos(rows: Certification[]): Promise<CertificationDto[]> {
+    const ids = [
+      ...new Set(
+        rows
+          .map((r) => r.rectifiesCertificationId)
+          .filter((id): id is string => id !== null),
+      ),
+    ];
+    const seqPorId = new Map<string, number>();
+    if (ids.length > 0) {
+      const originales = await this.dbs.db
+        .select({ id: certifications.id, seq: certifications.seq })
+        .from(certifications)
+        .where(
+          and(
+            inArray(certifications.id, ids),
+            eq(certifications.companyId, this.dbs.getCompanyId()),
+          ),
+        );
+      for (const o of originales) seqPorId.set(o.id, o.seq);
+    }
+    return rows.map((r) =>
+      toDto(
+        r,
+        r.rectifiesCertificationId
+          ? (seqPorId.get(r.rectifiesCertificationId) ?? null)
+          : null,
+      ),
+    );
+  }
 
   async list(
     projectId?: string,
@@ -105,7 +143,7 @@ export class CertificationsService {
           asc(certifications.seq),
           asc(certifications.id),
         );
-      return rows.map(toDto);
+      return this.toDtos(rows);
     }
     const [c] = await this.dbs.db
       .select({ n: sql<number>`count(*)::int` })
@@ -123,7 +161,7 @@ export class CertificationsService {
       .limit(pagina.pageSize)
       .offset(calcularOffset(pagina.page, pagina.pageSize));
     return construirPagina(
-      rows.map(toDto),
+      await this.toDtos(rows),
       c?.n ?? 0,
       pagina.page,
       pagina.pageSize,
@@ -212,7 +250,7 @@ export class CertificationsService {
       }
       throw err;
     }
-    return toDto(row);
+    return (await this.toDtos([row]))[0];
   }
 
   /**
@@ -324,7 +362,7 @@ export class CertificationsService {
       }
       throw err;
     }
-    return toDto(row);
+    return (await this.toDtos([row]))[0];
   }
 
   /**
@@ -436,7 +474,7 @@ export class CertificationsService {
       ]);
       return updated;
     });
-    return toDto(row);
+    return (await this.toDtos([row]))[0];
   }
 
   /**
@@ -545,7 +583,7 @@ export class CertificationsService {
       ]);
       return updated;
     });
-    return toDto(row);
+    return (await this.toDtos([row]))[0];
   }
 
   async remove(id: string, versionEsperada?: number): Promise<void> {

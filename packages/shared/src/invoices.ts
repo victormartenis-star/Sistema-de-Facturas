@@ -6,6 +6,10 @@ import {
 } from './facturae-reason';
 import type { VerifactuStatus } from './verifactu';
 
+/** Resultado de validar el Facturae generado contra el XSD oficial (null = no evaluado). */
+export const FACTURAE_XSD_STATUSES = ['valido', 'no_valido'] as const;
+export type FacturaeXsdStatus = (typeof FACTURAE_XSD_STATUSES)[number];
+
 /**
  * Facturas de compra y de venta con:
  * - Imputación analítica por línea (obra + partida + categoría).
@@ -408,6 +412,8 @@ export interface InvoiceDto {
   deliveryNotes: InvoiceDeliveryNoteRef[];
   /** Estado del registro VeriFactu real (Fase 14) — distinto de la huella interna, ver `verifactu.ts`. */
   verifactuStatus: VerifactuStatus;
+  /** Validación XSD del último Facturae generado: null = no evaluado. */
+  facturaeXsdStatus: FacturaeXsdStatus | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -380,6 +380,10 @@ export const invoices = pgTable(
     facturaeReasonCode: varchar('facturae_reason_code', { length: 2 }),
     /** Motivo de anulación (obligatorio fuera de borrador). */
     cancelReason: text('cancel_reason'),
+    /** Resultado de validar el último Facturae generado contra el XSD oficial: 'valido' | 'no_valido'; null = no evaluado. */
+    facturaeXsdStatus: varchar('facturae_xsd_status', { length: 10 }),
+    /** Errores del XSD (uno por línea) cuando `facturaeXsdStatus` es 'no_valido'. */
+    facturaeXsdErrors: text('facturae_xsd_errors'),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()

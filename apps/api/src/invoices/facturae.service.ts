@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
@@ -25,6 +26,7 @@ import {
 import { DbService } from '../db/db.service';
 import { FacturaeSigningService } from './facturae-signing.service';
 import { InvoicesService } from './invoices.service';
+import { validarFacturaeXsd } from './facturae-xsd';
 
 export interface FacturaeFileDto {
   xml: string;
@@ -62,6 +64,8 @@ function sanitizeFileName(value: string): string {
  */
 @Injectable()
 export class FacturaeService {
+  private readonly logger = new Logger(FacturaeService.name);
+
   constructor(
     private readonly dbs: DbService,
     private readonly invoicesService: InvoicesService,
@@ -169,11 +173,39 @@ export class FacturaeService {
     const signed = this.signingService.enabled;
     const xml = signed ? this.signingService.sign(unsignedXml) : unsignedXml;
 
+    await this.persistirValidacionXsd(invoiceId, xml);
+
     return {
       xml,
       fileName: `facturae-${sanitizeFileName(invoice.invoiceNumber)}.xml`,
       signed,
     };
+  }
+
+  /**
+   * Valida el XML entregado contra el XSD oficial y guarda el resultado en la
+   * factura. Si el validador falla por un motivo técnico (no por un XML
+   * inválido) no se bloquea la descarga: el estado queda como estaba. No
+   * incrementa `version`: es un metadato derivado, no un cambio editable.
+   */
+  private async persistirValidacionXsd(
+    invoiceId: string,
+    xml: string,
+  ): Promise<void> {
+    try {
+      const r = await validarFacturaeXsd(xml);
+      await this.dbs.db
+        .update(invoices)
+        .set({
+          facturaeXsdStatus: r.valid ? 'valido' : 'no_valido',
+          facturaeXsdErrors: r.valid ? null : r.errors.join('\n'),
+        })
+        .where(eq(invoices.id, invoiceId));
+    } catch (e) {
+      this.logger.error(
+        `No se pudo validar/persistir el XSD de Facturae de ${invoiceId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
   }
 
   /**
