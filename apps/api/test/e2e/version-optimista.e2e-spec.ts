@@ -260,7 +260,7 @@ describe('Versión optimista (integración) — If-Match', () => {
         .set('If-Match', '"1"')
         .send(e.cuerpo('segundo'))
         .expect(409);
-      expect(conflicto.body).toEqual({
+      expect(conflicto.body).toMatchObject({
         code: 'VERSION_CONFLICT',
         versionActual: 2,
       });
@@ -337,7 +337,10 @@ describe('Versión optimista (integración) — If-Match', () => {
       .set('If-Match', '"1"')
       .send({ notes: 'tarde' })
       .expect(409);
-    expect(res.body).toEqual({ code: 'VERSION_CONFLICT', versionActual: 2 });
+    expect(res.body).toMatchObject({
+      code: 'VERSION_CONFLICT',
+      versionActual: 2,
+    });
   });
 
   it('una acción POST con If-Match desfasado → 409 VERSION_CONFLICT; con el correcto → 201', async () => {
@@ -364,7 +367,10 @@ describe('Versión optimista (integración) — If-Match', () => {
       .post(`/invoices/${f.body.id}/aprobar`)
       .set('If-Match', '"7"')
       .expect(409);
-    expect(mala.body).toEqual({ code: 'VERSION_CONFLICT', versionActual: 1 });
+    expect(mala.body).toMatchObject({
+      code: 'VERSION_CONFLICT',
+      versionActual: 1,
+    });
     await authed(app, token)
       .post(`/invoices/${f.body.id}/aprobar`)
       .set('If-Match', '"1"')

@@ -63,6 +63,26 @@ describe('maskSensitiveData', () => {
     let deep: unknown = { password: 'secreta' };
     for (let i = 0; i < 20; i++) deep = { child: deep };
     expect(() => maskSensitiveData(deep)).not.toThrow();
+    // Pasado el tope no se devuelve el valor original (podría ser un secreto).
+    expect(JSON.stringify(maskSensitiveData(deep))).not.toContain('secreta');
+  });
+
+  it('enmascara certificate y secret a 1, 3 y 7 niveles de anidamiento', () => {
+    const anidar = (n: number, hoja: Record<string, unknown>) => {
+      let o: Record<string, unknown> = hoja;
+      for (let i = 0; i < n; i++) o = { nivel: o };
+      return o;
+    };
+    for (const n of [0, 2, 6]) {
+      const out = JSON.stringify(
+        maskSensitiveData(
+          anidar(n, { certificate: 'PFX-BYTES', secret: 'S3CR3T', ok: 'v' }),
+        ),
+      );
+      expect(out).not.toContain('PFX-BYTES');
+      expect(out).not.toContain('S3CR3T');
+      expect(out).toContain('"ok":"v"');
+    }
   });
 });
 

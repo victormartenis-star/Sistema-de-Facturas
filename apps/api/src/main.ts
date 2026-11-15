@@ -3,9 +3,12 @@ import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { logger } from './common/logging/logger';
+import { PinoNestLogger } from './common/logging/pino-nest-logger';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  app.useLogger(new PinoNestLogger());
 
   // Cabeceras de seguridad estándar (CSP, X-Content-Type-Options,
   // Strict-Transport-Security, X-Frame-Options…). `crossOriginResourcePolicy`
@@ -23,6 +26,7 @@ async function bootstrap() {
 
   app.enableCors({
     origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000',
+    exposedHeaders: ['X-Request-Id'],
   });
 
   const port = Number(process.env.API_PORT ?? 3001);
@@ -30,4 +34,8 @@ async function bootstrap() {
   new Logger('Bootstrap').log(`API escuchando en http://localhost:${port}`);
 }
 
-bootstrap();
+bootstrap().catch((err: unknown) => {
+  // Con bufferLogs un fallo de arranque podría perderse: se escribe siempre.
+  logger.fatal({ err }, 'Fallo de arranque');
+  process.exit(1);
+});

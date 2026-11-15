@@ -63,6 +63,7 @@ export const auditQuerySchema = z.object({
   entityId: z.string().uuid().optional(),
   userId: z.string().uuid().optional(),
   action: z.enum(AUDIT_ACTIONS).optional(),
+  correlationId: z.string().min(1).max(64).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });

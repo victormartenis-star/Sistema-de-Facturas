@@ -20,6 +20,7 @@ export * from './facturae';
 export * from './documents';
 export * from './extractions';
 export * from './investors';
+export * from './errores';
 export * from './logging';
 export * from './metrics';
 export * from './partes-diarios';

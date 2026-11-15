@@ -1,6 +1,6 @@
 /**
  * Utilidades puras para el logging estructurado de la API (ver
- * `apps/api/src/common/interceptors/logging.interceptor.ts`) y para el
+ * `apps/api/src/common/logging/logger.ts`) y para el
  * healthcheck (`apps/api/src/health`). Sin dependencias de Node ni de
  * NestJS: se pueden probar con datos de mentira, sin arrancar nada.
  */
@@ -20,6 +20,14 @@ const SENSITIVE_KEY_FRAGMENTS = [
   'authorization',
   'jwt',
   'secret',
+  'certificate',
+  'certificado',
+  'pfx',
+  'p12',
+  'privatekey',
+  'clave',
+  'apikey',
+  'cookie',
   'iban',
   'cardnumber',
   'cvv',
@@ -28,7 +36,8 @@ const SENSITIVE_KEY_FRAGMENTS = [
 
 const REDACTED = '***REDACTED***';
 /** Evita recorrer estructuras absurdamente anidadas o con ciclos. */
-const MAX_DEPTH = 6;
+const MAX_DEPTH = 10;
+const TRUNCATED = '[Truncado]';
 
 function isSensitiveKey(key: string): boolean {
   const normalized = key.toLowerCase().replace(/[_-]/g, '');
@@ -45,7 +54,8 @@ function isSensitiveKey(key: string): boolean {
  * cual.
  */
 export function maskSensitiveData(value: unknown, depth = 0): unknown {
-  if (depth >= MAX_DEPTH) return value;
+  // Pasado el tope no se devuelve el valor: podría contener secretos.
+  if (depth >= MAX_DEPTH) return TRUNCATED;
   if (Array.isArray(value)) {
     return value.map((item) => maskSensitiveData(item, depth + 1));
   }
@@ -64,13 +74,15 @@ export function maskSensitiveData(value: unknown, depth = 0): unknown {
 /** Línea de log estructurada de una petición HTTP completada. */
 export interface RequestLogEntry {
   timestamp: string;
-  requestId: string;
+  correlationId: string;
   method: string;
-  path: string;
+  /** Patrón de ruta (`/invoices/:id`), sin query string ni ids; `unmatched` si no hubo ruta. */
+  route: string;
   statusCode: number;
   latencyMs: number;
   /** `null` en rutas públicas o si el usuario no llegó a autenticarse. */
   userId: string | null;
+  companyId: string | null;
 }
 
 // ─── Healthcheck ──────────────────────────────────────────────────────────

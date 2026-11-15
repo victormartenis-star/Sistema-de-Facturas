@@ -90,3 +90,19 @@ export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
  * usan para TODAS sus lecturas y escrituras (el pool no ve filas sin confirmar).
  */
 export type DbOrTx = Db | Tx;
+
+/** Estado del pool de `pg` (para `/health/ready`); `null` si aún no se creó. */
+export function getPoolStats(): {
+  totalCount: number;
+  idleCount: number;
+  waitingCount: number;
+  max: number;
+} | null {
+  if (!pool) return null;
+  return {
+    totalCount: pool.totalCount,
+    idleCount: pool.idleCount,
+    waitingCount: pool.waitingCount,
+    max: pool.options.max ?? 10,
+  };
+}

@@ -33,11 +33,18 @@ export class ErrorApi extends Error {
 
 /** Extrae el texto de error de una respuesta de Nest. */
 function mensajeDe(cuerpo: unknown, estado: number): string {
-  if (cuerpo && typeof cuerpo === 'object' && 'message' in cuerpo) {
-    const m = (cuerpo as { message: unknown }).message;
-    // Nest devuelve string o string[] segun sea excepcion simple o de validacion.
-    if (Array.isArray(m)) return m.join('; ');
-    if (typeof m === 'string') return m;
+  if (cuerpo && typeof cuerpo === 'object') {
+    const c = cuerpo as {
+      detail?: unknown;
+      message?: unknown;
+      correlationId?: unknown;
+    };
+    const ref =
+      typeof c.correlationId === 'string' ? ` (ref: ${c.correlationId})` : '';
+    // RFC 7807: `detail`; `message` se conserva por compatibilidad (string o string[]).
+    if (typeof c.detail === 'string') return c.detail + ref;
+    if (Array.isArray(c.message)) return c.message.join('; ') + ref;
+    if (typeof c.message === 'string') return c.message + ref;
   }
   return `La API respondio ${estado}`;
 }
@@ -133,7 +140,9 @@ export async function pedirVersionado<T>(
     if (
       e instanceof ErrorApi &&
       e.estado === 409 &&
-      (e.cuerpo as { code?: string } | null)?.code === 'VERSION_CONFLICT'
+      ((e.cuerpo as { errorCode?: string; code?: string } | null)?.errorCode ===
+        'VERSION_CONFLICT' ||
+        (e.cuerpo as { code?: string } | null)?.code === 'VERSION_CONFLICT')
     ) {
       throw new ErrorApi(
         409,

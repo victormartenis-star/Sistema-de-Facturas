@@ -1801,14 +1801,13 @@ export const exportsApi = {
         : {},
     });
     if (!res.ok) {
-      let message = `Error ${res.status}`;
+      let body: unknown = null;
       try {
-        const body = await res.json();
-        message = body.message ?? message;
+        body = await res.json();
       } catch {
         // sin cuerpo JSON
       }
-      throw new ApiError(message, res.status, []);
+      throw errorDeRespuesta(res.status, body);
     }
     const nombre =
       /filename="([^"]+)"/.exec(

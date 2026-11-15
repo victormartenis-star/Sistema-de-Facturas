@@ -18,3 +18,4 @@ process.env.NODE_ENV = 'test';
 // propio bajo `storage/` (ya en `.gitignore`) para que `documents.e2e-spec.ts`
 // no mezcle sus ficheros con los del `storage/` de desarrollo.
 process.env.STORAGE_DIR = resolve(__dirname, '../../../../storage/test');
+process.env.LOG_LEVEL = 'silent';

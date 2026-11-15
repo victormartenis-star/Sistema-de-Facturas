@@ -4,6 +4,8 @@
  * Vive aparte de `api.ts` para poder probarlo sin `fetch` ni `localStorage`.
  */
 
+import { MENSAJE_CONFLICTO_VERSION } from '@erp/shared';
+
 export interface FieldError {
   field: string;
   message: string;
@@ -18,13 +20,14 @@ export class ApiError extends Error {
     public readonly code?: string,
     /** Versión vigente en servidor cuando hay `VERSION_CONFLICT`. */
     public readonly versionActual?: number,
+    /** Id de correlación (cabecera X-Request-Id) para citarlo a soporte. */
+    public readonly correlationId?: string,
   ) {
     super(message);
   }
 }
 
-export const MENSAJE_CONFLICTO_VERSION =
-  'Los datos han sido modificados por otro usuario. Recarga para ver la última versión.';
+export { MENSAJE_CONFLICTO_VERSION };
 
 /** Construye el `ApiError` a partir del estado y el cuerpo ya parseado (o nulo). */
 export function errorDeRespuesta(
@@ -37,20 +40,32 @@ export function errorDeRespuesta(
     status === 409 &&
     !!body &&
     typeof body === 'object' &&
-    (body as Record<string, unknown>).code === 'VERSION_CONFLICT';
+    ((body as Record<string, unknown>).errorCode === 'VERSION_CONFLICT' ||
+      (body as Record<string, unknown>).code === 'VERSION_CONFLICT');
   if (conflicto) message = MENSAJE_CONFLICTO_VERSION;
   let fieldErrors: FieldError[] = [];
   let code: string | undefined;
   let versionActual: number | undefined;
+  let correlationId: string | undefined;
   if (body && typeof body === 'object') {
     const b = body as Record<string, unknown>;
-    if (Array.isArray(b.message)) message = b.message.join(', ');
+    if (typeof b.detail === 'string') message = b.detail;
+    else if (Array.isArray(b.message)) message = b.message.join(', ');
     else if (typeof b.message === 'string') message = b.message;
     if (Array.isArray(b.errors)) fieldErrors = b.errors as FieldError[];
-    if (typeof b.code === 'string') code = b.code;
+    if (typeof b.errorCode === 'string') code = b.errorCode;
+    else if (typeof b.code === 'string') code = b.code;
+    if (typeof b.correlationId === 'string') correlationId = b.correlationId;
     if (typeof b.versionActual === 'number') versionActual = b.versionActual;
   }
-  return new ApiError(message, status, fieldErrors, code, versionActual);
+  return new ApiError(
+    message,
+    status,
+    fieldErrors,
+    code,
+    versionActual,
+    correlationId,
+  );
 }
 
 /** Solo el 409 con código `VERSION_CONFLICT`; los 409 de estado no cuentan. */

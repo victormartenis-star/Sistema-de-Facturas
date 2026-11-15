@@ -1,5 +1,5 @@
-import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
-import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
@@ -14,8 +14,6 @@ import { ComparativosModule } from './modules/comparativos/comparativos.module';
 import { ContactsModule } from './contacts/contacts.module';
 import { CostControlModule } from './cost-control/cost-control.module';
 import { ExportsModule } from './exports/exports.module';
-import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
-import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { CommonModule } from './common/common.module';
 import { DbModule } from './db/db.module';
 import { DeliveryNotesModule } from './delivery-notes/delivery-notes.module';
@@ -106,17 +104,6 @@ import { InformesModule } from './modules/informes/informes.module';
     SearchModule,
     InformesModule,
   ],
-  providers: [
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
-    { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
-  ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer): void {
-    // Middleware, no interceptor: debe correr antes que los guards para que
-    // el ID de correlación quede fijado incluso en peticiones que un guard
-    // rechaza (401 de JwtAuthGuard, 429 de ThrottlerGuard). Ver el propio
-    // fichero para el porqué completo.
-    consumer.apply(RequestIdMiddleware).forRoutes('*');
-  }
-}
+export class AppModule {}
