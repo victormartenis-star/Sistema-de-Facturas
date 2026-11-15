@@ -1,0 +1,2 @@
+ALTER TABLE "audit_anchors" ADD COLUMN "firma" char(64);--> statement-breakpoint
+ALTER TABLE "audit_anchors" ADD CONSTRAINT "audit_anchors_firma_check" CHECK ("audit_anchors"."firma" IS NULL OR "audit_anchors"."firma" ~ '^[0-9a-f]{64}$');

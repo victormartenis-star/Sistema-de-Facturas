@@ -112,14 +112,15 @@ describe('Auditoría (integración) — anclas diarias de la cadena', () => {
     await anclaje.anclarAhora();
     const r = await verificar();
     expect(r.integra).toBe(true);
-    expect(r.anclas).toBe(1);
+    expect(r.anclas).toHaveLength(1);
   });
 
   it('sin anclas el informe sigue siendo íntegro con anclas: 0', async () => {
     await sembrar(2);
     const r = await verificar();
     expect(r.integra).toBe(true);
-    expect(r.anclas).toBe(0);
+    expect(r.anclas).toHaveLength(0);
+    expect(r.estadoSincronizacion).toBe('sin_anclas');
   });
 
   it('reescritura coherente de la cadena tras el ancla -> ANCLA_NO_COINCIDE', async () => {

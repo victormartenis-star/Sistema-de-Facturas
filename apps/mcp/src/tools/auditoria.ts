@@ -19,6 +19,9 @@ export function registrarAuditoria(server: McpServer) {
         'Recorre la cadena hash del registro de auditoría de la empresa y ' +
         'dice si es íntegra. Devuelve `integra`; si no lo es, también ' +
         '`primerPuntoRoto` con la secuencia, el motivo y el detalle. ' +
+        'Incluye `firmaExterna`: estado de la firma HMAC de la última ancla ' +
+        '(`valida`, `invalida`, `sin_clave` o `sin_anclas`), fecha de la ' +
+        'última validación exitosa y estado de sincronización. ' +
         'Requiere un token con rol admin (otros roles reciben 403).',
       inputSchema: {},
       annotations: { readOnlyHint: true },
@@ -28,9 +31,17 @@ export function registrarAuditoria(server: McpServer) {
         const r = await pedir<AuditIntegrityReportDto>(
           '/audit/verify-integrity',
         );
+        const ultima = r.anclas[0];
+        const firmaExterna = {
+          estado: ultima ? ultima.firma : ('sin_anclas' as const),
+          ultimaAnclaFecha: ultima ? ultima.fecha : null,
+          ultimaValidacionExitosa: r.ultimaAnclaValidada?.fecha ?? null,
+          estadoSincronizacion: r.estadoSincronizacion,
+        };
         if (r.integra) {
           return {
             integra: true,
+            firmaExterna,
             entradasVerificadas: r.entradasVerificadas,
             ultimaSecuencia: r.ultimaSecuencia,
             verificadoEn: r.verificadoEn,
@@ -38,6 +49,7 @@ export function registrarAuditoria(server: McpServer) {
         }
         return {
           integra: false,
+          firmaExterna,
           entradasVerificadas: r.entradasVerificadas,
           verificadoEn: r.verificadoEn,
           primerPuntoRoto: r.primerPuntoRoto

@@ -109,6 +109,34 @@ export interface AuditIntegrityBreakDto {
   encontrado: string | null;
 }
 
+export const AUDIT_FIRMA_ESTADOS = ['valida', 'invalida', 'sin_clave'] as const;
+/** `sin_clave`: no hay `AUDIT_ANCHOR_KEY` para verificar, o el ancla no tiene firma. */
+export type AuditFirmaEstado = (typeof AUDIT_FIRMA_ESTADOS)[number];
+
+export const AUDIT_SINCRONIZACIONES = [
+  'sincronizada',
+  'atrasada',
+  'sin_anclas',
+] as const;
+export type AuditSincronizacion = (typeof AUDIT_SINCRONIZACIONES)[number];
+
+export interface AuditAnclaDto {
+  /** Día UTC (YYYY-MM-DD). */
+  fecha: string;
+  sequenceNumber: number;
+  entryHash: string;
+  firma: AuditFirmaEstado;
+}
+
+/** Ancla tal como se firma y se exporta: lo mínimo para verificarla sin BD. */
+export interface AuditAnclaFirmable {
+  companyId: string;
+  anchorDate: string;
+  sequenceNumber: number;
+  entryHash: string;
+  hashVersion: number;
+}
+
 /** Respuesta de `GET /audit/verify-integrity` (siempre HTTP 200). */
 export interface AuditIntegrityReportDto {
   companyId: string;
@@ -119,6 +147,9 @@ export interface AuditIntegrityReportDto {
   verificadoEn: string;
   duracionMs: number;
   primerPuntoRoto: AuditIntegrityBreakDto | null;
-  /** Anclas diarias comprobadas contra la cadena. */
-  anclas: number;
+  /** Anclas diarias comprobadas contra la cadena, de la más reciente a la más antigua. */
+  anclas: AuditAnclaDto[];
+  /** Última ancla cuya firma HMAC es válida (null si ninguna). */
+  ultimaAnclaValidada: { fecha: string; entryHash: string } | null;
+  estadoSincronizacion: AuditSincronizacion;
 }

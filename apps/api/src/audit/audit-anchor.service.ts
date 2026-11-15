@@ -1,7 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { appendFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { and, desc, eq, lt } from 'drizzle-orm';
 import { auditAnchors, auditChainHeads, auditLog, getDb } from '@erp/db';
+import { AUDIT_HASH_VERSION } from '@erp/shared';
+import type { AuditAnclaFirmable } from '@erp/shared';
+import { claveAnclaje, firmarAncla } from './audit-firma-ancla';
 
 const DIA_MS = 24 * 60 * 60 * 1000;
 
@@ -24,9 +29,16 @@ export interface ResultadoAnclaje {
  * de ese día. Las anclas son inmutables (triggers de la migración 0042) y
  * `AuditIntegrityService` las contrasta con la cadena.
  *
- * LIMITACIÓN: las anclas viven en la misma base de datos. Quien pueda hacer
- * DDL y reescriba cadena y anclas a la vez no se detecta; el anclaje externo
- * (sellado de tiempo, almacenamiento WORM) queda fuera de alcance.
+ * Anclaje externo firmado: con `AUDIT_ANCHOR_KEY` (mín. 32 caracteres) cada
+ * ancla se firma con HMAC-SHA256 (columna `firma`). Sin clave, `firma` queda
+ * null (estado `sin_clave`); nunca se inventa una clave. Si
+ * `AUDIT_ANCHOR_EXPORT_DIR` está definida, tras insertar el ancla se añade una
+ * línea JSON (JSON Lines) a `audit-anclas-<empresa>.jsonl` en ese directorio.
+ *
+ * SIMULACIÓN (no es WORM real): el fichero es append-only solo por convención
+ * del sistema de ficheros (`flag: 'a'`), no por hardware, y la firma es un
+ * HMAC con clave simétrica en el entorno: quien la posea puede fabricar anclas
+ * válidas. Un fallo de exportación se registra pero NO impide anclar.
  */
 @Injectable()
 export class AuditAnchorService {
@@ -56,6 +68,15 @@ export class AuditAnchorService {
     }
     const limite = new Date(Date.parse(`${fecha}T00:00:00.000Z`) + DIA_MS);
     const resultado: ResultadoAnclaje = { fecha, creadas: 0, existentes: 0 };
+    const nuevas: Array<AuditAnclaFirmable & { firma: string | null }> = [];
+    let clave: string | null = null;
+    try {
+      clave = claveAnclaje();
+    } catch (e) {
+      this.logger.error(
+        `Clave de anclaje no válida, anclas sin firma: ${String(e)}`,
+      );
+    }
 
     await getDb().transaction(async (tx) => {
       // Bloqueo compartido de las cabeceras: lectura coherente sin escrituras
@@ -93,21 +114,62 @@ export class AuditAnchorService {
           .orderBy(desc(auditLog.sequenceNumber))
           .limit(1);
         if (!ultima?.entryHash) continue;
+        const base: AuditAnclaFirmable = {
+          companyId,
+          anchorDate: fecha,
+          sequenceNumber: ultima.sequenceNumber,
+          entryHash: ultima.entryHash,
+          hashVersion: AUDIT_HASH_VERSION,
+        };
+        const firma = clave ? firmarAncla(base, clave) : null;
         const insertadas = await tx
           .insert(auditAnchors)
           .values({
             companyId,
             anchorDate: fecha,
-            sequenceNumber: ultima.sequenceNumber,
-            entryHash: ultima.entryHash,
+            sequenceNumber: base.sequenceNumber,
+            entryHash: base.entryHash,
+            firma,
           })
           .onConflictDoNothing()
           .returning({ id: auditAnchors.id });
-        if (insertadas.length > 0) resultado.creadas++;
+        if (insertadas.length > 0) {
+          resultado.creadas++;
+          nuevas.push({ ...base, firma });
+        }
       }
     });
 
+    await this.exportar(nuevas);
+
     this.logger.log(JSON.stringify({ msg: 'audit.anchor.done', ...resultado }));
     return resultado;
+  }
+
+  /** Añade cada ancla como línea JSON al fichero de su empresa; nunca lanza. */
+  private async exportar(
+    anclas: Array<AuditAnclaFirmable & { firma: string | null }>,
+  ): Promise<void> {
+    const dir = process.env.AUDIT_ANCHOR_EXPORT_DIR;
+    if (!dir) return;
+    for (const ancla of anclas) {
+      try {
+        await appendFile(
+          join(dir, `audit-anclas-${ancla.companyId}.jsonl`),
+          `${JSON.stringify(ancla)}
+`,
+          { flag: 'a', encoding: 'utf8' },
+        );
+      } catch (e) {
+        this.logger.error(
+          JSON.stringify({
+            msg: 'audit.anchor.export.failed',
+            companyId: ancla.companyId,
+            anchorDate: ancla.anchorDate,
+            error: String(e),
+          }),
+        );
+      }
+    }
   }
 }

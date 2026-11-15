@@ -31,6 +31,19 @@ function respuestaJson(cuerpo: unknown, estado = 200): Response {
   });
 }
 
+const EXTERNA_OK = {
+  anclas: [
+    {
+      fecha: '2026-11-15',
+      sequenceNumber: 5,
+      entryHash: 'h5',
+      firma: 'valida',
+    },
+  ],
+  ultimaAnclaValidada: { fecha: '2026-11-15', entryHash: 'h5' },
+  estadoSincronizacion: 'sincronizada',
+};
+
 describe('verify_audit_integrity', () => {
   const fetchMock = vi.fn();
 
@@ -50,6 +63,7 @@ describe('verify_audit_integrity', () => {
         ultimaSecuencia: 3,
         verificadoEn: '2026-11-15T10:00:00.000Z',
         primerPuntoRoto: null,
+        ...EXTERNA_OK,
       }),
     );
     await obtenerManejador()();
@@ -70,12 +84,19 @@ describe('verify_audit_integrity', () => {
         ultimaSecuencia: 5,
         verificadoEn: '2026-11-15T10:00:00.000Z',
         primerPuntoRoto: null,
+        ...EXTERNA_OK,
       }),
     );
     const r = await obtenerManejador()();
     expect(r.isError).toBeUndefined();
     const datos = JSON.parse(r.content[0].text);
     expect(datos).toMatchObject({ integra: true, entradasVerificadas: 5 });
+    expect(datos.firmaExterna).toEqual({
+      estado: 'valida',
+      ultimaAnclaFecha: '2026-11-15',
+      ultimaValidacionExitosa: '2026-11-15',
+      estadoSincronizacion: 'sincronizada',
+    });
   });
 
   it('cadena rota: devuelve primerPuntoRoto con motivo', async () => {
@@ -92,6 +113,7 @@ describe('verify_audit_integrity', () => {
           esperado: 'aaa',
           encontrado: 'bbb',
         },
+        ...EXTERNA_OK,
       }),
     );
     const r = await obtenerManejador()();
@@ -101,6 +123,58 @@ describe('verify_audit_integrity', () => {
       secuencia: 2,
       motivo: 'hash_no_coincide',
     });
+  });
+
+  it('firma externa inválida: no hay validación exitosa', async () => {
+    fetchMock.mockResolvedValue(
+      respuestaJson({
+        integra: true,
+        entradasVerificadas: 5,
+        ultimaSecuencia: 5,
+        verificadoEn: '2026-11-15T10:00:00.000Z',
+        primerPuntoRoto: null,
+        anclas: [
+          {
+            fecha: '2026-11-15',
+            sequenceNumber: 5,
+            entryHash: 'h5',
+            firma: 'invalida',
+          },
+        ],
+        ultimaAnclaValidada: null,
+        estadoSincronizacion: 'atrasada',
+      }),
+    );
+    const datos = JSON.parse((await obtenerManejador()()).content[0].text);
+    expect(datos.firmaExterna).toMatchObject({
+      estado: 'invalida',
+      ultimaValidacionExitosa: null,
+      estadoSincronizacion: 'atrasada',
+    });
+  });
+
+  it('sin clave: estado sin_clave', async () => {
+    fetchMock.mockResolvedValue(
+      respuestaJson({
+        integra: true,
+        entradasVerificadas: 5,
+        ultimaSecuencia: 5,
+        verificadoEn: '2026-11-15T10:00:00.000Z',
+        primerPuntoRoto: null,
+        anclas: [
+          {
+            fecha: '2026-11-15',
+            sequenceNumber: 5,
+            entryHash: 'h5',
+            firma: 'sin_clave',
+          },
+        ],
+        ultimaAnclaValidada: null,
+        estadoSincronizacion: 'atrasada',
+      }),
+    );
+    const datos = JSON.parse((await obtenerManejador()()).content[0].text);
+    expect(datos.firmaExterna.estado).toBe('sin_clave');
   });
 
   it('error RFC 7807: devuelve un mensaje con la ref', async () => {

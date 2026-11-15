@@ -9,12 +9,17 @@ import {
 import {
   AUDIT_GENESIS_HASH,
   AUDIT_HASH_VERSION,
+  AuditAnclaDto,
   AuditIntegrityBreakDto,
   AuditIntegrityMotivo,
   AuditIntegrityReportDto,
+  AuditSincronizacion,
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
 import { calcularHashAuditoria, entradaDeFila } from './audit-chain';
+import { claveAnclaje, verificarFirmaAncla } from './audit-firma-ancla';
+
+const DIA_MS = 24 * 60 * 60 * 1000;
 
 const LOTE_VERIFICACION = 2000;
 
@@ -213,10 +218,50 @@ export class AuditIntegrityService {
           }
         }
 
-        return { roto, verificadas, hashPrevio, anclas: anclas.length };
+        return { roto, verificadas, hashPrevio, anclas };
       },
       { isolationLevel: 'repeatable read', accessMode: 'read only' },
     );
+
+    let clave: string | null = null;
+    try {
+      clave = claveAnclaje();
+    } catch (e) {
+      this.logger.error(`Clave de anclaje no válida: ${String(e)}`);
+    }
+    const anclasDto: AuditAnclaDto[] = informe.anclas
+      .map((a) => ({
+        fecha: a.anchorDate,
+        sequenceNumber: a.sequenceNumber,
+        entryHash: a.entryHash,
+        firma:
+          !clave || !a.firma
+            ? ('sin_clave' as const)
+            : verificarFirmaAncla(
+                  {
+                    companyId: a.companyId,
+                    anchorDate: a.anchorDate,
+                    sequenceNumber: a.sequenceNumber,
+                    entryHash: a.entryHash,
+                    hashVersion: AUDIT_HASH_VERSION,
+                    firma: a.firma,
+                  },
+                  clave,
+                )
+              ? ('valida' as const)
+              : ('invalida' as const),
+      }))
+      .sort((x, y) => (x.fecha < y.fecha ? 1 : x.fecha > y.fecha ? -1 : 0));
+    const valida = anclasDto.find((a) => a.firma === 'valida');
+    const ayer = new Date(Date.now() - DIA_MS).toISOString().slice(0, 10);
+    // Sincronizada: la última ancla es de ayer u hoy Y su firma es válida.
+    // Cualquier otro caso con anclas (vieja, sin firma o inválida) es atrasada.
+    const estadoSincronizacion: AuditSincronizacion =
+      anclasDto.length === 0
+        ? 'sin_anclas'
+        : anclasDto[0].fecha >= ayer && anclasDto[0].firma === 'valida'
+          ? 'sincronizada'
+          : 'atrasada';
 
     const resultado: AuditIntegrityReportDto = {
       companyId: empresa,
@@ -227,7 +272,11 @@ export class AuditIntegrityService {
       verificadoEn: new Date().toISOString(),
       duracionMs: Date.now() - inicio,
       primerPuntoRoto: informe.roto,
-      anclas: informe.anclas,
+      anclas: anclasDto,
+      ultimaAnclaValidada: valida
+        ? { fecha: valida.fecha, entryHash: valida.entryHash }
+        : null,
+      estadoSincronizacion,
     };
     this.logger.log(
       JSON.stringify({

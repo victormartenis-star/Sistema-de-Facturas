@@ -302,6 +302,13 @@
       "when": 1794760067418,
       "tag": "0042_fase2_audit_anclas",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1794762907370,
+      "tag": "0043_audit_anclas_firma",
+      "breakpoints": true
     }
   ]
 }

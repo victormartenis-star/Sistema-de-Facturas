@@ -1243,11 +1243,17 @@ export const auditAnchors = pgTable(
     anchorDate: date('anchor_date').notNull(),
     sequenceNumber: bigint('sequence_number', { mode: 'number' }).notNull(),
     entryHash: char('entry_hash', { length: 64 }).notNull(),
+    /** HMAC-SHA256 hex del ancla (`AUDIT_ANCHOR_KEY`); null si no había clave. */
+    firma: char('firma', { length: 64 }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
   (t) => [
+    check(
+      'audit_anchors_firma_check',
+      sql`${t.firma} IS NULL OR ${t.firma} ~ '^[0-9a-f]{64}$'`,
+    ),
     unique('audit_anchors_company_date_unique').on(t.companyId, t.anchorDate),
     check('audit_anchors_seq_check', sql`${t.sequenceNumber} >= 1`),
     check('audit_anchors_hash_check', sql`${t.entryHash} ~ '^[0-9a-f]{64}$'`),
