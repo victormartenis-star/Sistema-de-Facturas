@@ -187,6 +187,56 @@ export async function createBudget(
   return res.body as BudgetShape;
 }
 
+/**
+ * Valor de `If-Match` para una versión: `"3"`. Desde que `EXIGIR_VERSION`
+ * vale `true` por defecto, todo PATCH/DELETE de una entidad versionada
+ * (presupuestos, partidas, facturas, albaranes, líneas de certificación,
+ * pedidos…) debe llevarlo.
+ */
+export function ifMatch(version: unknown): string {
+  return `"${String(version)}"`;
+}
+
+/** Lee `version` con un GET a `url` y la devuelve ya como valor de `If-Match`. */
+export async function ifMatchDe(
+  app: INestApplication,
+  token: string,
+  url: string,
+): Promise<string> {
+  const res = await authed(app, token).get(url).expect(200);
+  return ifMatch((res.body as { version: unknown }).version);
+}
+
+/** `If-Match` de una entidad sin GET por id (p. ej. albaranes): se lee de su listado. */
+export async function ifMatchDeLista(
+  app: INestApplication,
+  token: string,
+  listUrl: string,
+  id: string,
+): Promise<string> {
+  const res = await authed(app, token).get(listUrl).expect(200);
+  const fila = (res.body as { id: string; version: unknown }[]).find(
+    (f) => f.id === id,
+  );
+  if (!fila) throw new Error(`${id} no aparece en ${listUrl}`);
+  return ifMatch(fila.version);
+}
+
+/** `If-Match` de una partida (no hay GET por id: se lee del detalle del presupuesto). */
+export async function ifMatchPartida(
+  app: INestApplication,
+  token: string,
+  budgetId: string,
+  itemId: string,
+): Promise<string> {
+  const res = await authed(app, token).get(`/budgets/${budgetId}`).expect(200);
+  const item = (
+    res.body as { items: { id: string; version: unknown }[] }
+  ).items.find((i) => i.id === itemId);
+  if (!item) throw new Error(`Partida ${itemId} no encontrada`);
+  return ifMatch(item.version);
+}
+
 /** `PATCH /budgets/:id` para pasarlo a `activo` (necesario para el BAC del control de costes). */
 export async function activateBudget(
   app: INestApplication,
@@ -195,6 +245,7 @@ export async function activateBudget(
 ): Promise<void> {
   await authed(app, token)
     .patch(`/budgets/${budgetId}`)
+    .set('If-Match', await ifMatchDe(app, token, `/budgets/${budgetId}`))
     .send({ status: 'activo' })
     .expect(200);
 }

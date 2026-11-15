@@ -10,6 +10,7 @@ import {
   createObraUser,
   createProject,
   createTestApp,
+  ifMatch,
   registerUser,
 } from './helpers';
 import { resetTestDb, seedCompany } from './reset-db';
@@ -152,8 +153,9 @@ describe('Certifications (integración) — creación, facturación y RBAC por o
       .expect(201);
 
     // En borrador sí se puede editar.
-    await authed(app, admin.accessToken)
+    const editada = await authed(app, admin.accessToken)
       .patch(`${lines}/${line.body.id}`)
+      .set('If-Match', ifMatch(line.body.version))
       .send({ periodAmount: 410 })
       .expect(200);
 
@@ -178,10 +180,12 @@ describe('Certifications (integración) — creación, facturación y RBAC por o
       .expect(409);
     await authed(app, admin.accessToken)
       .patch(`${lines}/${line.body.id}`)
+      .set('If-Match', ifMatch(editada.body.version))
       .send({ periodAmount: 999 })
       .expect(409);
     await authed(app, admin.accessToken)
       .delete(`${lines}/${line.body.id}`)
+      .set('If-Match', ifMatch(editada.body.version))
       .expect(409);
   });
 

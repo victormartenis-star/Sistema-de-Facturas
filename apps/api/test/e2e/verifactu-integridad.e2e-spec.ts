@@ -7,6 +7,7 @@ import {
   createContact,
   createProject,
   createTestApp,
+  ifMatchDe,
   registerUser,
 } from './helpers';
 import { resetTestDb, seedCompany } from './reset-db';
@@ -91,7 +92,10 @@ describe('VeriFactu: integridad de la cadena (integración)', () => {
     await descargar(env, v2).expect(200);
     const antes = await fila(v2);
     expect(antes.verifactuPreviousHash).toBe(VERIFACTU_GENESIS_HASH);
-    await authed(app, env.token).delete(`/invoices/${borrador}`).expect(204);
+    await authed(app, env.token)
+      .delete(`/invoices/${borrador}`)
+      .set('If-Match', await ifMatchDe(app, env.token, `/invoices/${borrador}`))
+      .expect(204);
     await descargar(env, v2).expect(200);
     const despues = await fila(v2);
     expect(despues.verifactuHash).toBe(antes.verifactuHash);
@@ -150,6 +154,7 @@ describe('VeriFactu: integridad de la cadena (integración)', () => {
       .where(eq(invoices.id, borrador));
     await authed(app, env.token)
       .patch(`/invoices/${borrador}`)
+      .set('If-Match', await ifMatchDe(app, env.token, `/invoices/${borrador}`))
       .send({ notes: 'cambio' })
       .expect(200);
     const r = await fila(borrador);

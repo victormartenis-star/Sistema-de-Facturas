@@ -9,6 +9,7 @@ import {
   createObraUser,
   createProject,
   createTestApp,
+  ifMatchDe,
   registerUser,
 } from './helpers';
 import { resetTestDb, seedCompany } from './reset-db';
@@ -790,6 +791,7 @@ describe('Facturas rectificativas y anulación (integración)', () => {
       expect(ok.body.rectificationType).toBeNull();
       await authed(app, token)
         .patch(`/invoices/${ok.body.id}`)
+        .set('If-Match', await ifMatchDe(app, token, `/invoices/${ok.body.id}`))
         .send({ rectificationMotive: 'R1' })
         .expect(400);
     });

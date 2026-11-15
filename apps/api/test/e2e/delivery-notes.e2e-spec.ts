@@ -9,6 +9,7 @@ import {
   createProject,
   createTestApp,
   createUserWithRole,
+  ifMatchDeLista,
   registerUser,
 } from './helpers';
 import { resetTestDb, seedCompany } from './reset-db';
@@ -68,6 +69,10 @@ describe('Delivery Notes (integración) — CRUD de albaranes', () => {
 
     const updateRes = await authed(app, admin.accessToken)
       .patch(`/delivery-notes/${noteId}`)
+      .set(
+        'If-Match',
+        await ifMatchDeLista(app, admin.accessToken, '/delivery-notes', noteId),
+      )
       .send({ amount: 750, description: 'Corrección de importe' })
       .expect(200);
     expect(updateRes.body.amount).toBe(750);
@@ -75,6 +80,10 @@ describe('Delivery Notes (integración) — CRUD de albaranes', () => {
 
     await authed(app, admin.accessToken)
       .delete(`/delivery-notes/${noteId}`)
+      .set(
+        'If-Match',
+        await ifMatchDeLista(app, admin.accessToken, '/delivery-notes', noteId),
+      )
       .expect(204);
     const afterDelete = await authed(app, admin.accessToken)
       .get('/delivery-notes')
@@ -163,12 +172,20 @@ describe('Delivery Notes (integración) — CRUD de albaranes', () => {
 
     const updateRes = await authed(app, admin.accessToken)
       .patch(`/delivery-notes/${noteId}`)
+      .set(
+        'If-Match',
+        await ifMatchDeLista(app, admin.accessToken, '/delivery-notes', noteId),
+      )
       .send({ amount: 600 })
       .expect(409);
     expect(updateRes.body.message).toContain('facturado');
 
     const removeRes = await authed(app, admin.accessToken)
       .delete(`/delivery-notes/${noteId}`)
+      .set(
+        'If-Match',
+        await ifMatchDeLista(app, admin.accessToken, '/delivery-notes', noteId),
+      )
       .expect(409);
     expect(removeRes.body.message).toContain('facturado');
   });
@@ -210,10 +227,28 @@ describe('Delivery Notes (integración) — CRUD de albaranes', () => {
       const { noteId } = await validatedNote(admin.accessToken);
       await authed(app, admin.accessToken)
         .patch(`/delivery-notes/${noteId}`)
+        .set(
+          'If-Match',
+          await ifMatchDeLista(
+            app,
+            admin.accessToken,
+            '/delivery-notes',
+            noteId,
+          ),
+        )
         .send({ amount: 100 })
         .expect(409);
       await authed(app, admin.accessToken)
         .patch(`/delivery-notes/${noteId}`)
+        .set(
+          'If-Match',
+          await ifMatchDeLista(
+            app,
+            admin.accessToken,
+            '/delivery-notes',
+            noteId,
+          ),
+        )
         .send({ description: 'Solo texto' })
         .expect(200);
     });
@@ -223,6 +258,15 @@ describe('Delivery Notes (integración) — CRUD de albaranes', () => {
       const { noteId } = await validatedNote(admin.accessToken);
       await authed(app, admin.accessToken)
         .delete(`/delivery-notes/${noteId}`)
+        .set(
+          'If-Match',
+          await ifMatchDeLista(
+            app,
+            admin.accessToken,
+            '/delivery-notes',
+            noteId,
+          ),
+        )
         .expect(409);
     });
 
@@ -245,6 +289,15 @@ describe('Delivery Notes (integración) — CRUD de albaranes', () => {
 
       await authed(app, admin.accessToken)
         .patch(`/delivery-notes/${noteId}`)
+        .set(
+          'If-Match',
+          await ifMatchDeLista(
+            app,
+            admin.accessToken,
+            '/delivery-notes',
+            noteId,
+          ),
+        )
         .send({ amount: 450 })
         .expect(200);
 
@@ -298,10 +351,28 @@ describe('Delivery Notes (integración) — CRUD de albaranes', () => {
         .expect(409);
       await authed(app, admin.accessToken)
         .patch(`/delivery-notes/${noteId}`)
+        .set(
+          'If-Match',
+          await ifMatchDeLista(
+            app,
+            admin.accessToken,
+            '/delivery-notes',
+            noteId,
+          ),
+        )
         .send({ description: 'Cambio' })
         .expect(409);
       await authed(app, admin.accessToken)
         .delete(`/delivery-notes/${noteId}`)
+        .set(
+          'If-Match',
+          await ifMatchDeLista(
+            app,
+            admin.accessToken,
+            '/delivery-notes',
+            noteId,
+          ),
+        )
         .expect(409);
     });
 
@@ -323,10 +394,30 @@ describe('Delivery Notes (integración) — CRUD de albaranes', () => {
 
       await api
         .patch(`/delivery-notes/${noteId}`)
+        .set(
+          'If-Match',
+          await ifMatchDeLista(
+            app,
+            admin.accessToken,
+            '/delivery-notes',
+            noteId,
+          ),
+        )
         .send({ description: 'Intruso' })
         .expect(404);
       await api.post(`/delivery-notes/${noteId}/validar`).expect(404);
-      await api.delete(`/delivery-notes/${noteId}`).expect(404);
+      await api
+        .delete(`/delivery-notes/${noteId}`)
+        .set(
+          'If-Match',
+          await ifMatchDeLista(
+            app,
+            admin.accessToken,
+            '/delivery-notes',
+            noteId,
+          ),
+        )
+        .expect(404);
     });
 
     /** Pedido de `amount` € con su proveedor, listo para recibir albaranes. */
@@ -403,7 +494,13 @@ describe('Delivery Notes (integración) — CRUD de albaranes', () => {
         .where(eq(purchaseOrders.id, p.orderId));
       expect(await estadoPedido(t, p.orderId)).toBe('servido');
 
-      await authed(app, t).delete(`/delivery-notes/${noteId}`).expect(204);
+      await authed(app, t)
+        .delete(`/delivery-notes/${noteId}`)
+        .set(
+          'If-Match',
+          await ifMatchDeLista(app, t, '/delivery-notes', noteId),
+        )
+        .expect(204);
       expect(await estadoPedido(t, p.orderId)).toBe('emitido');
     });
 
@@ -432,7 +529,14 @@ describe('Delivery Notes (integración) — CRUD de albaranes', () => {
         expect(await estadoPedido(t, p.orderId)).toBe('emitido');
 
         const del = await Promise.all(
-          ids.map((id) => authed(app, t).delete(`/delivery-notes/${id}`)),
+          ids.map(async (id) =>
+            authed(app, t)
+              .delete(`/delivery-notes/${id}`)
+              .set(
+                'If-Match',
+                await ifMatchDeLista(app, t, '/delivery-notes', id),
+              ),
+          ),
         );
         expect(del.map((r) => r.status)).toEqual(ids.map(() => 204));
         expect(await estadoPedido(t, p.orderId)).toBe('emitido');

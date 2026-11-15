@@ -13,6 +13,7 @@ import {
   createObraUser,
   createProject,
   createTestApp,
+  ifMatchDe,
   registerUser,
 } from './helpers';
 import { resetTestDb, seedCompany } from './reset-db';
@@ -128,6 +129,7 @@ describe('Facturas: endurecimiento (integración)', () => {
       const id = await ventaBorrador(token, cliente.id, project.id);
       await authed(app, token)
         .patch(`/invoices/${id}`)
+        .set('If-Match', await ifMatchDe(app, token, `/invoices/${id}`))
         .send({ contactId: ajena.contacto.id })
         .expect(404);
     });
@@ -155,6 +157,7 @@ describe('Facturas: endurecimiento (integración)', () => {
       const id = await ventaBorrador(token, cliente.id, project.id);
       await authed(app, token)
         .patch(`/invoices/${id}`)
+        .set('If-Match', await ifMatchDe(app, token, `/invoices/${id}`))
         .send({
           lines: [{ description: 'X', baseAmount: 5, projectId: a.obra.id }],
         })
@@ -199,9 +202,13 @@ describe('Facturas: endurecimiento (integración)', () => {
         .expect(403);
       await authed(app, t)
         .patch(`/invoices/${borrador}`)
+        .set('If-Match', await ifMatchDe(app, token, `/invoices/${borrador}`))
         .send({ notes: 'x' })
         .expect(403);
-      await authed(app, t).delete(`/invoices/${borrador}`).expect(403);
+      await authed(app, t)
+        .delete(`/invoices/${borrador}`)
+        .set('If-Match', await ifMatchDe(app, token, `/invoices/${borrador}`))
+        .expect(403);
     });
 
     it('obra recibe 403 al aprobar una rectificativa', async () => {
@@ -262,6 +269,7 @@ describe('Facturas: endurecimiento (integración)', () => {
       ]) {
         await authed(app, token)
           .patch(`/invoices/${rectId}`)
+          .set('If-Match', await ifMatchDe(app, token, `/invoices/${rectId}`))
           .send(body)
           .expect(400);
       }
@@ -271,6 +279,7 @@ describe('Facturas: endurecimiento (integración)', () => {
       const t = await rectificativa('total');
       await authed(app, t.token)
         .patch(`/invoices/${t.rectId}`)
+        .set('If-Match', await ifMatchDe(app, t.token, `/invoices/${t.rectId}`))
         .send({ lines: [{ description: 'X', baseAmount: 1 }] })
         .expect(400);
       const d = await rectificativa('diferencias', {
@@ -280,6 +289,7 @@ describe('Facturas: endurecimiento (integración)', () => {
       });
       await authed(app, d.token)
         .patch(`/invoices/${d.rectId}`)
+        .set('If-Match', await ifMatchDe(app, d.token, `/invoices/${d.rectId}`))
         .send({
           lines: [
             { description: 'Delta2', baseAmount: -20, projectId: d.project.id },

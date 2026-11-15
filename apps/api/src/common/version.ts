@@ -20,8 +20,10 @@ import type { DbOrTx } from '@erp/db';
  * 409 `{ code: 'VERSION_CONFLICT', versionActual }`.
  *
  * Política (`EXIGIR_VERSION`, se lee en cada petición):
- *  - `false` (por defecto): sin If-Match se acepta, pero se incrementa.
- *  - `true`: las ediciones y borrados sin If-Match responden 428.
+ *  - Por defecto (variable sin definir) y con `true`: las ediciones y borrados
+ *    sin If-Match responden 428 `PRECONDITION_REQUIRED`.
+ *  - `false` (solo si vale exactamente 'false'): sin If-Match se acepta, pero se
+ *    incrementa. Es la vía de escape para clientes antiguos.
  * Las acciones POST (aprobar, pagar, anular…) nunca exigen If-Match; se valida
  * solo si llega.
  */
@@ -32,7 +34,8 @@ export const CODIGO_VERSION_CONFLICT = 'VERSION_CONFLICT';
 export type TablaVersionada = PgTable & { id: PgColumn; version: PgColumn };
 
 function exigirVersionActivo(): boolean {
-  return process.env.EXIGIR_VERSION === 'true';
+  // Default seguro: se exige salvo que se desactive explícitamente.
+  return process.env.EXIGIR_VERSION !== 'false';
 }
 
 /** Parsea el valor de `If-Match`: `"3"` o `3`; entero positivo o 400. */

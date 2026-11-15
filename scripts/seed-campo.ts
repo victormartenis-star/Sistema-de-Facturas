@@ -628,6 +628,7 @@ async function escribirTodo(
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init?.headers as Record<string, string> | undefined),
       },
     });
     if (res.status === 204) return undefined as T;
@@ -781,7 +782,14 @@ async function escribirTodo(
           sortOrder: i,
         });
       }
-      await enviar('PATCH', `/budgets/${b.id}`, { status: 'activo' });
+      // `EXIGIR_VERSION` es `true` por defecto: el PATCH lleva If-Match con la
+      // versión vigente del presupuesto (se relee, no se supone).
+      const actual = await pedir<{ version: number }>(`/budgets/${b.id}`);
+      await pedir(`/budgets/${b.id}`, {
+        method: 'PATCH',
+        headers: { 'If-Match': `"${actual.version}"` },
+        body: JSON.stringify({ status: 'activo' }),
+      });
       return b;
     },
     nombrePres,

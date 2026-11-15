@@ -10,6 +10,9 @@ import {
   createProject,
   createTestApp,
   createUserWithRole,
+  ifMatch,
+  ifMatchDe,
+  ifMatchPartida,
   registerUser,
 } from './helpers';
 import { resetTestDb, seedCompany } from './reset-db';
@@ -54,6 +57,7 @@ describe('Budgets (integración) — presupuestos y partidas', () => {
 
     const updated = await authed(app, admin.accessToken)
       .patch(`/budget-items/${item.id}`)
+      .set('If-Match', ifMatch(item.version))
       .send({ quantity: 20 })
       .expect(200);
     expect(updated.body.totalAmount).toBeCloseTo(2_000, 2);
@@ -66,6 +70,7 @@ describe('Budgets (integración) — presupuestos y partidas', () => {
 
     await authed(app, admin.accessToken)
       .delete(`/budget-items/${item.id}`)
+      .set('If-Match', ifMatch(updated.body.version))
       .expect(204);
 
     const detailAfter = await authed(app, admin.accessToken)
@@ -125,6 +130,7 @@ describe('Budgets (integración) — presupuestos y partidas', () => {
 
     await authed(app, admin.accessToken)
       .delete(`/budgets/${budget.id}`)
+      .set('If-Match', ifMatch(budget.version))
       .expect(204);
 
     const list = await authed(app, admin.accessToken)
@@ -152,10 +158,12 @@ describe('Budgets (integración) — presupuestos y partidas', () => {
       .expect(404);
     await authed(app, obraTokens.accessToken)
       .patch(`/budgets/${budget.id}`)
+      .set('If-Match', ifMatch(budget.version))
       .send({ name: 'Intento' })
       .expect(404);
     await authed(app, obraTokens.accessToken)
       .patch(`/budget-items/${item.id}`)
+      .set('If-Match', ifMatch(item.version))
       .send({ quantity: 5 })
       .expect(404);
   });
@@ -177,6 +185,10 @@ describe('Budgets (integración) — presupuestos y partidas', () => {
         if (status === 'cerrado') {
           await authed(app, token)
             .patch(`/budgets/${budget.id}`)
+            .set(
+              'If-Match',
+              await ifMatchDe(app, token, `/budgets/${budget.id}`),
+            )
             .send({ status: 'cerrado' })
             .expect(200);
         }
@@ -190,6 +202,10 @@ describe('Budgets (integración) — presupuestos y partidas', () => {
       const budget = await createBudget(app, admin.accessToken, project.id);
       const res = await authed(app, admin.accessToken)
         .patch(`/budgets/${budget.id}`)
+        .set(
+          'If-Match',
+          await ifMatchDe(app, admin.accessToken, `/budgets/${budget.id}`),
+        )
         .send({ status: 'activo' })
         .expect(409);
       expect(res.body.message).toMatch(/sin partidas/);
@@ -200,6 +216,10 @@ describe('Budgets (integración) — presupuestos y partidas', () => {
       const { budget } = await budgetWithItem(admin.accessToken, 'activo');
       await authed(app, admin.accessToken)
         .patch(`/budgets/${budget.id}`)
+        .set(
+          'If-Match',
+          await ifMatchDe(app, admin.accessToken, `/budgets/${budget.id}`),
+        )
         .send({ status: 'borrador' })
         .expect(409);
 
@@ -209,10 +229,18 @@ describe('Budgets (integración) — presupuestos y partidas', () => {
       );
       await authed(app, admin.accessToken)
         .patch(`/budgets/${cerrado.id}`)
+        .set(
+          'If-Match',
+          await ifMatchDe(app, admin.accessToken, `/budgets/${cerrado.id}`),
+        )
         .send({ status: 'borrador' })
         .expect(409);
       await authed(app, admin.accessToken)
         .patch(`/budgets/${cerrado.id}`)
+        .set(
+          'If-Match',
+          await ifMatchDe(app, admin.accessToken, `/budgets/${cerrado.id}`),
+        )
         .send({ status: 'activo' })
         .expect(409);
     });
@@ -237,14 +265,28 @@ describe('Budgets (integración) — presupuestos y partidas', () => {
         .expect(409);
       await api
         .patch(`/budget-items/${item.id}`)
+        .set(
+          'If-Match',
+          await ifMatchPartida(app, admin.accessToken, budget.id, item.id),
+        )
         .send({ unitPrice: 99 })
         .expect(409);
-      await api.delete(`/budget-items/${item.id}`).expect(409);
+      await api
+        .delete(`/budget-items/${item.id}`)
+        .set(
+          'If-Match',
+          await ifMatchPartida(app, admin.accessToken, budget.id, item.id),
+        )
+        .expect(409);
 
       // La imputación analítica sí se puede corregir y no cambia importes.
       const phase = await createPhase(app, admin.accessToken, project.id);
       const res = await api
         .patch(`/budget-items/${item.id}`)
+        .set(
+          'If-Match',
+          await ifMatchPartida(app, admin.accessToken, budget.id, item.id),
+        )
         .send({ phaseId: phase.id })
         .expect(200);
       expect(res.body.phaseId).toBe(phase.id);
@@ -260,10 +302,18 @@ describe('Budgets (integración) — presupuestos y partidas', () => {
       const phase = await createPhase(app, admin.accessToken, project.id);
       await authed(app, admin.accessToken)
         .patch(`/budget-items/${item.id}`)
+        .set(
+          'If-Match',
+          await ifMatchPartida(app, admin.accessToken, budget.id, item.id),
+        )
         .send({ phaseId: phase.id })
         .expect(409);
       await authed(app, admin.accessToken)
         .patch(`/budgets/${budget.id}`)
+        .set(
+          'If-Match',
+          await ifMatchDe(app, admin.accessToken, `/budgets/${budget.id}`),
+        )
         .send({ notes: 'cambio' })
         .expect(409);
     });
@@ -273,10 +323,18 @@ describe('Budgets (integración) — presupuestos y partidas', () => {
       const { budget } = await budgetWithItem(admin.accessToken, 'activo');
       await authed(app, admin.accessToken)
         .patch(`/budgets/${budget.id}`)
+        .set(
+          'If-Match',
+          await ifMatchDe(app, admin.accessToken, `/budgets/${budget.id}`),
+        )
         .send({ notes: 'Aclaración' })
         .expect(200);
       await authed(app, admin.accessToken)
         .patch(`/budgets/${budget.id}`)
+        .set(
+          'If-Match',
+          await ifMatchDe(app, admin.accessToken, `/budgets/${budget.id}`),
+        )
         .send({ name: 'Otro nombre' })
         .expect(409);
     });
@@ -286,6 +344,10 @@ describe('Budgets (integración) — presupuestos y partidas', () => {
       const { budget } = await budgetWithItem(admin.accessToken, 'activo');
       await authed(app, admin.accessToken)
         .delete(`/budgets/${budget.id}`)
+        .set(
+          'If-Match',
+          await ifMatchDe(app, admin.accessToken, `/budgets/${budget.id}`),
+        )
         .expect(409);
     });
 
@@ -308,6 +370,7 @@ describe('Budgets (integración) — presupuestos y partidas', () => {
         .expect(200);
       await authed(app, admin.accessToken)
         .patch(`/budget-items/${detail.body.items[0].id}`)
+        .set('If-Match', ifMatch(detail.body.items[0].version))
         .send({ unitPrice: 20 })
         .expect(200);
       await activateBudget(app, admin.accessToken, res.body.id);

@@ -6,6 +6,7 @@ import {
   createContact,
   createProject,
   createTestApp,
+  ifMatchDe,
   registerUser,
 } from './helpers';
 import { resetTestDb, seedCompany } from './reset-db';
@@ -186,6 +187,10 @@ describe('Estado único (integración) — máquina de estados y carreras', () =
       const [patch, aprobar] = await Promise.all([
         authed(app, admin.accessToken)
           .patch(`/invoices/${id}`)
+          .set(
+            'If-Match',
+            await ifMatchDe(app, admin.accessToken, `/invoices/${id}`),
+          )
           .send({
             lines: [
               {

@@ -371,13 +371,34 @@ describe('Versión optimista (integración) — If-Match', () => {
       .expect(201);
   });
 
-  it('política EXIGIR_VERSION=false (por defecto): sin If-Match → 200 y se incrementa', async () => {
+  it('política por defecto (EXIGIR_VERSION sin definir): PATCH y DELETE sin If-Match → 428; con If-Match → 200', async () => {
+    expect(process.env.EXIGIR_VERSION).toBeUndefined();
     const [factura] = await crearEntidades();
-    await authed(app, token)
+    const res = await authed(app, token)
       .patch(factura.url)
       .send(factura.cuerpo('sin cabecera'))
+      .expect(428);
+    expect(res.body.code).toBe('PRECONDITION_REQUIRED');
+    await authed(app, token).delete(factura.url).expect(428);
+    await authed(app, token)
+      .patch(factura.url)
+      .set('If-Match', '"1"')
+      .send(factura.cuerpo('con cabecera'))
       .expect(200);
-    expect((await factura.leer()).version).toBe(2);
+  });
+
+  it('política EXIGIR_VERSION=false (explícito): sin If-Match → 200 y se incrementa', async () => {
+    const [factura] = await crearEntidades();
+    process.env.EXIGIR_VERSION = 'false';
+    try {
+      await authed(app, token)
+        .patch(factura.url)
+        .send(factura.cuerpo('sin cabecera'))
+        .expect(200);
+      expect((await factura.leer()).version).toBe(2);
+    } finally {
+      delete process.env.EXIGIR_VERSION;
+    }
   });
 
   it('política EXIGIR_VERSION=true: sin If-Match → 428 (PATCH y DELETE); con If-Match y acciones POST siguen funcionando', async () => {
