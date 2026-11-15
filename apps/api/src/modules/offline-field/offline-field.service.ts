@@ -102,24 +102,27 @@ export class OfflineFieldService {
       if (existing) return fichajeToDto(existing, project);
     }
 
-    const [row] = await this.dbs.db
-      .insert(fichajes)
-      .values({
-        companyId,
-        projectId: data.projectId,
-        workerName: data.workerName,
-        type: data.type,
-        occurredAt: new Date(data.occurredAt),
-        latitude: data.latitude != null ? data.latitude.toFixed(7) : null,
-        longitude: data.longitude != null ? data.longitude.toFixed(7) : null,
-        clientId: data.clientId ?? null,
-      })
-      .returning();
-    void this.audit.log({
-      entityType: 'fichaje',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(fichajes)
+        .values({
+          companyId,
+          projectId: data.projectId,
+          workerName: data.workerName,
+          type: data.type,
+          occurredAt: new Date(data.occurredAt),
+          latitude: data.latitude != null ? data.latitude.toFixed(7) : null,
+          longitude: data.longitude != null ? data.longitude.toFixed(7) : null,
+          clientId: data.clientId ?? null,
+        })
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'fichaje',
+        entityId: row.id,
+        action: 'create',
+        newData: row,
+      });
+      return row;
     });
     return fichajeToDto(row, project);
   }
@@ -167,24 +170,27 @@ export class OfflineFieldService {
     }
 
     const allChecked = data.items.every((i) => i.checked);
-    const [row] = await this.dbs.db
-      .insert(prlChecklists)
-      .values({
-        companyId,
-        projectId: data.projectId,
-        workerName: data.workerName,
-        checkDate: data.checkDate,
-        items: data.items,
-        allChecked,
-        notes: data.notes ?? null,
-        clientId: data.clientId ?? null,
-      })
-      .returning();
-    void this.audit.log({
-      entityType: 'prl_checklist',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(prlChecklists)
+        .values({
+          companyId,
+          projectId: data.projectId,
+          workerName: data.workerName,
+          checkDate: data.checkDate,
+          items: data.items,
+          allChecked,
+          notes: data.notes ?? null,
+          clientId: data.clientId ?? null,
+        })
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'prl_checklist',
+        entityId: row.id,
+        action: 'create',
+        newData: row,
+      });
+      return row;
     });
     return checklistToDto(row, project);
   }

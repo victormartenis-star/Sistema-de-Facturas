@@ -190,17 +190,21 @@ export class InvoicesService {
   async create(input: InvoiceCreateInput): Promise<InvoiceDto> {
     this.rechazarClasificacionRectificativa(input);
     const { companyId, data, amounts } = await this.prepararCreacion(input);
-    const invoiceId = await this.dbs.db.transaction(
-      async (tx) => (await this.crearEnTx(tx, companyId, data, amounts)).id,
-    );
-    const dto = await this.get(invoiceId);
-    void this.audit.log({
-      entityType: 'invoice',
-      entityId: invoiceId,
-      action: 'create',
-      newData: { invoiceId, kind: dto.kind, status: dto.status },
+    const invoiceId = await this.dbs.db.transaction(async (tx) => {
+      const creada = await this.crearEnTx(tx, companyId, data, amounts);
+      await this.audit.registrar(tx, {
+        entityType: 'invoice',
+        entityId: creada.id,
+        action: 'create',
+        newData: {
+          invoiceId: creada.id,
+          kind: creada.kind,
+          status: creada.status,
+        },
+      });
+      return creada.id;
     });
-    return dto;
+    return this.get(invoiceId);
   }
 
   /** Motivo/tipo de rectificación no se aceptan al crear/editar facturas ordinarias (400). */
@@ -505,14 +509,14 @@ export class InvoicesService {
       );
     }
 
-    await this.dbs.db.transaction((tx) =>
-      this.aprobarEnTx(tx, invoice, contact, versionEsperada),
-    );
-    void this.audit.log({
-      entityType: 'invoice',
-      entityId: id,
-      action: 'update',
-      newData: { status: 'aprobada' },
+    await this.dbs.db.transaction(async (tx) => {
+      await this.aprobarEnTx(tx, invoice, contact, versionEsperada);
+      await this.audit.registrar(tx, {
+        entityType: 'invoice',
+        entityId: id,
+        action: 'update',
+        newData: { status: 'aprobada' },
+      });
     });
     return this.get(id);
   }
@@ -773,33 +777,31 @@ export class InvoicesService {
     if (data.lines) {
       await this.validarImputaciones(invoice.companyId, data.lines);
     }
-    const newId = await this.dbs.db.transaction(
-      async (tx) =>
-        (
-          await this.crearRectificativaEnTx(tx, invoice.id, {
-            clase: data.clase,
-            issueDate: data.issueDate,
-            motivo: data.motivo,
-            rectificationMotive: data.rectificationMotive,
-            rectificationType: data.rectificationType,
-            facturaeReasonCode: data.facturaeReasonCode,
-            lines: data.lines,
-          })
-        ).row.id,
-    );
-    void this.audit.log({
-      entityType: 'invoice',
-      entityId: newId,
-      action: 'create',
-      newData: {
-        invoiceId: newId,
-        rectifies: id,
+    const newId = await this.dbs.db.transaction(async (tx) => {
+      const { row } = await this.crearRectificativaEnTx(tx, invoice.id, {
         clase: data.clase,
+        issueDate: data.issueDate,
+        motivo: data.motivo,
         rectificationMotive: data.rectificationMotive,
         rectificationType: data.rectificationType,
         facturaeReasonCode: data.facturaeReasonCode,
-        status: 'borrador',
-      },
+        lines: data.lines,
+      });
+      await this.audit.registrar(tx, {
+        entityType: 'invoice',
+        entityId: row.id,
+        action: 'create',
+        newData: {
+          invoiceId: row.id,
+          rectifies: id,
+          clase: data.clase,
+          rectificationMotive: data.rectificationMotive,
+          rectificationType: data.rectificationType,
+          facturaeReasonCode: data.facturaeReasonCode,
+          status: 'borrador',
+        },
+      });
+      return row.id;
     });
     return this.get(newId);
   }
@@ -1074,12 +1076,12 @@ export class InvoicesService {
         { cancelReason: data.motivo ?? null },
         versionEsperada,
       );
-    });
-    void this.audit.log({
-      entityType: 'invoice',
-      entityId: id,
-      action: 'update',
-      newData: { status: 'anulada', motivo: data.motivo ?? null },
+      await this.audit.registrar(tx, {
+        entityType: 'invoice',
+        entityId: id,
+        action: 'update',
+        newData: { status: 'anulada', motivo: data.motivo ?? null },
+      });
     });
     return this.get(id);
   }

@@ -123,23 +123,26 @@ export class EsgService {
   async createFactor(input: EsgFactorCreateInput): Promise<EsgFactorDto> {
     const companyId = await this.dbs.getCompanyId();
     const data = esgFactorCreateSchema.parse(input);
-    const [row] = await this.dbs.db
-      .insert(esgFactoresEmision)
-      .values({
-        companyId,
-        categoria: data.categoria,
-        nombre: data.nombre,
-        unidad: data.unidad,
-        factorKgCo2e: data.factorKgCo2e.toFixed(6),
-        fuente: data.fuente ?? null,
-        activo: data.activo,
-      })
-      .returning();
-    void this.audit.log({
-      entityType: 'esg_factor_emision',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(esgFactoresEmision)
+        .values({
+          companyId,
+          categoria: data.categoria,
+          nombre: data.nombre,
+          unidad: data.unidad,
+          factorKgCo2e: data.factorKgCo2e.toFixed(6),
+          fuente: data.fuente ?? null,
+          activo: data.activo,
+        })
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'esg_factor_emision',
+        entityId: row.id,
+        action: 'create',
+        newData: row,
+      });
+      return row;
     });
     return factorToDto(row);
   }
@@ -218,26 +221,28 @@ export class EsgService {
       Number(factor.factorKgCo2e),
     );
 
-    const [row] = await this.dbs.db
-      .insert(esgRegistrosEmision)
-      .values({
-        companyId,
-        projectId: data.projectId,
-        phaseId: data.phaseId ?? null,
-        factorId: data.factorId,
-        fecha: data.fecha,
-        cantidad: data.cantidad.toFixed(4),
-        emisionesKgCo2e: emisionesKgCo2e.toFixed(3),
-        documentId: data.documentId ?? null,
-        notas: data.notas ?? null,
-      })
-      .returning();
-
-    void this.audit.log({
-      entityType: 'esg_registro_emision',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(esgRegistrosEmision)
+        .values({
+          companyId,
+          projectId: data.projectId,
+          phaseId: data.phaseId ?? null,
+          factorId: data.factorId,
+          fecha: data.fecha,
+          cantidad: data.cantidad.toFixed(4),
+          emisionesKgCo2e: emisionesKgCo2e.toFixed(3),
+          documentId: data.documentId ?? null,
+          notas: data.notas ?? null,
+        })
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'esg_registro_emision',
+        entityId: row.id,
+        action: 'create',
+        newData: row,
+      });
+      return row;
     });
     return registroToDto(row, factor);
   }
@@ -348,32 +353,35 @@ export class EsgService {
 
     let row: RcdVale;
     try {
-      [row] = await this.dbs.db
-        .insert(rcdVales)
-        .values({
-          companyId,
-          projectId: data.projectId,
-          lerCode: data.lerCode,
-          description: data.description,
-          quantity: data.quantity.toFixed(3),
-          unit: data.unit,
-          treatment: data.treatment,
-          managerContactId: data.managerContactId,
-          ticketNumber: data.ticketNumber,
-          ticketDate: data.ticketDate,
-          documentId: data.documentId ?? null,
-          notes: data.notes ?? null,
-        })
-        .returning();
+      row = await this.dbs.db.transaction(async (tx) => {
+        const [creado] = await tx
+          .insert(rcdVales)
+          .values({
+            companyId,
+            projectId: data.projectId,
+            lerCode: data.lerCode,
+            description: data.description,
+            quantity: data.quantity.toFixed(3),
+            unit: data.unit,
+            treatment: data.treatment,
+            managerContactId: data.managerContactId,
+            ticketNumber: data.ticketNumber,
+            ticketDate: data.ticketDate,
+            documentId: data.documentId ?? null,
+            notes: data.notes ?? null,
+          })
+          .returning();
+        await this.audit.registrar(tx, {
+          entityType: 'rcd_vale',
+          entityId: creado.id,
+          action: 'create',
+          newData: creado,
+        });
+        return creado;
+      });
     } catch (err) {
       this.rethrowDuplicateVale(err, data.ticketNumber);
     }
-    void this.audit.log({
-      entityType: 'rcd_vale',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
-    });
     return valeToDto(row, manager.legalName);
   }
 

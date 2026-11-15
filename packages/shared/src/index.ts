@@ -2,6 +2,7 @@ export * from './access';
 export * from './json-canonico';
 export * from './auth';
 export * from './audit';
+export * from './audit-hash';
 export * from './bim';
 export * from './budgets';
 export * from './calculo';

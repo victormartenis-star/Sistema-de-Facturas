@@ -4,13 +4,13 @@ export const AUDIT_ACTIONS = ['create', 'update', 'delete', 'export'] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
 /**
- * Todo `entityType` que algún `AuditService.log()` escribe realmente — ver
+ * Todo `entityType` que algún `AuditService.registrar()` escribe realmente — ver
  * `entityType: AuditEntityType | string` en `audit.service.ts`: el lado que
- * escribe no está atado a esta lista (nunca bloquea un `log()` por un tipo
+ * escribe no está atado a esta lista (nunca bloquea un `registrar()` por un tipo
  * nuevo), pero `auditQuerySchema.entityType` sí, así que un tipo que falte
  * aquí queda escrito en `audit_log` y es imposible de filtrar desde
  * `GET /audit`. Mantener sincronizado con `grep -rhn "entityType: '"
- * apps/api/src` al añadir un `audit.log()` nuevo.
+ * apps/api/src` al añadir un `registrar()` nuevo.
  */
 export const AUDIT_ENTITY_TYPES = [
   'export',
@@ -79,4 +79,42 @@ export interface AuditLogDto {
   oldData: unknown;
   newData: unknown;
   meta: unknown;
+  sequenceNumber: number;
+  previousHash: string | null;
+  entryHash: string | null;
+  correlationId: string | null;
+}
+
+export const AUDIT_INTEGRITY_MOTIVOS = [
+  'SEQUENCE_GAP',
+  'SEQUENCE_DUPLICATE',
+  'UNSEALED',
+  'HASH_VERSION_UNSUPPORTED',
+  'PREVIOUS_HASH_MISMATCH',
+  'ENTRY_HASH_MISMATCH',
+  'HEAD_MISMATCH',
+  'HEAD_MISSING',
+] as const;
+export type AuditIntegrityMotivo = (typeof AUDIT_INTEGRITY_MOTIVOS)[number];
+
+export interface AuditIntegrityBreakDto {
+  id: string | null;
+  sequenceNumber: number;
+  occurredAt: string | null;
+  motivo: AuditIntegrityMotivo;
+  detalle: string;
+  esperado: string | null;
+  encontrado: string | null;
+}
+
+/** Respuesta de `GET /audit/verify-integrity` (siempre HTTP 200). */
+export interface AuditIntegrityReportDto {
+  companyId: string;
+  integra: boolean;
+  entradasVerificadas: number;
+  ultimaSecuencia: number;
+  ultimoHash: string;
+  verificadoEn: string;
+  duracionMs: number;
+  primerPuntoRoto: AuditIntegrityBreakDto | null;
 }

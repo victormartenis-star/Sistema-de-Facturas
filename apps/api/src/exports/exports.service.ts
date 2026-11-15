@@ -168,24 +168,28 @@ export class ExportsService {
       );
     }
 
-    void this.audit.log({
-      entityType: 'export',
-      entityId: q.projectId ?? this.dbs.getCompanyId(),
-      action: 'export',
-      meta: {
-        recurso,
-        format: q.format,
-        filas: ds.total,
-        filtros: {
-          projectId: q.projectId,
-          budgetId: q.budgetId,
-          from: q.from,
-          to: q.to,
-          status: q.status,
-          kind: q.kind,
+    // Exportar es una lectura: la transacción existe solo para auditarla, y se
+    // espera antes de devolver el fichero (si la auditoría falla, no hay descarga).
+    await this.dbs.db.transaction((tx) =>
+      this.audit.registrar(tx, {
+        entityType: 'export',
+        entityId: q.projectId ?? this.dbs.getCompanyId(),
+        action: 'export',
+        meta: {
+          recurso,
+          format: q.format,
+          filas: ds.total,
+          filtros: {
+            projectId: q.projectId,
+            budgetId: q.budgetId,
+            from: q.from,
+            to: q.to,
+            status: q.status,
+            kind: q.kind,
+          },
         },
-      },
-    });
+      }),
+    );
 
     const dia = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     if (q.format === 'json') {

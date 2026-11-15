@@ -145,30 +145,32 @@ export class PartesDiariosService {
       : null;
     const totalCost = computePartePersonalCost(data);
 
-    const [row] = await this.dbs.db
-      .insert(partesPersonal)
-      .values({
-        companyId,
-        projectId: data.projectId,
-        phaseId: data.phaseId ?? null,
-        workerName: data.workerName,
-        trabajadorId: data.trabajadorId ?? null,
-        categoryId: data.categoryId ?? null,
-        workDate: data.workDate,
-        ordinaryHours: data.ordinaryHours.toFixed(2),
-        overtimeHours: data.overtimeHours.toFixed(2),
-        ordinaryRate: data.ordinaryRate.toFixed(2),
-        overtimeRate: data.overtimeRate.toFixed(2),
-        totalCost: totalCost.toFixed(2),
-        notes: data.notes ?? null,
-      })
-      .returning();
-
-    void this.audit.log({
-      entityType: 'parte_personal',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(partesPersonal)
+        .values({
+          companyId,
+          projectId: data.projectId,
+          phaseId: data.phaseId ?? null,
+          workerName: data.workerName,
+          trabajadorId: data.trabajadorId ?? null,
+          categoryId: data.categoryId ?? null,
+          workDate: data.workDate,
+          ordinaryHours: data.ordinaryHours.toFixed(2),
+          overtimeHours: data.overtimeHours.toFixed(2),
+          ordinaryRate: data.ordinaryRate.toFixed(2),
+          overtimeRate: data.overtimeRate.toFixed(2),
+          totalCost: totalCost.toFixed(2),
+          notes: data.notes ?? null,
+        })
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'parte_personal',
+        entityId: row.id,
+        action: 'create',
+        newData: row,
+      });
+      return row;
     });
     return personalToDto(row, phase?.code ?? null, trabajador?.nombre ?? null);
   }
@@ -313,29 +315,31 @@ export class PartesDiariosService {
       : null;
     const totalCost = computeParteMaquinariaCost(data);
 
-    const [row] = await this.dbs.db
-      .insert(partesMaquinaria)
-      .values({
-        companyId,
-        projectId: data.projectId,
-        phaseId: data.phaseId ?? null,
-        machineName: data.machineName,
-        equipoId: data.equipoId ?? null,
-        ownership: data.ownership,
-        workDate: data.workDate,
-        hoursUsed: data.hoursUsed.toFixed(2),
-        fuelLiters: data.fuelLiters?.toFixed(2) ?? null,
-        hourlyRate: data.hourlyRate.toFixed(2),
-        totalCost: totalCost.toFixed(2),
-        notes: data.notes ?? null,
-      })
-      .returning();
-
-    void this.audit.log({
-      entityType: 'parte_maquinaria',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(partesMaquinaria)
+        .values({
+          companyId,
+          projectId: data.projectId,
+          phaseId: data.phaseId ?? null,
+          machineName: data.machineName,
+          equipoId: data.equipoId ?? null,
+          ownership: data.ownership,
+          workDate: data.workDate,
+          hoursUsed: data.hoursUsed.toFixed(2),
+          fuelLiters: data.fuelLiters?.toFixed(2) ?? null,
+          hourlyRate: data.hourlyRate.toFixed(2),
+          totalCost: totalCost.toFixed(2),
+          notes: data.notes ?? null,
+        })
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'parte_maquinaria',
+        entityId: row.id,
+        action: 'create',
+        newData: row,
+      });
+      return row;
     });
     return maquinariaToDto(row, phase?.code ?? null, equipo?.nombre ?? null);
   }

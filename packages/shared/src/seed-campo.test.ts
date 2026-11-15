@@ -591,10 +591,10 @@ describe('auditoría de las entidades de campo', () => {
     ).toThrow(/audit_log: 1 fila/);
   });
 
-  it('el resumen incluye audit_log primero y omite ceros', () => {
+  it('el resumen NO incluye audit_log (la auditoría inmutable no se borra) y omite ceros', () => {
     expect(
       resumenLimpieza({ contacts: 3, [TABLA_AUDITORIA_CAMPO]: 7, projects: 0 }),
-    ).toEqual(['audit_log: 7', 'contacts: 3']);
-    expect(resumenLimpieza({ audit_log: 0 })).toEqual([]);
+    ).toEqual(['contacts: 3']);
+    expect(resumenLimpieza({ audit_log: 9 })).toEqual([]);
   });
 });

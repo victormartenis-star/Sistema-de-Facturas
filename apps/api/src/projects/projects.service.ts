@@ -79,25 +79,28 @@ export class ProjectsService {
     const companyId = await this.dbs.getCompanyId();
     const data = projectCreateSchema.parse(input);
     try {
-      const [row] = await this.dbs.db
-        .insert(projects)
-        .values({
-          companyId,
-          code: data.code,
-          name: data.name,
-          status: data.status,
-          startDate: data.startDate ?? null,
-          expectedEnd: data.expectedEnd ?? null,
-          contractAmount: data.contractAmount?.toFixed(2) ?? null,
-          retentionPct: data.retentionPct.toFixed(2),
-          notes: data.notes ?? null,
-        })
-        .returning();
-      void this.audit.log({
-        entityType: 'project',
-        entityId: row.id,
-        action: 'create',
-        newData: row,
+      const row = await this.dbs.db.transaction(async (tx) => {
+        const [creada] = await tx
+          .insert(projects)
+          .values({
+            companyId,
+            code: data.code,
+            name: data.name,
+            status: data.status,
+            startDate: data.startDate ?? null,
+            expectedEnd: data.expectedEnd ?? null,
+            contractAmount: data.contractAmount?.toFixed(2) ?? null,
+            retentionPct: data.retentionPct.toFixed(2),
+            notes: data.notes ?? null,
+          })
+          .returning();
+        await this.audit.registrar(tx, {
+          entityType: 'project',
+          entityId: creada.id,
+          action: 'create',
+          newData: creada,
+        });
+        return creada;
       });
       return toDto(row);
     } catch (err) {
@@ -108,34 +111,37 @@ export class ProjectsService {
   async update(id: string, input: ProjectUpdateInput): Promise<ProjectDto> {
     await this.find(id);
     try {
-      const [row] = await this.dbs.db
-        .update(projects)
-        .set({
-          ...(input.code !== undefined && { code: input.code }),
-          ...(input.name !== undefined && { name: input.name }),
-          ...(input.status !== undefined && { status: input.status }),
-          ...(input.startDate !== undefined && {
-            startDate: input.startDate ?? null,
-          }),
-          ...(input.expectedEnd !== undefined && {
-            expectedEnd: input.expectedEnd ?? null,
-          }),
-          ...(input.contractAmount !== undefined && {
-            contractAmount: input.contractAmount?.toFixed(2) ?? null,
-          }),
-          ...(input.retentionPct !== undefined && {
-            retentionPct: input.retentionPct.toFixed(2),
-          }),
-          ...(input.notes !== undefined && { notes: input.notes ?? null }),
-          updatedAt: new Date(),
-        })
-        .where(eq(projects.id, id))
-        .returning();
-      void this.audit.log({
-        entityType: 'project',
-        entityId: id,
-        action: 'update',
-        newData: row,
+      const row = await this.dbs.db.transaction(async (tx) => {
+        const [actualizada] = await tx
+          .update(projects)
+          .set({
+            ...(input.code !== undefined && { code: input.code }),
+            ...(input.name !== undefined && { name: input.name }),
+            ...(input.status !== undefined && { status: input.status }),
+            ...(input.startDate !== undefined && {
+              startDate: input.startDate ?? null,
+            }),
+            ...(input.expectedEnd !== undefined && {
+              expectedEnd: input.expectedEnd ?? null,
+            }),
+            ...(input.contractAmount !== undefined && {
+              contractAmount: input.contractAmount?.toFixed(2) ?? null,
+            }),
+            ...(input.retentionPct !== undefined && {
+              retentionPct: input.retentionPct.toFixed(2),
+            }),
+            ...(input.notes !== undefined && { notes: input.notes ?? null }),
+            updatedAt: new Date(),
+          })
+          .where(eq(projects.id, id))
+          .returning();
+        await this.audit.registrar(tx, {
+          entityType: 'project',
+          entityId: id,
+          action: 'update',
+          newData: actualizada,
+        });
+        return actualizada;
       });
       return toDto(row);
     } catch (err) {
@@ -146,15 +152,17 @@ export class ProjectsService {
   /** Borrado lógico (deleted_at), como marca 02-base-de-datos.md. */
   async remove(id: string): Promise<void> {
     const existing = await this.find(id);
-    await this.dbs.db
-      .update(projects)
-      .set({ deletedAt: new Date(), updatedAt: new Date() })
-      .where(eq(projects.id, id));
-    void this.audit.log({
-      entityType: 'project',
-      entityId: id,
-      action: 'delete',
-      oldData: existing,
+    await this.dbs.db.transaction(async (tx) => {
+      await tx
+        .update(projects)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(eq(projects.id, id));
+      await this.audit.registrar(tx, {
+        entityType: 'project',
+        entityId: id,
+        action: 'delete',
+        oldData: existing,
+      });
     });
   }
 

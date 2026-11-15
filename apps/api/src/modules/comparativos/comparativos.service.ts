@@ -131,22 +131,24 @@ export class ComparativosService {
     await this.findProject(data.projectId);
     const phase = await this.findPhase(data.phaseId, data.projectId);
 
-    const [row] = await this.dbs.db
-      .insert(comparativos)
-      .values({
-        companyId,
-        projectId: data.projectId,
-        phaseId: data.phaseId,
-        title: data.title,
-        notes: data.notes ?? null,
-      })
-      .returning();
-
-    void this.audit.log({
-      entityType: 'comparativo',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(comparativos)
+        .values({
+          companyId,
+          projectId: data.projectId,
+          phaseId: data.phaseId,
+          title: data.title,
+          notes: data.notes ?? null,
+        })
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'comparativo',
+        entityId: row.id,
+        action: 'create',
+        newData: row,
+      });
+      return row;
     });
     return toDto(row, phase, 0);
   }
@@ -330,15 +332,15 @@ export class ComparativosService {
           };
         }),
       );
+      await this.audit.registrar(tx, {
+        entityType: 'comparativo_oferta',
+        entityId: ofertaId,
+        action: 'create',
+        newData: { comparativoId: comparativo.id, ...data },
+      });
       return ofertaId;
     });
 
-    void this.audit.log({
-      entityType: 'comparativo_oferta',
-      entityId: id,
-      action: 'create',
-      newData: { comparativoId: comparativo.id, ...data },
-    });
     return this.getOferta(id);
   }
 
@@ -499,19 +501,18 @@ export class ComparativosService {
         })
         .where(eq(comparativos.id, comparativo.id))
         .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'comparativo',
+        entityId: comparativo.id,
+        action: 'update',
+        newData: {
+          status: 'adjudicado',
+          ofertaId: oferta.id,
+          purchaseOrderId: order.id,
+          amount: offerTotal,
+        },
+      });
       return { row, order };
-    });
-
-    void this.audit.log({
-      entityType: 'comparativo',
-      entityId: comparativo.id,
-      action: 'update',
-      newData: {
-        status: 'adjudicado',
-        ofertaId: oferta.id,
-        purchaseOrderId: updated.order.id,
-        amount: offerTotal,
-      },
     });
     const count = (await this.ofertaCounts([id])).get(id) ?? 0;
     return toDto(updated.row, phase, count);

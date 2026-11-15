@@ -196,6 +196,12 @@ export class CertificationsService {
             notes: data.notes ?? null,
           })
           .returning();
+        await this.audit.registrar(tx, {
+          entityType: 'certification',
+          entityId: created.id,
+          action: 'create',
+          newData: created,
+        });
         return created;
       });
     } catch (err) {
@@ -206,12 +212,6 @@ export class CertificationsService {
       }
       throw err;
     }
-    void this.audit.log({
-      entityType: 'certification',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
-    });
     return toDto(row);
   }
 
@@ -308,6 +308,12 @@ export class CertificationsService {
             facturaeReasonCode: data.facturaeReasonCode,
           })
           .returning();
+        await this.audit.registrar(tx, {
+          entityType: 'certification',
+          entityId: created.id,
+          action: 'create',
+          newData: created,
+        });
         return created;
       });
     } catch (err) {
@@ -318,12 +324,6 @@ export class CertificationsService {
       }
       throw err;
     }
-    void this.audit.log({
-      entityType: 'certification',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
-    });
     return toDto(row);
   }
 
@@ -367,7 +367,7 @@ export class CertificationsService {
       `(${Number(cert.cumulativePct).toFixed(2)} % a origen; ` +
       `acumulado ${Number(cert.cumulativeAmount).toFixed(2)} €)`;
 
-    const { row, invoiceId } = await this.dbs.db.transaction(async (tx) => {
+    const row = await this.dbs.db.transaction(async (tx) => {
       const [locked] = await tx
         .select({
           status: certifications.status,
@@ -415,24 +415,26 @@ export class CertificationsService {
         { invoiceId: invoice.id },
         versionEsperada,
       );
-      return { row: updated, invoiceId: invoice.id };
-    });
-    void this.audit.log({
-      entityType: 'invoice',
-      entityId: invoiceId,
-      action: 'create',
-      newData: {
-        invoiceId,
-        kind: 'venta',
-        rectifies: origCert.invoiceId,
-        status: 'aprobada',
-      },
-    });
-    void this.audit.log({
-      entityType: 'certification',
-      entityId: id,
-      action: 'update',
-      newData: { status: 'facturada', invoiceId },
+      await this.audit.registrar(tx, [
+        {
+          entityType: 'invoice',
+          entityId: invoice.id,
+          action: 'create',
+          newData: {
+            invoiceId: invoice.id,
+            kind: 'venta',
+            rectifies: origCert.invoiceId,
+            status: 'aprobada',
+          },
+        },
+        {
+          entityType: 'certification',
+          entityId: id,
+          action: 'update',
+          newData: { status: 'facturada', invoiceId: invoice.id },
+        },
+      ]);
+      return updated;
     });
     return toDto(row);
   }
@@ -489,7 +491,7 @@ export class CertificationsService {
     // Crear la factura, aprobarla (vencimientos) y marcar la certificación
     // como facturada es una sola operación: o ocurre todo o nada. El bloqueo
     // de la certificación impide facturarla dos veces en paralelo.
-    const { row, invoiceId } = await this.dbs.db.transaction(async (tx) => {
+    const row = await this.dbs.db.transaction(async (tx) => {
       const [locked] = await tx
         .select({
           status: certifications.status,
@@ -520,26 +522,28 @@ export class CertificationsService {
         { invoiceId: invoice.id },
         versionEsperada,
       );
-      return { row: updated, invoiceId: invoice.id };
-    });
-    // Auditoría tras el commit (si fallara, no debe abortar la transacción).
-    void this.audit.log({
-      entityType: 'invoice',
-      entityId: invoiceId,
-      action: 'create',
-      newData: { invoiceId, kind: 'venta', status: 'borrador' },
-    });
-    void this.audit.log({
-      entityType: 'invoice',
-      entityId: invoiceId,
-      action: 'update',
-      newData: { status: 'aprobada' },
-    });
-    void this.audit.log({
-      entityType: 'certification',
-      entityId: id,
-      action: 'update',
-      newData: { status: 'facturada', invoiceId },
+      // Auditoría dentro de la transacción: una sola llamada, lo último.
+      await this.audit.registrar(tx, [
+        {
+          entityType: 'invoice',
+          entityId: invoice.id,
+          action: 'create',
+          newData: { invoiceId: invoice.id, kind: 'venta', status: 'borrador' },
+        },
+        {
+          entityType: 'invoice',
+          entityId: invoice.id,
+          action: 'update',
+          newData: { status: 'aprobada' },
+        },
+        {
+          entityType: 'certification',
+          entityId: id,
+          action: 'update',
+          newData: { status: 'facturada', invoiceId: invoice.id },
+        },
+      ]);
+      return updated;
     });
     return toDto(row);
   }
@@ -599,12 +603,12 @@ export class CertificationsService {
           'Certificación no encontrada',
         );
       }
-    });
-    void this.audit.log({
-      entityType: 'certification',
-      entityId: id,
-      action: 'delete',
-      oldData: cert,
+      await this.audit.registrar(tx, {
+        entityType: 'certification',
+        entityId: id,
+        action: 'delete',
+        oldData: cert,
+      });
     });
   }
 

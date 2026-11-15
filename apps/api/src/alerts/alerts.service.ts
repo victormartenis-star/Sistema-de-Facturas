@@ -111,29 +111,32 @@ export class AlertsService {
     const companyId = this.dbs.getCompanyId();
     await this.seedDefaults(companyId);
     const data = alertRuleUpdateSchema.parse(input);
-    const [row] = await this.dbs.db
-      .update(alertRules)
-      .set({
-        ...(data.thresholdDays !== undefined && {
-          thresholdDays: data.thresholdDays,
-        }),
-        ...(data.thresholdPct !== undefined && {
-          thresholdPct:
-            data.thresholdPct === null ? null : data.thresholdPct.toFixed(2),
-        }),
-        ...(data.channels !== undefined && { channels: data.channels }),
-        ...(data.enabled !== undefined && { enabled: data.enabled }),
-        updatedAt: new Date(),
-      })
-      .where(
-        and(eq(alertRules.companyId, companyId), eq(alertRules.type, type)),
-      )
-      .returning();
-    void this.audit.log({
-      entityType: 'alert_rule',
-      entityId: row.id,
-      action: 'update',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [actualizada] = await tx
+        .update(alertRules)
+        .set({
+          ...(data.thresholdDays !== undefined && {
+            thresholdDays: data.thresholdDays,
+          }),
+          ...(data.thresholdPct !== undefined && {
+            thresholdPct:
+              data.thresholdPct === null ? null : data.thresholdPct.toFixed(2),
+          }),
+          ...(data.channels !== undefined && { channels: data.channels }),
+          ...(data.enabled !== undefined && { enabled: data.enabled }),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(eq(alertRules.companyId, companyId), eq(alertRules.type, type)),
+        )
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'alert_rule',
+        entityId: actualizada.id,
+        action: 'update',
+        newData: actualizada,
+      });
+      return actualizada;
     });
     return toRuleDto(row);
   }

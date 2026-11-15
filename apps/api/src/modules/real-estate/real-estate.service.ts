@@ -194,23 +194,26 @@ export class RealEstateService {
     await this.assertProjectAccessible(data.projectId);
     const project = await this.projectCode(data.projectId);
 
-    const [row] = await this.dbs.db
-      .insert(realEstateUnits)
-      .values({
-        companyId,
-        projectId: data.projectId,
-        code: data.code,
-        kind: data.kind,
-        surfaceM2: data.surfaceM2 != null ? data.surfaceM2.toFixed(2) : null,
-        salePrice: data.salePrice.toFixed(2),
-        notes: data.notes ?? null,
-      })
-      .returning();
-    void this.audit.log({
-      entityType: 'real_estate_unit',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(realEstateUnits)
+        .values({
+          companyId,
+          projectId: data.projectId,
+          code: data.code,
+          kind: data.kind,
+          surfaceM2: data.surfaceM2 != null ? data.surfaceM2.toFixed(2) : null,
+          salePrice: data.salePrice.toFixed(2),
+          notes: data.notes ?? null,
+        })
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'real_estate_unit',
+        entityId: row.id,
+        action: 'create',
+        newData: row,
+      });
+      return row;
     });
     return unitToDto(row, project);
   }
@@ -330,15 +333,15 @@ export class RealEstateService {
         .update(realEstateUnits)
         .set({ status: 'reservada', updatedAt: new Date() })
         .where(eq(realEstateUnits.id, data.unitId));
+      await this.audit.registrar(tx, {
+        entityType: 'real_estate_reservation',
+        entityId: reservation.id,
+        action: 'create',
+        newData: reservation,
+      });
       return [reservation];
     });
 
-    void this.audit.log({
-      entityType: 'real_estate_reservation',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
-    });
     return reservationToDto(row, unit.code, buyer.legalName);
   }
 
@@ -505,15 +508,15 @@ export class RealEstateService {
         .update(realEstateUnits)
         .set({ status: 'entregada', updatedAt: new Date() })
         .where(eq(realEstateUnits.id, reservation.unitId));
+      await this.audit.registrar(tx, {
+        entityType: 'real_estate_key_handover',
+        entityId: handover.id,
+        action: 'create',
+        newData: handover,
+      });
       return [handover];
     });
 
-    void this.audit.log({
-      entityType: 'real_estate_key_handover',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
-    });
     return handoverToDto(row);
   }
 
@@ -576,24 +579,27 @@ export class RealEstateService {
       ? await this.findContact(data.reportedByContactId)
       : null;
 
-    const [row] = await this.dbs.db
-      .insert(postventaIncidents)
-      .values({
-        companyId,
-        unitId: data.unitId,
-        reportedByContactId: data.reportedByContactId ?? null,
-        category: data.category,
-        description: data.description,
-        reportedAt: data.reportedAt,
-        warrantyDeadline: data.warrantyDeadline ?? null,
-        notes: data.notes ?? null,
-      })
-      .returning();
-    void this.audit.log({
-      entityType: 'postventa_incident',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(postventaIncidents)
+        .values({
+          companyId,
+          unitId: data.unitId,
+          reportedByContactId: data.reportedByContactId ?? null,
+          category: data.category,
+          description: data.description,
+          reportedAt: data.reportedAt,
+          warrantyDeadline: data.warrantyDeadline ?? null,
+          notes: data.notes ?? null,
+        })
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'postventa_incident',
+        entityId: row.id,
+        action: 'create',
+        newData: row,
+      });
+      return row;
     });
     return incidentToDto(row, unit.code, reportedBy?.legalName ?? null);
   }

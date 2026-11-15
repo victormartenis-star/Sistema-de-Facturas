@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
+import { runWithCorrelation } from '../request-context';
 
 export const REQUEST_ID_HEADER = 'x-request-id';
 
@@ -27,6 +28,6 @@ export class RequestIdMiddleware implements NestMiddleware {
     const id = incoming?.trim() || randomUUID();
     (req as RequestWithId).id = id;
     res.setHeader(REQUEST_ID_HEADER, id);
-    next();
+    runWithCorrelation(id, () => next());
   }
 }

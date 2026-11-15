@@ -22,7 +22,7 @@ import {
   signerFirmarSchema,
   signerRechazarSchema,
 } from '@erp/shared';
-import { AuditService } from '../../audit/audit.service';
+import { AuditService, EntradaAuditoria } from '../../audit/audit.service';
 import { DbService } from '../../db/db.service';
 
 function toDto(
@@ -135,15 +135,15 @@ export class ESignatureService {
           })),
         )
         .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'signature_request',
+        entityId: inserted.id,
+        action: 'create',
+        newData: { ...inserted, firmantes: data.firmantes },
+      });
       return { row: inserted, firmantes: insertedFirmantes };
     });
 
-    void this.audit.log({
-      entityType: 'signature_request',
-      entityId: row.id,
-      action: 'create',
-      newData: { ...row, firmantes: data.firmantes },
-    });
     return toDto(row, firmantes);
   }
 
@@ -194,24 +194,26 @@ export class ESignatureService {
           })
           .where(eq(signatureRequests.id, requestId))
           .returning();
+        const entradas: EntradaAuditoria[] = [
+          {
+            entityType: 'signature_signer',
+            entityId: signerId,
+            action: 'update',
+            newData: { estado: 'firmado', hashFirma },
+          },
+        ];
+        if (isRequestComplete(all)) {
+          entradas.push({
+            entityType: 'signature_request',
+            entityId: requestId,
+            action: 'update',
+            newData: { estado: 'completada' },
+          });
+        }
+        await this.audit.registrar(tx, entradas);
         return [updated, all] as const;
       },
     );
-
-    void this.audit.log({
-      entityType: 'signature_signer',
-      entityId: signerId,
-      action: 'update',
-      newData: { estado: 'firmado', hashFirma },
-    });
-    if (isRequestComplete(firmantes)) {
-      void this.audit.log({
-        entityType: 'signature_request',
-        entityId: requestId,
-        action: 'update',
-        newData: { estado: 'completada' },
-      });
-    }
     return toDto(updatedRow, firmantes);
   }
 
@@ -250,16 +252,15 @@ export class ESignatureService {
           .set({ estado: nuevoEstado, updatedAt: new Date() })
           .where(eq(signatureRequests.id, requestId))
           .returning();
+        await this.audit.registrar(tx, {
+          entityType: 'signature_signer',
+          entityId: signerId,
+          action: 'update',
+          newData: { estado: 'rechazado', motivo: data.motivo },
+        });
         return [updated, all] as const;
       },
     );
-
-    void this.audit.log({
-      entityType: 'signature_signer',
-      entityId: signerId,
-      action: 'update',
-      newData: { estado: 'rechazado', motivo: data.motivo },
-    });
     return toDto(updatedRow, firmantes);
   }
 

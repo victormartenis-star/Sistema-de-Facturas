@@ -25,11 +25,10 @@
  * `--limpiar` borra de la base (conexión DATABASE_URL, en una transacción: todo
  * o nada) SOLO filas con identificador `CAMPO-` y los usuarios campo-*@erp.test;
  * si una fila que no es de campo depende de una de campo, aborta sin borrar.
- * También borra de `audit_log` (sin FK a las entidades) SOLO las filas cuyo
- * `entity_id` es el id de una fila CAMPO- ya leída y cuyo `company_id` es el de
- * las empresas de esas filas (projects/contacts/users CAMPO-): una fila con
- * `entity_id` de campo pero otra empresa no se toca. Se borra antes que las
- * entidades, en la misma transacción, y el recuento se verifica como el resto.
+ * NO borra `audit_log`: la auditoría es una cadena hash inmutable por empresa
+ * (los triggers rechazan el DELETE) y borrar filas intermedias de una empresa
+ * real rompería la cadena. Las filas de auditoría de entidades CAMPO- quedan
+ * como historia; el script solo informa de cuántas son.
  * Sin `--confirmar` solo cuenta por tabla lo que borraría (transacción de solo
  * lectura). Con `--confirmar`, el orden es: validar entorno, API y login ->
  * limpiar -> sembrar, todo en la misma invocación (así no se borra sin poder
@@ -479,7 +478,8 @@ async function limpiarCampo(modo: ModoSeedCampo): Promise<void> {
             )
           ).rows;
     exigirSoloAuditoriaCampo(auditoria, idsEntidad, idsEmpresa);
-    conteos[TABLA_AUDITORIA_CAMPO] = auditoria.length;
+    // Solo informativo: la auditoría inmutable no se borra (ver cabecera).
+    const auditoriaConservada = auditoria.length;
 
     // Filas ajenas que dependen de filas de campo (cualquier tabla de la BD).
     const nombres = ORDEN_BORRADO_CAMPO.map((t) => t.tabla);
@@ -517,7 +517,7 @@ async function limpiarCampo(modo: ModoSeedCampo): Promise<void> {
       const n = res.rows[0].n as number;
       if (n === 0) continue;
       if (fk.tipo === 'n' || fk.tipo === 'd') {
-        // SET NULL / SET DEFAULT: la fila ajena sobrevive (p. ej. audit_log.user_id).
+        // SET NULL / SET DEFAULT: la fila ajena sobrevive.
         console.log(
           `aviso: ${fk.hijo}.${fk.columna} de ${n} fila(s) ajena(s) quedará sin referencia.`,
         );
@@ -540,21 +540,13 @@ async function limpiarCampo(modo: ModoSeedCampo): Promise<void> {
         : `Limpieza (${modo === 'escribir' ? 'se borra, hijos antes que padres' : 'simulación, nada se borra'}):`,
     );
     for (const l of lineas) console.log(`  ${l}`);
+    if (auditoriaConservada > 0) {
+      console.log(
+        `  aviso: ${auditoriaConservada} fila(s) de ${TABLA_AUDITORIA_CAMPO} de entidades CAMPO- se conservan (cadena de auditoría inmutable).`,
+      );
+    }
 
     if (modo === 'escribir') {
-      // Primero la auditoría (orden seguro: antes de borrar las entidades).
-      if (conteos[TABLA_AUDITORIA_CAMPO] > 0) {
-        const res = await cliente.query(
-          `DELETE FROM ${TABLA_AUDITORIA_CAMPO}
-            WHERE entity_id = ANY($1::uuid[]) AND company_id = ANY($2::uuid[])`,
-          [idsEntidad, idsEmpresa],
-        );
-        if (res.rowCount !== conteos[TABLA_AUDITORIA_CAMPO]) {
-          throw new Error(
-            `${TABLA_AUDITORIA_CAMPO}: se esperaban ${conteos[TABLA_AUDITORIA_CAMPO]} borrados y fueron ${res.rowCount}.`,
-          );
-        }
-      }
       for (const t of ORDEN_BORRADO_CAMPO) {
         if ((conteos[t.tabla] ?? 0) === 0) continue;
         const porIds = ids[t.tabla];

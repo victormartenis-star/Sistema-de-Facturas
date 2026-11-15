@@ -114,22 +114,25 @@ export class TreasuryService {
   ): Promise<BankAccountDto> {
     const companyId = await this.dbs.getCompanyId();
     const data = bankAccountCreateSchema.parse(input);
-    const [row] = await this.dbs.db
-      .insert(bankAccounts)
-      .values({
-        companyId,
-        name: data.name,
-        kind: data.kind,
-        iban: data.iban ?? null,
-        currentBalance: data.currentBalance.toFixed(2),
-        isActive: data.isActive,
-      })
-      .returning();
-    void this.audit.log({
-      entityType: 'bank_account',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [creada] = await tx
+        .insert(bankAccounts)
+        .values({
+          companyId,
+          name: data.name,
+          kind: data.kind,
+          iban: data.iban ?? null,
+          currentBalance: data.currentBalance.toFixed(2),
+          isActive: data.isActive,
+        })
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'bank_account',
+        entityId: creada.id,
+        action: 'create',
+        newData: creada,
+      });
+      return creada;
     });
     return bankAccountToDto(row);
   }
@@ -140,25 +143,28 @@ export class TreasuryService {
   ): Promise<BankAccountDto> {
     await this.findBankAccount(id);
     const data = bankAccountUpdateSchema.parse(input);
-    const [row] = await this.dbs.db
-      .update(bankAccounts)
-      .set({
-        ...(data.name !== undefined && { name: data.name }),
-        ...(data.kind !== undefined && { kind: data.kind }),
-        ...(data.iban !== undefined && { iban: data.iban ?? null }),
-        ...(data.currentBalance !== undefined && {
-          currentBalance: data.currentBalance.toFixed(2),
-        }),
-        ...(data.isActive !== undefined && { isActive: data.isActive }),
-        updatedAt: new Date(),
-      })
-      .where(eq(bankAccounts.id, id))
-      .returning();
-    void this.audit.log({
-      entityType: 'bank_account',
-      entityId: row.id,
-      action: 'update',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [actualizada] = await tx
+        .update(bankAccounts)
+        .set({
+          ...(data.name !== undefined && { name: data.name }),
+          ...(data.kind !== undefined && { kind: data.kind }),
+          ...(data.iban !== undefined && { iban: data.iban ?? null }),
+          ...(data.currentBalance !== undefined && {
+            currentBalance: data.currentBalance.toFixed(2),
+          }),
+          ...(data.isActive !== undefined && { isActive: data.isActive }),
+          updatedAt: new Date(),
+        })
+        .where(eq(bankAccounts.id, id))
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'bank_account',
+        entityId: actualizada.id,
+        action: 'update',
+        newData: actualizada,
+      });
+      return actualizada;
     });
     return bankAccountToDto(row);
   }

@@ -221,15 +221,15 @@ export class ChangeOrdersService {
               )
               .returning()
           : [];
+      await this.audit.registrar(tx, {
+        entityType: 'change_order',
+        entityId: inserted.id,
+        action: 'create',
+        newData: inserted,
+      });
       return { row: inserted, lineas: insertedLineas };
     });
 
-    void this.audit.log({
-      entityType: 'change_order',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
-    });
     return this.hydrate(row, lineas);
   }
 
@@ -343,22 +343,24 @@ export class ChangeOrdersService {
     const data = changeOrderEnviarSchema.parse(input);
     await this.findContact(data.direccionFacultativaContactId);
 
-    const [row] = await this.dbs.db
-      .update(changeOrders)
-      .set({
-        estado: 'enviado_df',
-        direccionFacultativaContactId: data.direccionFacultativaContactId,
-        fechaEnvio: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(changeOrders.id, id))
-      .returning();
-
-    void this.audit.log({
-      entityType: 'change_order',
-      entityId: id,
-      action: 'update',
-      newData: { estado: 'enviado_df' },
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(changeOrders)
+        .set({
+          estado: 'enviado_df',
+          direccionFacultativaContactId: data.direccionFacultativaContactId,
+          fechaEnvio: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(changeOrders.id, id))
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'change_order',
+        entityId: id,
+        action: 'update',
+        newData: { estado: 'enviado_df' },
+      });
+      return row;
     });
     return this.hydrate(row);
   }
@@ -376,28 +378,30 @@ export class ChangeOrdersService {
     }
     const data = changeOrderResolverSchema.parse(input);
 
-    const [row] = await this.dbs.db
-      .update(changeOrders)
-      .set({
-        estado: data.estado,
-        importeAprobado:
-          data.estado === 'aprobado'
-            ? (
-                data.importeAprobado ?? Number(existing.importeEstimado)
-              ).toFixed(2)
-            : null,
-        comentarioResolucion: data.comentarioResolucion ?? null,
-        fechaResolucion: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(changeOrders.id, id))
-      .returning();
-
-    void this.audit.log({
-      entityType: 'change_order',
-      entityId: id,
-      action: 'update',
-      newData: { estado: data.estado, importeAprobado: row.importeAprobado },
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(changeOrders)
+        .set({
+          estado: data.estado,
+          importeAprobado:
+            data.estado === 'aprobado'
+              ? (
+                  data.importeAprobado ?? Number(existing.importeEstimado)
+                ).toFixed(2)
+              : null,
+          comentarioResolucion: data.comentarioResolucion ?? null,
+          fechaResolucion: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(changeOrders.id, id))
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'change_order',
+        entityId: id,
+        action: 'update',
+        newData: { estado: data.estado, importeAprobado: row.importeAprobado },
+      });
+      return row;
     });
     return this.hydrate(row);
   }

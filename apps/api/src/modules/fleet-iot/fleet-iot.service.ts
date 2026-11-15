@@ -18,7 +18,7 @@ import {
   telemetriaIngestSchema,
   todayIso,
 } from '@erp/shared';
-import { AuditService } from '../../audit/audit.service';
+import { AuditService, EntradaAuditoria } from '../../audit/audit.service';
 import { DbService } from '../../db/db.service';
 
 function lecturaToDto(row: IotLecturaTelemetria): TelemetriaLecturaDto {
@@ -72,57 +72,64 @@ export class FleetIotService {
     const data = telemetriaIngestSchema.parse(input);
     const equipo = await this.findEquipo(data.equipoId);
 
-    const [lectura] = await this.dbs.db
-      .insert(iotLecturasTelemetria)
-      .values({
-        companyId,
-        equipoId: data.equipoId,
-        projectId: data.projectId ?? null,
-        capturadoEn: data.capturadoEn ? new Date(data.capturadoEn) : new Date(),
-        horasUso: data.horasUso?.toFixed(2) ?? null,
-        kmRecorridos: data.kmRecorridos?.toFixed(2) ?? null,
-        combustibleNivelPct: data.combustibleNivelPct?.toFixed(2) ?? null,
-        temperaturaMotor: data.temperaturaMotor?.toFixed(2) ?? null,
-        ubicacionLat: data.ubicacionLat?.toFixed(6) ?? null,
-        ubicacionLng: data.ubicacionLng?.toFixed(6) ?? null,
-        codigoError: data.codigoError ?? null,
-        payload: data.payload,
-      })
-      .returning();
-
-    const candidatas = evaluateTelemetriaAlertas({
-      codigoError: data.codigoError,
-      temperaturaMotor: data.temperaturaMotor,
-      combustibleNivelPct: data.combustibleNivelPct,
-    });
-
-    const alertas: IotAlertaDto[] = [];
-    for (const candidata of candidatas) {
-      const [row] = await this.dbs.db
-        .insert(iotAlertas)
+    const { lectura, alertas } = await this.dbs.db.transaction(async (tx) => {
+      const [lectura] = await tx
+        .insert(iotLecturasTelemetria)
         .values({
           companyId,
           equipoId: data.equipoId,
-          lecturaId: lectura.id,
-          tipo: candidata.tipo,
-          gravedad: candidata.gravedad,
-          mensaje: candidata.mensaje,
+          projectId: data.projectId ?? null,
+          capturadoEn: data.capturadoEn
+            ? new Date(data.capturadoEn)
+            : new Date(),
+          horasUso: data.horasUso?.toFixed(2) ?? null,
+          kmRecorridos: data.kmRecorridos?.toFixed(2) ?? null,
+          combustibleNivelPct: data.combustibleNivelPct?.toFixed(2) ?? null,
+          temperaturaMotor: data.temperaturaMotor?.toFixed(2) ?? null,
+          ubicacionLat: data.ubicacionLat?.toFixed(6) ?? null,
+          ubicacionLng: data.ubicacionLng?.toFixed(6) ?? null,
+          codigoError: data.codigoError ?? null,
+          payload: data.payload,
         })
         .returning();
-      void this.audit.log({
-        entityType: 'iot_alerta',
-        entityId: row.id,
-        action: 'create',
-        newData: row,
-      });
-      alertas.push(alertaToDto(row, equipo.nombre));
-    }
 
-    void this.audit.log({
-      entityType: 'iot_lectura_telemetria',
-      entityId: lectura.id,
-      action: 'create',
-      newData: lectura,
+      const candidatas = evaluateTelemetriaAlertas({
+        codigoError: data.codigoError,
+        temperaturaMotor: data.temperaturaMotor,
+        combustibleNivelPct: data.combustibleNivelPct,
+      });
+
+      const alertas: IotAlertaDto[] = [];
+      const entradasAuditoria: EntradaAuditoria[] = [];
+      for (const candidata of candidatas) {
+        const [row] = await tx
+          .insert(iotAlertas)
+          .values({
+            companyId,
+            equipoId: data.equipoId,
+            lecturaId: lectura.id,
+            tipo: candidata.tipo,
+            gravedad: candidata.gravedad,
+            mensaje: candidata.mensaje,
+          })
+          .returning();
+        entradasAuditoria.push({
+          entityType: 'iot_alerta',
+          entityId: row.id,
+          action: 'create',
+          newData: row,
+        });
+        alertas.push(alertaToDto(row, equipo.nombre));
+      }
+
+      entradasAuditoria.push({
+        entityType: 'iot_lectura_telemetria',
+        entityId: lectura.id,
+        action: 'create',
+        newData: lectura,
+      });
+      await this.audit.registrar(tx, entradasAuditoria);
+      return { lectura, alertas };
     });
     return { lectura: lecturaToDto(lectura), alertas };
   }

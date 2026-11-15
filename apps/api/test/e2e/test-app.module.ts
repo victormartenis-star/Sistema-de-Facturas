@@ -24,6 +24,8 @@ import { OfflineFieldModule } from '../../src/modules/offline-field/offline-fiel
 import { ComparativosModule } from '../../src/modules/comparativos/comparativos.module';
 import { EquiposModule } from '../../src/modules/equipos/equipos.module';
 import { TrabajadoresModule } from '../../src/modules/trabajadores/trabajadores.module';
+import { ESignatureModule } from '../../src/modules/e-signature/e-signature.module';
+import { FleetIotModule } from '../../src/modules/fleet-iot/fleet-iot.module';
 import { EsgModule } from '../../src/modules/esg/esg.module';
 import { PartesDiariosModule } from '../../src/modules/partes-diarios/partes-diarios.module';
 import { OcrModule } from '../../src/ocr/ocr.module';
@@ -71,6 +73,8 @@ import { UsersModule } from '../../src/users/users.module';
   imports: [
     CommonModule,
     DbModule,
+    ESignatureModule, // sin spec propio: lo ejercita audit-servicios.e2e-spec.ts (auditoría en transacción)
+    FleetIotModule, // ídem
     AuditModule,
     AuthModule,
     ProjectsModule,

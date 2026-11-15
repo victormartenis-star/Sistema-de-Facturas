@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   AnyPgColumn,
+  bigint,
   boolean,
   char,
   check,
@@ -12,6 +13,7 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   unique,
@@ -1103,28 +1105,86 @@ export type AuditAction = (typeof AUDIT_ACTIONS)[number];
  * `AuditPartitionService` (`apps/api/src/audit/`) — sin `pg_partman`, no
  * disponible en este entorno.
  */
-export const auditLog = pgTable('audit_log', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  /** Timestamp del evento (con zona horaria). */
-  occurredAt: timestamp('occurred_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  /** Usuario que realizó la acción (null si fue el sistema). */
-  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
-  companyId: uuid('company_id')
-    .notNull()
-    .references(() => companies.id, { onDelete: 'cascade' }),
-  /** Tipo de entidad: 'certification', 'invoice', 'project', etc. */
-  entityType: varchar('entity_type', { length: 60 }).notNull(),
-  entityId: uuid('entity_id').notNull(),
-  action: varchar('action', { length: 10 }).notNull(),
-  /** Snapshot anterior (null en create). */
-  oldData: jsonb('old_data'),
-  /** Snapshot nuevo (null en delete). */
-  newData: jsonb('new_data'),
-  /** IP o agente adicional (opcional). */
-  meta: jsonb('meta'),
-});
+export const auditLog = pgTable(
+  'audit_log',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** Timestamp del evento (con zona horaria). Las filas nuevas llevan precisión de milisegundos. */
+    occurredAt: timestamp('occurred_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /**
+     * Usuario que realizó la acción (null si fue el sistema). Sin FK: una FK
+     * `ON DELETE SET NULL` haría un UPDATE sobre una tabla inmutable.
+     */
+    userId: uuid('user_id'),
+    /** Sin `ON DELETE CASCADE`: borrar una empresa con auditoría debe fallar. */
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    /** Tipo de entidad: 'certification', 'invoice', 'project', etc. */
+    entityType: varchar('entity_type', { length: 60 }).notNull(),
+    entityId: uuid('entity_id').notNull(),
+    action: varchar('action', { length: 10 }).notNull(),
+    /** Snapshot anterior (null en create). */
+    oldData: jsonb('old_data'),
+    /** Snapshot nuevo (null en delete). */
+    newData: jsonb('new_data'),
+    /** IP o agente adicional (opcional). */
+    meta: jsonb('meta'),
+    /** 1, 2, 3… por empresa, sin huecos (cadena hash). */
+    sequenceNumber: bigint('sequence_number', { mode: 'number' }).notNull(),
+    /** `entry_hash` de la fila anterior; génesis = 64 ceros. Nulo solo en filas históricas sin sellar. */
+    previousHash: char('previous_hash', { length: 64 }),
+    /** SHA-256 hex de la preimagen canónica (ver `@erp/shared` audit-hash). */
+    entryHash: char('entry_hash', { length: 64 }),
+    hashVersion: smallint('hash_version'),
+    /** `X-Request-Id` de la petición que originó la entrada (entra en el hash). */
+    correlationId: varchar('correlation_id', { length: 64 }),
+  },
+  (t) => [
+    uniqueIndex('audit_log_company_seq_unique').on(
+      t.companyId,
+      t.sequenceNumber,
+      t.occurredAt,
+    ),
+    index('audit_log_company_correlation_idx')
+      .on(t.companyId, t.correlationId)
+      .where(sql`${t.correlationId} IS NOT NULL`),
+  ],
+);
+
+/**
+ * Cabecera de la cadena hash: una fila por empresa. Su bloqueo de fila
+ * (`FOR UPDATE`) serializa las escrituras de auditoría de la empresa y es la
+ * garantía de unicidad de `(company_id, sequence_number)` (un UNIQUE en una
+ * tabla particionada debe incluir la clave de partición). Solo la tocan los
+ * triggers de `audit_log`. `last_entry_hash` nulo = filas históricas sin sellar.
+ */
+export const auditChainHeads = pgTable(
+  'audit_chain_heads',
+  {
+    companyId: uuid('company_id')
+      .primaryKey()
+      .references(() => companies.id),
+    lastSequenceNumber: bigint('last_sequence_number', { mode: 'number' })
+      .notNull()
+      .default(0),
+    lastEntryHash: char('last_entry_hash', { length: 64 }).default(
+      '0000000000000000000000000000000000000000000000000000000000000000',
+    ),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    check('audit_chain_heads_seq_check', sql`${t.lastSequenceNumber} >= 0`),
+    check(
+      'audit_chain_heads_hash_check',
+      sql`${t.lastEntryHash} IS NULL OR ${t.lastEntryHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+  ],
+);
 
 export type AuditLogEntry = typeof auditLog.$inferSelect;
 export type NewAuditLogEntry = typeof auditLog.$inferInsert;

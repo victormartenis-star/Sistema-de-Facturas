@@ -69,6 +69,13 @@ export class AuditPartitionService {
           `create table "${partitionName}" partition of audit_log for values from ('${startIso}') to ('${endIso}')`,
         ),
       );
+      // Los triggers de fila se clonan solos desde el padre; los de sentencia
+      // (TRUNCATE) no: hay que crearlo en cada partición nueva.
+      await db.execute(
+        sql.raw(
+          `create trigger audit_log_bt_truncate before truncate on "${partitionName}" for each statement execute function audit_bloquear_truncate()`,
+        ),
+      );
       created.push(partitionName);
     }
     return created;

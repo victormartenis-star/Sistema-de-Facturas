@@ -2,6 +2,8 @@ import { Global, Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AuditController } from './audit.controller';
 import { AuditPartitionService } from './audit-partition.service';
+import { AuditChainBackfillService } from './audit-chain-backfill.service';
+import { AuditIntegrityService } from './audit-integrity.service';
 import { AuditService } from './audit.service';
 
 /** Global para que otros módulos puedan inyectar AuditService sin importar AuditModule. */
@@ -9,7 +11,12 @@ import { AuditService } from './audit.service';
 @Module({
   imports: [ScheduleModule.forRoot()],
   controllers: [AuditController],
-  providers: [AuditService, AuditPartitionService],
-  exports: [AuditService],
+  providers: [
+    AuditService,
+    AuditPartitionService,
+    AuditIntegrityService,
+    AuditChainBackfillService,
+  ],
+  exports: [AuditService, AuditIntegrityService],
 })
 export class AuditModule {}

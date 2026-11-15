@@ -42,9 +42,14 @@ export async function resetTestDb(
   if (tableNames.length === 0) return;
   const db = getDb();
   const identifiers = tableNames.map((name) => `"${name}"`).join(', ');
-  await db.execute(
-    sql.raw(`TRUNCATE TABLE ${identifiers} RESTART IDENTITY CASCADE`),
-  );
+  // `audit_log`/`audit_chain_heads` son inmutables: la purga de cadena
+  // completa solo la permite `erp.audit_purge = on` en una base `*_test`.
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`select set_config('erp.audit_purge', 'on', true)`);
+    await tx.execute(
+      sql.raw(`TRUNCATE TABLE ${identifiers} RESTART IDENTITY CASCADE`),
+    );
+  });
 }
 
 /**
@@ -71,7 +76,10 @@ export async function seedCompany(): Promise<string> {
   // exactamente una empresa (la de este fichero) antes de que arranque su
   // primer test, igual que si de verdad solo existiera una empresa en toda
   // la base (la premisa que `getDefaultCompanyId()` da por hecha).
-  await db.execute(sql`TRUNCATE TABLE "companies" RESTART IDENTITY CASCADE`);
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`select set_config('erp.audit_purge', 'on', true)`);
+    await tx.execute(sql`TRUNCATE TABLE "companies" RESTART IDENTITY CASCADE`);
+  });
   const [company] = await db
     .insert(companies)
     .values({ name: 'Empresa de Pruebas de Integración', taxId: 'B00000000' })

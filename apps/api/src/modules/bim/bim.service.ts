@@ -144,23 +144,26 @@ export class BimService {
       file.buffer,
     );
     try {
-      const [row] = await this.dbs.db
-        .insert(bimModels)
-        .values({
-          companyId,
-          projectId: meta.projectId,
-          name: meta.name,
-          storageKey,
-          fileName,
-          fileSize: file.buffer.length,
-          ifcSchema: sniffIfcSchema(file.buffer),
-        })
-        .returning();
-      void this.audit.log({
-        entityType: 'bim_model',
-        entityId: row.id,
-        action: 'create',
-        newData: row,
+      const row = await this.dbs.db.transaction(async (tx) => {
+        const [creado] = await tx
+          .insert(bimModels)
+          .values({
+            companyId,
+            projectId: meta.projectId,
+            name: meta.name,
+            storageKey,
+            fileName,
+            fileSize: file.buffer.length,
+            ifcSchema: sniffIfcSchema(file.buffer),
+          })
+          .returning();
+        await this.audit.registrar(tx, {
+          entityType: 'bim_model',
+          entityId: creado.id,
+          action: 'create',
+          newData: creado,
+        });
+        return creado;
       });
       return modelToDto(row, project);
     } catch (err) {
@@ -183,14 +186,16 @@ export class BimService {
 
   async removeModel(id: string): Promise<void> {
     const row = await this.findModel(id);
-    await this.dbs.db
-      .update(bimModels)
-      .set({ deletedAt: new Date(), updatedAt: new Date() })
-      .where(eq(bimModels.id, id));
-    void this.audit.log({
-      entityType: 'bim_model',
-      entityId: row.id,
-      action: 'delete',
+    await this.dbs.db.transaction(async (tx) => {
+      await tx
+        .update(bimModels)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(eq(bimModels.id, id));
+      await this.audit.registrar(tx, {
+        entityType: 'bim_model',
+        entityId: row.id,
+        action: 'delete',
+      });
     });
   }
 
@@ -254,22 +259,24 @@ export class BimService {
       updatedAt: new Date(),
     };
 
-    const [row] = existing
-      ? await this.dbs.db
-          .update(bimElementLinks)
-          .set(values)
-          .where(eq(bimElementLinks.id, existing.id))
-          .returning()
-      : await this.dbs.db
-          .insert(bimElementLinks)
-          .values({ bimModelId, ifcGlobalId, ...values })
-          .returning();
-
-    void this.audit.log({
-      entityType: 'bim_element_link',
-      entityId: row.id,
-      action: existing ? 'update' : 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [guardado] = existing
+        ? await tx
+            .update(bimElementLinks)
+            .set(values)
+            .where(eq(bimElementLinks.id, existing.id))
+            .returning()
+        : await tx
+            .insert(bimElementLinks)
+            .values({ bimModelId, ifcGlobalId, ...values })
+            .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'bim_element_link',
+        entityId: guardado.id,
+        action: existing ? 'update' : 'create',
+        newData: guardado,
+      });
+      return guardado;
     });
 
     const item = row.budgetItemId

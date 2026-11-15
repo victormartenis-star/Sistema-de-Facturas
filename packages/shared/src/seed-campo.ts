@@ -547,7 +547,10 @@ export function motivoAbortoPorDependientes(
   return `No se borra nada: hay filas que no son de campo y dependen de datos ${PREFIJO_CAMPO}: ${detalle}. Resuélvelo a mano y reintenta.`;
 }
 
-/** Tabla de auditoría: sus filas se borran antes que las entidades que registran. */
+/**
+ * Tabla de auditoría. Es una cadena hash inmutable: `--limpiar` NO la borra
+ * (solo cuenta las filas de campo para avisar de que se conservan).
+ */
 export const TABLA_AUDITORIA_CAMPO = 'audit_log';
 
 const RE_UUID =
@@ -617,12 +620,12 @@ export function exigirSoloAuditoriaCampo(
 
 /**
  * Líneas legibles `tabla: n` en orden de borrado (solo tablas con filas).
- * `audit_log` va primero: se borra antes que las entidades.
+ * `audit_log` no figura: la auditoría inmutable no se borra.
  */
 export function resumenLimpieza(
   conteos: Readonly<Record<string, number>>,
 ): string[] {
-  return [{ tabla: TABLA_AUDITORIA_CAMPO }, ...ORDEN_BORRADO_CAMPO]
-    .filter((t) => (conteos[t.tabla] ?? 0) > 0)
-    .map((t) => `${t.tabla}: ${conteos[t.tabla]}`);
+  return ORDEN_BORRADO_CAMPO.filter((t) => (conteos[t.tabla] ?? 0) > 0).map(
+    (t) => `${t.tabla}: ${conteos[t.tabla]}`,
+  );
 }

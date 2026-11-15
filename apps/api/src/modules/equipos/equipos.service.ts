@@ -123,27 +123,29 @@ export class EquiposService {
     if (data.proveedorAlquilerId)
       await this.findProveedorNombre(data.proveedorAlquilerId);
 
-    const [row] = await this.dbs.db
-      .insert(equipos)
-      .values({
-        companyId,
-        nombre: data.nombre,
-        matricula: data.matricula ?? null,
-        tipo: data.tipo,
-        ownership: data.ownership,
-        proveedorAlquilerId: data.proveedorAlquilerId ?? null,
-        estado: data.estado,
-        fechaAlta: data.fechaAlta ?? null,
-        fechaBaja: data.fechaBaja ?? null,
-        notas: data.notas ?? null,
-      })
-      .returning();
-
-    void this.audit.log({
-      entityType: 'equipo',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(equipos)
+        .values({
+          companyId,
+          nombre: data.nombre,
+          matricula: data.matricula ?? null,
+          tipo: data.tipo,
+          ownership: data.ownership,
+          proveedorAlquilerId: data.proveedorAlquilerId ?? null,
+          estado: data.estado,
+          fechaAlta: data.fechaAlta ?? null,
+          fechaBaja: data.fechaBaja ?? null,
+          notas: data.notas ?? null,
+        })
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'equipo',
+        entityId: row.id,
+        action: 'create',
+        newData: row,
+      });
+      return row;
     });
     const proveedorNombre = row.proveedorAlquilerId
       ? await this.findProveedorNombre(row.proveedorAlquilerId)
@@ -234,25 +236,27 @@ export class EquiposService {
     await this.findEquipo(data.equipoId);
     if (data.proveedorId) await this.findProveedorNombre(data.proveedorId);
 
-    const [row] = await this.dbs.db
-      .insert(mantenimientosEquipo)
-      .values({
-        companyId,
-        equipoId: data.equipoId,
-        tipo: data.tipo,
-        fecha: data.fecha,
-        proveedorId: data.proveedorId ?? null,
-        coste: data.coste?.toFixed(2) ?? null,
-        proximaRevisionFecha: data.proximaRevisionFecha ?? null,
-        descripcion: data.descripcion ?? null,
-      })
-      .returning();
-
-    void this.audit.log({
-      entityType: 'mantenimiento_equipo',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(mantenimientosEquipo)
+        .values({
+          companyId,
+          equipoId: data.equipoId,
+          tipo: data.tipo,
+          fecha: data.fecha,
+          proveedorId: data.proveedorId ?? null,
+          coste: data.coste?.toFixed(2) ?? null,
+          proximaRevisionFecha: data.proximaRevisionFecha ?? null,
+          descripcion: data.descripcion ?? null,
+        })
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'mantenimiento_equipo',
+        entityId: row.id,
+        action: 'create',
+        newData: row,
+      });
+      return row;
     });
     const proveedorNombre = row.proveedorId
       ? await this.findProveedorNombre(row.proveedorId)

@@ -68,26 +68,28 @@ export class ContractAiService {
 
     const result = await this.callModel(content);
 
-    const [row] = await this.dbs.db
-      .insert(contractAudits)
-      .values({
-        companyId,
-        projectId: data.projectId ?? null,
-        contactId: data.contactId ?? null,
-        documentId: data.documentId ?? null,
-        model: this.model,
-        overallRisk: result.overallRisk,
-        summary: result.summary,
-        findings: result.findings,
-        requestedByUserId,
-      })
-      .returning();
-
-    void this.audit.log({
-      entityType: 'contract_audit',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(contractAudits)
+        .values({
+          companyId,
+          projectId: data.projectId ?? null,
+          contactId: data.contactId ?? null,
+          documentId: data.documentId ?? null,
+          model: this.model,
+          overallRisk: result.overallRisk,
+          summary: result.summary,
+          findings: result.findings,
+          requestedByUserId,
+        })
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'contract_audit',
+        entityId: row.id,
+        action: 'create',
+        newData: row,
+      });
+      return row;
     });
 
     const contactName = row.contactId

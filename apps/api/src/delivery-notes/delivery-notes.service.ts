@@ -416,15 +416,14 @@ export class DeliveryNotesService {
         versionEsperada,
       );
       if (locked.orderId) await this.orders.refreshStatus(locked.orderId, tx);
-    });
-
-    void this.audit.log({
-      entityType: 'delivery_note',
-      entityId: id,
-      action: 'update',
-      oldData: { status: 'validado' },
-      newData: { status: 'pendiente' },
-      meta: { accion: 'devolver', motivo },
+      await this.audit.registrar(tx, {
+        entityType: 'delivery_note',
+        entityId: id,
+        action: 'update',
+        oldData: { status: 'validado' },
+        newData: { status: 'pendiente' },
+        meta: { accion: 'devolver', motivo },
+      });
     });
     return this.get(id);
   }

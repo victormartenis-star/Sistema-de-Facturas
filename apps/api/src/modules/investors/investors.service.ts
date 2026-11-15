@@ -103,24 +103,27 @@ export class InvestorsService {
   async createInvestor(input: InvestorCreateInput): Promise<InvestorDto> {
     const companyId = await this.dbs.getCompanyId();
     const data = investorCreateSchema.parse(input);
-    const [row] = await this.dbs.db
-      .insert(investors)
-      .values({
-        companyId,
-        kind: data.kind,
-        legalName: data.legalName,
-        taxId: data.taxId ?? null,
-        email: data.email ?? null,
-        phone: data.phone ?? null,
-        iban: data.iban ?? null,
-        notes: data.notes ?? null,
-      })
-      .returning();
-    void this.audit.log({
-      entityType: 'investor',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(investors)
+        .values({
+          companyId,
+          kind: data.kind,
+          legalName: data.legalName,
+          taxId: data.taxId ?? null,
+          email: data.email ?? null,
+          phone: data.phone ?? null,
+          iban: data.iban ?? null,
+          notes: data.notes ?? null,
+        })
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'investor',
+        entityId: row.id,
+        action: 'create',
+        newData: row,
+      });
+      return row;
     });
     return investorToDto(row);
   }
@@ -203,28 +206,31 @@ export class InvestorsService {
       await this.assertCompanyWideAllowed();
     }
 
-    const [row] = await this.dbs.db
-      .insert(investmentAccounts)
-      .values({
-        companyId,
-        projectId: data.projectId ?? null,
-        name: data.name,
-        status: data.status,
-        committedAmount: data.committedAmount.toFixed(2),
-        currentValuationAmount:
-          data.currentValuationAmount !== undefined &&
-          data.currentValuationAmount !== null
-            ? data.currentValuationAmount.toFixed(2)
-            : null,
-        startDate: data.startDate,
-        notes: data.notes ?? null,
-      })
-      .returning();
-    void this.audit.log({
-      entityType: 'investment_account',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(investmentAccounts)
+        .values({
+          companyId,
+          projectId: data.projectId ?? null,
+          name: data.name,
+          status: data.status,
+          committedAmount: data.committedAmount.toFixed(2),
+          currentValuationAmount:
+            data.currentValuationAmount !== undefined &&
+            data.currentValuationAmount !== null
+              ? data.currentValuationAmount.toFixed(2)
+              : null,
+          startDate: data.startDate,
+          notes: data.notes ?? null,
+        })
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'investment_account',
+        entityId: row.id,
+        action: 'create',
+        newData: row,
+      });
+      return row;
     });
     return this.accountToDto(row, projectCode);
   }
@@ -236,45 +242,50 @@ export class InvestorsService {
     const { account, projectCode } = await this.findAccountWithProject(id);
     const data = investmentAccountUpdateSchema.parse(input);
 
-    const [row] = await this.dbs.db
-      .update(investmentAccounts)
-      .set({
-        ...(data.name !== undefined && { name: data.name }),
-        ...(data.status !== undefined && { status: data.status }),
-        ...(data.committedAmount !== undefined && {
-          committedAmount: data.committedAmount.toFixed(2),
-        }),
-        ...(data.currentValuationAmount !== undefined && {
-          currentValuationAmount:
-            data.currentValuationAmount === null
-              ? null
-              : data.currentValuationAmount.toFixed(2),
-        }),
-        ...(data.startDate !== undefined && { startDate: data.startDate }),
-        ...(data.notes !== undefined && { notes: data.notes ?? null }),
-        updatedAt: new Date(),
-      })
-      .where(eq(investmentAccounts.id, id))
-      .returning();
-    void this.audit.log({
-      entityType: 'investment_account',
-      entityId: row.id,
-      action: 'update',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(investmentAccounts)
+        .set({
+          ...(data.name !== undefined && { name: data.name }),
+          ...(data.status !== undefined && { status: data.status }),
+          ...(data.committedAmount !== undefined && {
+            committedAmount: data.committedAmount.toFixed(2),
+          }),
+          ...(data.currentValuationAmount !== undefined && {
+            currentValuationAmount:
+              data.currentValuationAmount === null
+                ? null
+                : data.currentValuationAmount.toFixed(2),
+          }),
+          ...(data.startDate !== undefined && { startDate: data.startDate }),
+          ...(data.notes !== undefined && { notes: data.notes ?? null }),
+          updatedAt: new Date(),
+        })
+        .where(eq(investmentAccounts.id, id))
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'investment_account',
+        entityId: row.id,
+        action: 'update',
+        newData: row,
+      });
+      return row;
     });
     return this.accountToDto(row, account.projectId ? projectCode : null);
   }
 
   async removeAccount(id: string): Promise<void> {
     const { account } = await this.findAccountWithProject(id);
-    await this.dbs.db
-      .update(investmentAccounts)
-      .set({ deletedAt: new Date(), updatedAt: new Date() })
-      .where(eq(investmentAccounts.id, id));
-    void this.audit.log({
-      entityType: 'investment_account',
-      entityId: account.id,
-      action: 'delete',
+    await this.dbs.db.transaction(async (tx) => {
+      await tx
+        .update(investmentAccounts)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(eq(investmentAccounts.id, id));
+      await this.audit.registrar(tx, {
+        entityType: 'investment_account',
+        entityId: account.id,
+        action: 'delete',
+      });
     });
   }
 
@@ -293,21 +304,24 @@ export class InvestorsService {
     const data = participationCreateSchema.parse(input);
     const investor = await this.findInvestor(data.investorId);
 
-    const [row] = await this.dbs.db
-      .insert(investmentParticipations)
-      .values({
-        accountId,
-        investorId: data.investorId,
-        participationPct: data.participationPct.toFixed(4),
-        committedAmount: data.committedAmount.toFixed(2),
-        joinedAt: data.joinedAt,
-      })
-      .returning();
-    void this.audit.log({
-      entityType: 'investment_participation',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(investmentParticipations)
+        .values({
+          accountId,
+          investorId: data.investorId,
+          participationPct: data.participationPct.toFixed(4),
+          committedAmount: data.committedAmount.toFixed(2),
+          joinedAt: data.joinedAt,
+        })
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'investment_participation',
+        entityId: row.id,
+        action: 'create',
+        newData: row,
+      });
+      return row;
     });
     return this.participationToDto(row, investor.legalName);
   }
@@ -345,13 +359,15 @@ export class InvestorsService {
   ): Promise<void> {
     await this.findAccountWithProject(accountId);
     await this.findParticipation(accountId, participationId);
-    await this.dbs.db
-      .delete(investmentParticipations)
-      .where(eq(investmentParticipations.id, participationId));
-    void this.audit.log({
-      entityType: 'investment_participation',
-      entityId: participationId,
-      action: 'delete',
+    await this.dbs.db.transaction(async (tx) => {
+      await tx
+        .delete(investmentParticipations)
+        .where(eq(investmentParticipations.id, participationId));
+      await this.audit.registrar(tx, {
+        entityType: 'investment_participation',
+        entityId: participationId,
+        action: 'delete',
+      });
     });
   }
 
@@ -371,23 +387,26 @@ export class InvestorsService {
     const data = investmentCashflowCreateSchema.parse(input);
     const investor = await this.findInvestor(data.investorId);
 
-    const [row] = await this.dbs.db
-      .insert(investmentCashflows)
-      .values({
-        companyId,
-        accountId,
-        investorId: data.investorId,
-        direction: data.direction,
-        flowDate: data.flowDate,
-        amount: data.amount.toFixed(2),
-        concept: data.concept ?? null,
-      })
-      .returning();
-    void this.audit.log({
-      entityType: 'investment_cashflow',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(investmentCashflows)
+        .values({
+          companyId,
+          accountId,
+          investorId: data.investorId,
+          direction: data.direction,
+          flowDate: data.flowDate,
+          amount: data.amount.toFixed(2),
+          concept: data.concept ?? null,
+        })
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'investment_cashflow',
+        entityId: row.id,
+        action: 'create',
+        newData: row,
+      });
+      return row;
     });
     return cashflowToDto(row, investor.legalName);
   }
@@ -415,20 +434,29 @@ export class InvestorsService {
       data.totalAmount,
     );
 
-    const rows = await this.dbs.db
-      .insert(investmentCashflows)
-      .values(
-        shares.map((s) => ({
-          companyId,
-          accountId,
-          investorId: s.investorId,
-          direction: 'reparto' as const,
-          flowDate: data.flowDate,
-          amount: s.amount.toFixed(2),
-          concept: data.concept ?? null,
-        })),
-      )
-      .returning();
+    const rows = await this.dbs.db.transaction(async (tx) => {
+      const creados = await tx
+        .insert(investmentCashflows)
+        .values(
+          shares.map((s) => ({
+            companyId,
+            accountId,
+            investorId: s.investorId,
+            direction: 'reparto' as const,
+            flowDate: data.flowDate,
+            amount: s.amount.toFixed(2),
+            concept: data.concept ?? null,
+          })),
+        )
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'investment_account',
+        entityId: accountId,
+        action: 'update',
+        newData: { reparto: data },
+      });
+      return creados;
+    });
 
     const namesByInvestor = new Map(
       participations.map((p) => [p.investorId, p.investorName]),
@@ -436,13 +464,6 @@ export class InvestorsService {
     const created = rows.map((row) =>
       cashflowToDto(row, namesByInvestor.get(row.investorId) ?? ''),
     );
-
-    void this.audit.log({
-      entityType: 'investment_account',
-      entityId: accountId,
-      action: 'update',
-      newData: { reparto: data },
-    });
 
     return {
       accountId,

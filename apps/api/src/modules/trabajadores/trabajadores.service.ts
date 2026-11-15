@@ -81,29 +81,31 @@ export class TrabajadoresService {
     const data = trabajadorCreateSchema.parse(input);
     if (data.proveedorId) await this.findProveedorNombre(data.proveedorId);
 
-    const [row] = await this.dbs.db
-      .insert(trabajadores)
-      .values({
-        companyId,
-        nombre: data.nombre,
-        documentoIdentidad: data.documentoIdentidad ?? null,
-        categoryId: data.categoryId ?? null,
-        tipo: data.tipo,
-        proveedorId: data.proveedorId ?? null,
-        ordinaryRateDefault: data.ordinaryRateDefault?.toFixed(2) ?? null,
-        overtimeRateDefault: data.overtimeRateDefault?.toFixed(2) ?? null,
-        activo: data.activo,
-        fechaAlta: data.fechaAlta ?? null,
-        fechaBaja: data.fechaBaja ?? null,
-        notas: data.notas ?? null,
-      })
-      .returning();
-
-    void this.audit.log({
-      entityType: 'trabajador',
-      entityId: row.id,
-      action: 'create',
-      newData: row,
+    const row = await this.dbs.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(trabajadores)
+        .values({
+          companyId,
+          nombre: data.nombre,
+          documentoIdentidad: data.documentoIdentidad ?? null,
+          categoryId: data.categoryId ?? null,
+          tipo: data.tipo,
+          proveedorId: data.proveedorId ?? null,
+          ordinaryRateDefault: data.ordinaryRateDefault?.toFixed(2) ?? null,
+          overtimeRateDefault: data.overtimeRateDefault?.toFixed(2) ?? null,
+          activo: data.activo,
+          fechaAlta: data.fechaAlta ?? null,
+          fechaBaja: data.fechaBaja ?? null,
+          notas: data.notas ?? null,
+        })
+        .returning();
+      await this.audit.registrar(tx, {
+        entityType: 'trabajador',
+        entityId: row.id,
+        action: 'create',
+        newData: row,
+      });
+      return row;
     });
     const proveedorNombre = row.proveedorId
       ? await this.findProveedorNombre(row.proveedorId)

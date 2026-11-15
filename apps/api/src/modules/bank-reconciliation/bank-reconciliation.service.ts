@@ -202,17 +202,21 @@ export class BankReconciliationService {
       .limit(1);
     if (!milestone) throw new NotFoundException('Vencimiento no encontrado');
 
-    await this.dbs.db
-      .update(bankTransactions)
-      .set({ reconciledMilestoneId: milestoneId, reconciledAt: new Date() })
-      .where(eq(bankTransactions.id, transactionId));
-    await this.treasury.setStatus(milestoneId, 'pagado');
-    void this.audit.log({
-      entityType: 'bank_transaction',
-      entityId: transactionId,
-      action: 'update',
-      newData: { reconciledMilestoneId: milestoneId },
+    await this.dbs.db.transaction(async (trx) => {
+      await trx
+        .update(bankTransactions)
+        .set({ reconciledMilestoneId: milestoneId, reconciledAt: new Date() })
+        .where(eq(bankTransactions.id, transactionId));
+      await this.audit.registrar(trx, {
+        entityType: 'bank_transaction',
+        entityId: transactionId,
+        action: 'update',
+        newData: { reconciledMilestoneId: milestoneId },
+      });
     });
+    // `TreasuryService.setStatus` abre su propia conexión y no es consciente
+    // de transacciones: va después del commit atómico movimiento + auditoría.
+    await this.treasury.setStatus(milestoneId, 'pagado');
   }
 
   /**

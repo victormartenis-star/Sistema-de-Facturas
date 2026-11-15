@@ -8,5 +8,5 @@
     "types": ["node"],
     "lib": ["ES2022"]
   },
-  "include": ["seed-campo.ts"]
+  "include": ["seed-campo.ts", "sellar-auditoria.ts"]
 }
