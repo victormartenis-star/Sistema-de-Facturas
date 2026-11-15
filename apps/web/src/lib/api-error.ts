@@ -29,11 +29,55 @@ export class ApiError extends Error {
 
 export { MENSAJE_CONFLICTO_VERSION };
 
-/** Construye el `ApiError` a partir del estado y el cuerpo ya parseado (o nulo). */
+/** UUIDv4 (identificador de petición o clave de idempotencia). */
+export function nuevoUuid(): string {
+  if (
+    typeof crypto !== 'undefined' &&
+    typeof crypto.randomUUID === 'function'
+  ) {
+    return crypto.randomUUID();
+  }
+  // Respaldo para contextos sin `crypto.randomUUID` (HTTP sin TLS, tests antiguos).
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.floor(Math.random() * 16);
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
+/**
+ * Cabecera `Idempotency-Key`: se genera UNA vez por intento de envío y se
+ * reutiliza en los reintentos de ese mismo intento. Sin clave no se envía nada.
+ */
+export function idempotencyKey(clave?: string | null): Record<string, string> {
+  return clave ? { 'Idempotency-Key': clave } : {};
+}
+
+/** 428 `PRECONDITION_REQUIRED`: la mutación exigía `If-Match` y no se envió. */
+export function esPrecondicionRequerida(e: unknown): e is ApiError {
+  return (
+    e instanceof ApiError &&
+    e.status === 428 &&
+    (e.code === undefined || e.code === 'PRECONDITION_REQUIRED')
+  );
+}
+
+/** Texto para soporte: `ref: <correlationId>` o cadena vacía. */
+export function refSoporte(e: unknown): string {
+  return e instanceof ApiError && e.correlationId
+    ? `ref: ${e.correlationId}`
+    : '';
+}
+
+/**
+ * Construye el `ApiError` a partir del estado y el cuerpo ya parseado (o nulo).
+ * `requestId` es la cabecera `X-Request-Id` de la respuesta: se usa como
+ * `correlationId` cuando el cuerpo no lo trae.
+ */
 export function errorDeRespuesta(
   status: number,
   body: unknown,
   porDefecto = `Error ${status}`,
+  requestId?: string | null,
 ): ApiError {
   let message = porDefecto;
   const conflicto =
@@ -46,7 +90,7 @@ export function errorDeRespuesta(
   let fieldErrors: FieldError[] = [];
   let code: string | undefined;
   let versionActual: number | undefined;
-  let correlationId: string | undefined;
+  let correlationId: string | undefined = requestId || undefined;
   if (body && typeof body === 'object') {
     const b = body as Record<string, unknown>;
     if (typeof b.detail === 'string') message = b.detail;

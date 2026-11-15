@@ -7,6 +7,8 @@
  * `packages/shared` vino a corregir.
  */
 
+import { randomUUID } from 'node:crypto';
+
 export const BASE_URL = process.env.ERP_API_URL ?? 'http://localhost:3001';
 
 /**
@@ -32,21 +34,33 @@ export class ErrorApi extends Error {
 }
 
 /** Extrae el texto de error de una respuesta de Nest. */
-function mensajeDe(cuerpo: unknown, estado: number): string {
+function mensajeDe(
+  cuerpo: unknown,
+  estado: number,
+  requestId?: string,
+): string {
   if (cuerpo && typeof cuerpo === 'object') {
     const c = cuerpo as {
       detail?: unknown;
       message?: unknown;
       correlationId?: unknown;
     };
-    const ref =
-      typeof c.correlationId === 'string' ? ` (ref: ${c.correlationId})` : '';
+    // El correlationId del cuerpo manda; si no, la cabecera X-Request-Id.
+    const id =
+      typeof c.correlationId === 'string' ? c.correlationId : requestId;
+    const ref = id ? ` (ref: ${id})` : '';
     // RFC 7807: `detail`; `message` se conserva por compatibilidad (string o string[]).
     if (typeof c.detail === 'string') return c.detail + ref;
     if (Array.isArray(c.message)) return c.message.join('; ') + ref;
     if (typeof c.message === 'string') return c.message + ref;
   }
-  return `La API respondio ${estado}`;
+  return `La API respondio ${estado}${requestId ? ` (ref: ${requestId})` : ''}`;
+}
+
+/** ` (ref: <correlationId>)` si el cuerpo RFC 7807 lo trae; vacio si no. */
+function refDe(cuerpo: unknown): string {
+  const id = (cuerpo as { correlationId?: unknown } | null)?.correlationId;
+  return typeof id === 'string' ? ` (ref: ${id})` : '';
 }
 
 export async function pedir<T>(
@@ -54,11 +68,14 @@ export async function pedir<T>(
   init: RequestInit = {},
 ): Promise<T> {
   let res: Response;
+  // Una por peticion: la API la devuelve y la guarda en audit_log.
+  const requestId = randomUUID();
   try {
     res = await fetch(`${BASE_URL}${ruta}`, {
       ...init,
       headers: {
         'Content-Type': 'application/json',
+        'X-Request-Id': requestId,
         ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
         ...(init.headers ?? {}),
       },
@@ -87,7 +104,11 @@ export async function pedir<T>(
   }
 
   if (!res.ok) {
-    let mensaje = mensajeDe(cuerpo, res.status);
+    let mensaje = mensajeDe(
+      cuerpo,
+      res.status,
+      res.headers.get('x-request-id') ?? requestId,
+    );
     // Un 401 sin token configurado es un fallo de instalacion, no de la
     // peticion: sin esta pista el agente reintenta la llamada en bucle.
     if (res.status === 401 && !TOKEN) {
@@ -148,7 +169,8 @@ export async function pedirVersionado<T>(
         409,
         e.cuerpo,
         `versión obsoleta: vuelve a leer el ${entidad} y reintenta ` +
-          `(otro usuario lo modificó entre tu lectura y este cambio)`,
+          `(otro usuario lo modificó entre tu lectura y este cambio)` +
+          refDe(e.cuerpo),
       );
     }
     throw e;

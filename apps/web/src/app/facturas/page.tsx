@@ -37,6 +37,7 @@ import { useAvisarError, useToast } from '@/components/toast';
 import { InvoiceFormModal } from '@/components/invoice-form-modal';
 import { InvoiceRectifyModal } from '@/components/invoice-rectify-modal';
 import { ReasonDialog } from '@/components/reason-dialog';
+import { TrazabilidadFiscal } from '@/components/trazabilidad-fiscal';
 import {
   IconCheck,
   IconPencil,
@@ -75,81 +76,96 @@ const errText = textoDeError;
 
 function DetalleFactura({ inv, kind }: { inv: InvoiceDto; kind: InvoiceKind }) {
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <div>
-        <p className="mb-2 text-xs font-semibold text-gray-600 uppercase">
-          Líneas e imputación
-        </p>
-        <ul className="space-y-1">
-          {inv.lines.map((l) => (
-            <li
-              key={l.id}
-              className="flex items-baseline justify-between gap-3 text-sm"
-            >
-              <span>
-                {l.description}
-                {(l.projectCode || l.phaseCode) && (
-                  <span className="ml-2 rounded bg-gray-200 px-1.5 py-0.5 font-mono text-[10px] text-gray-600">
-                    {l.projectCode ?? ''}
-                    {l.phaseCode ? ` · ${l.phaseCode}` : ''}
-                  </span>
-                )}
-              </span>
-              <span className="tabular-nums">
-                {formatEur(l.baseAmount)} + {l.vatPct} %
-              </span>
-            </li>
-          ))}
-        </ul>
-        {inv.isp && (
-          <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-800">
-            {ISP_LEGEND}
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div>
+          <p className="mb-2 text-xs font-semibold text-gray-600 uppercase">
+            Líneas e imputación
           </p>
-        )}
-      </div>
-      <div>
-        {kind === 'compra' && (
-          <>
-            <p className="mb-2 text-xs font-semibold text-gray-600 uppercase">
-              Albaranes punteados
-            </p>
-            {inv.deliveryNotes.length === 0 ? (
-              <p className="flex items-center gap-1.5 text-sm text-amber-700">
-                <IconX size={13} />
-                Sin albaranes: no se podrá aprobar
-              </p>
-            ) : (
-              <ul className="space-y-1">
-                {inv.deliveryNotes.map((n) => (
-                  <li
-                    key={n.id}
-                    className="flex items-center justify-between text-sm"
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <IconCheck size={13} className="text-emerald-700" />
-                      {n.noteNumber}
+          <ul className="space-y-1">
+            {inv.lines.map((l) => (
+              <li
+                key={l.id}
+                className="flex items-baseline justify-between gap-3 text-sm"
+              >
+                <span>
+                  {l.description}
+                  {(l.projectCode || l.phaseCode) && (
+                    <span className="ml-2 rounded bg-gray-200 px-1.5 py-0.5 font-mono text-[10px] text-gray-600">
+                      {l.projectCode ?? ''}
+                      {l.phaseCode ? ` · ${l.phaseCode}` : ''}
                     </span>
-                    <span className="tabular-nums">{formatEur(n.amount)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </>
-        )}
-        <p className="mt-3 text-xs text-gray-500">
-          Vencimiento:{' '}
-          {inv.dueDate ? formatDate(inv.dueDate) : 'según plazo del contacto'}
-          {inv.retentionAmount > 0 && (
+                  )}
+                </span>
+                <span className="tabular-nums">
+                  {formatEur(l.baseAmount)} + {l.vatPct} %
+                </span>
+              </li>
+            ))}
+          </ul>
+          {inv.isp && (
+            <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-800">
+              {ISP_LEGEND}
+            </p>
+          )}
+        </div>
+        <div>
+          {kind === 'compra' && (
             <>
-              {' · '}Garantía {inv.retentionPct} % (
-              {formatEur(inv.retentionAmount)}) hasta{' '}
-              {inv.retentionReleaseDate
-                ? formatDate(inv.retentionReleaseDate)
-                : '1 año tras emisión'}
+              <p className="mb-2 text-xs font-semibold text-gray-600 uppercase">
+                Albaranes punteados
+              </p>
+              {inv.deliveryNotes.length === 0 ? (
+                <p className="flex items-center gap-1.5 text-sm text-amber-700">
+                  <IconX size={13} />
+                  Sin albaranes: no se podrá aprobar
+                </p>
+              ) : (
+                <ul className="space-y-1">
+                  {inv.deliveryNotes.map((n) => (
+                    <li
+                      key={n.id}
+                      className="flex items-center justify-between text-sm"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <IconCheck size={13} className="text-emerald-700" />
+                        {n.noteNumber}
+                      </span>
+                      <span className="tabular-nums">
+                        {formatEur(n.amount)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </>
           )}
-        </p>
+          <p className="mt-3 text-xs text-gray-500">
+            Vencimiento:{' '}
+            {inv.dueDate ? formatDate(inv.dueDate) : 'según plazo del contacto'}
+            {inv.retentionAmount > 0 && (
+              <>
+                {' · '}Garantía {inv.retentionPct} % (
+                {formatEur(inv.retentionAmount)}) hasta{' '}
+                {inv.retentionReleaseDate
+                  ? formatDate(inv.retentionReleaseDate)
+                  : '1 año tras emisión'}
+              </>
+            )}
+          </p>
+        </div>
       </div>
+      <TrazabilidadFiscal
+        entityType="invoice"
+        entityId={inv.id}
+        fiscal={{
+          estado: INVOICE_STATUS_LABELS[inv.status],
+          rectificaA: inv.rectifiesInvoiceNumber ?? inv.rectifiesInvoiceId,
+          motivo: inv.rectificationMotive,
+          tipo: inv.rectificationType,
+          facturaeReasonCode: inv.facturaeReasonCode,
+        }}
+      />
     </div>
   );
 }

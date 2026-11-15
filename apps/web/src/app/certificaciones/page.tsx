@@ -46,6 +46,7 @@ import {
   type ColumnaDef,
 } from '@/components/data-table';
 import { KpiCard } from '@/components/kpi-card';
+import { TrazabilidadFiscal } from '@/components/trazabilidad-fiscal';
 import { Autorizado } from '@/components/autorizado';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { MOTIVO_MAX, MOTIVO_MIN } from '@/components/reason-dialog';
@@ -1133,6 +1134,19 @@ export default function CertificacionesPage() {
                     can('editar', 'certificacion')
                   }
                 />
+                <div className="px-6 pb-4">
+                  <TrazabilidadFiscal
+                    entityType="certification"
+                    entityId={cert.id}
+                    fiscal={{
+                      estado: CERT_STATUS_LABELS[cert.status],
+                      rectificaA: cert.rectifiesCertificationId,
+                      motivo: cert.rectificationMotive,
+                      tipo: cert.rectificationType,
+                      facturaeReasonCode: cert.facturaeReasonCode,
+                    }}
+                  />
+                </div>
               </div>
             )}
             acciones={(cert) => (

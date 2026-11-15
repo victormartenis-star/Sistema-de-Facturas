@@ -1,7 +1,18 @@
 import { DOCUMENT_MAX_SIZE_MB } from '@erp/shared';
-import { ApiError, errorDeRespuesta, ifMatch } from './api-error';
+import {
+  ApiError,
+  errorDeRespuesta,
+  idempotencyKey,
+  ifMatch,
+  nuevoUuid,
+} from './api-error';
 import type { ExportRecurso, PaginaDto } from '@erp/shared';
-import type { AuditLogDto, AuditQuery, ComplianceAlertDto } from '@erp/shared';
+import type {
+  AuditIntegrityReportDto,
+  AuditLogDto,
+  AuditQuery,
+  ComplianceAlertDto,
+} from '@erp/shared';
 import type {
   BimElementLinkDto,
   BimElementLinkUpsertInput,
@@ -288,6 +299,8 @@ async function request<T>(
   const session = readStoredSession();
   const headers: Record<string, string> = {
     ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+    // Una por petición; el servidor la devuelve y queda en audit_log.
+    'X-Request-Id': nuevoUuid(),
     ...(init?.headers as Record<string, string> | undefined),
   };
   if (session?.accessToken && !headers.Authorization) {
@@ -314,7 +327,12 @@ async function request<T>(
     } catch {
       // sin cuerpo JSON
     }
-    const err = errorDeRespuesta(res.status, body);
+    const err = errorDeRespuesta(
+      res.status,
+      body,
+      undefined,
+      res.headers.get('X-Request-Id') ?? headers['X-Request-Id'],
+    );
     if (res.status === 413) {
       throw new ApiError(
         `El archivo supera el máximo de ${DOCUMENT_MAX_SIZE_MB} MB`,
@@ -322,6 +340,7 @@ async function request<T>(
         err.fieldErrors,
         err.code,
         err.versionActual,
+        err.correlationId,
       );
     }
     throw err;
@@ -642,9 +661,11 @@ export const invoicesApi = {
     pageSize: number;
   }) => request<PaginaDto<InvoiceDto>>(`/invoices${filtrosAQuery(f)}`),
   get: (id: string) => request<InvoiceDto>(`/invoices/${id}`),
-  create: (input: InvoiceCreateInput) =>
+  /** `clave`: Idempotency-Key del intento; si falta se genera una nueva. */
+  create: (input: InvoiceCreateInput, clave?: string) =>
     request<InvoiceDto>('/invoices', {
       method: 'POST',
+      headers: idempotencyKey(clave ?? nuevoUuid()),
       body: JSON.stringify(input),
     }),
   update: (id: string, input: InvoiceUpdateInput, version?: number) =>
@@ -667,9 +688,10 @@ export const invoicesApi = {
       body: JSON.stringify(motivo ? { motivo } : {}),
     }),
   /** Crea la factura rectificativa (total o por diferencias) en borrador. */
-  rectify: (id: string, input: InvoiceRectifyInput) =>
+  rectify: (id: string, input: InvoiceRectifyInput, clave?: string) =>
     request<InvoiceDto>(`/invoices/${id}/rectificar`, {
       method: 'POST',
+      headers: idempotencyKey(clave ?? nuevoUuid()),
       body: JSON.stringify(input),
     }),
   remove: (id: string, version?: number) =>
@@ -689,9 +711,10 @@ export const certificationsApi = {
     request<PaginaDto<CertificationDto>>(`/certifications${filtrosAQuery(f)}`),
   list: (projectId: string) =>
     request<CertificationDto[]>(`/certifications?projectId=${projectId}`),
-  create: (input: CertificationCreateInput) =>
+  create: (input: CertificationCreateInput, clave?: string) =>
     request<CertificationDto>('/certifications', {
       method: 'POST',
+      headers: idempotencyKey(clave ?? nuevoUuid()),
       body: JSON.stringify(input),
     }),
   invoice: (id: string, input: CertificationInvoiceInput) =>
@@ -1755,11 +1778,15 @@ export const auditApi = {
     if (query?.entityId) params.set('entityId', query.entityId);
     if (query?.userId) params.set('userId', query.userId);
     if (query?.action) params.set('action', query.action);
+    if (query?.correlationId) params.set('correlationId', query.correlationId);
     if (query?.limit !== undefined) params.set('limit', String(query.limit));
     if (query?.offset !== undefined) params.set('offset', String(query.offset));
     const qs = params.toString();
     return request<AuditLogDto[]>(`/audit${qs ? `?${qs}` : ''}`);
   },
+  /** Solo admin (403 para el resto). Siempre 200: el veredicto va en `integra`. */
+  verifyIntegrity: () =>
+    request<AuditIntegrityReportDto>('/audit/verify-integrity'),
 };
 
 /** URL del original (visor); la sirve la API en streaming. */
