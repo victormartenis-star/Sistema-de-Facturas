@@ -406,6 +406,15 @@ export const invoices = pgTable(
       t.issueDate,
     ),
     index('invoices_contact_id_idx').on(t.contactId),
+    // Listado sin filtro de estado: orden real (fecha de emisión, alta, id).
+    index('invoices_company_issue_date_idx')
+      .on(
+        t.companyId,
+        t.issueDate.desc().nullsFirst(),
+        t.createdAt.desc().nullsFirst(),
+        t.id.desc().nullsFirst(),
+      )
+      .where(sql`deleted_at IS NULL`),
     uniqueIndex('invoices_contact_number_unique')
       .on(t.companyId, t.kind, t.contactId, t.invoiceNumber)
       .where(sql`deleted_at IS NULL`),
@@ -500,6 +509,12 @@ export const certifications = pgTable(
   },
   (t) => [
     index('certifications_invoice_id_idx').on(t.invoiceId),
+    index('certifications_company_project_seq_idx')
+      .on(t.companyId, t.projectId, t.seq.desc().nullsFirst())
+      .where(sql`deleted_at IS NULL`),
+    index('certifications_company_status_idx')
+      .on(t.companyId, t.status)
+      .where(sql`deleted_at IS NULL`),
     index('certifications_rectifies_certification_id_idx').on(
       t.rectifiesCertificationId,
     ),
@@ -584,6 +599,16 @@ export const purchaseOrders = pgTable(
   },
   (t) => [
     index('purchase_orders_contact_id_idx').on(t.contactId),
+    index('purchase_orders_company_order_date_idx')
+      .on(
+        t.companyId,
+        t.orderDate.desc().nullsFirst(),
+        t.seq.desc().nullsFirst(),
+      )
+      .where(sql`deleted_at IS NULL`),
+    index('purchase_orders_company_status_idx')
+      .on(t.companyId, t.status)
+      .where(sql`deleted_at IS NULL`),
     uniqueIndex('purchase_orders_number_unique')
       .on(t.companyId, t.orderNumber)
       .where(sql`deleted_at IS NULL`),
@@ -635,6 +660,17 @@ export const deliveryNotes = pgTable(
     index('delivery_notes_order_status_idx').on(t.orderId, t.status),
     index('delivery_notes_invoice_id_idx').on(t.invoiceId),
     index('delivery_notes_project_id_idx').on(t.projectId),
+    index('delivery_notes_company_note_date_idx')
+      .on(
+        t.companyId,
+        t.noteDate.desc().nullsFirst(),
+        t.createdAt.desc().nullsFirst(),
+        t.id.desc().nullsFirst(),
+      )
+      .where(sql`deleted_at IS NULL`),
+    index('delivery_notes_company_status_idx')
+      .on(t.companyId, t.status)
+      .where(sql`deleted_at IS NULL`),
     uniqueIndex('delivery_notes_contact_number_unique')
       .on(t.companyId, t.contactId, t.noteNumber)
       .where(sql`deleted_at IS NULL`),
@@ -2319,7 +2355,12 @@ export const changeOrders = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (t) => [unique().on(t.projectId, t.seq)],
+  (t) => [
+    unique().on(t.projectId, t.seq),
+    index('change_orders_company_created_idx')
+      .on(t.companyId, t.createdAt.desc().nullsFirst())
+      .where(sql`deleted_at IS NULL`),
+  ],
 );
 
 export type ChangeOrder = typeof changeOrders.$inferSelect;

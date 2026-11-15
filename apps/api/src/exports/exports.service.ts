@@ -837,11 +837,11 @@ export class ExportsService {
       )
       .orderBy(asc(projects.code))
       .limit(EXPORT_MAX_FILAS + 1);
-    const filas = [];
-    for (const p of obras) {
-      const e = await this.costControl.getEconomics(p.id);
-      filas.push({ p, e });
-    }
+    // Una carga por lotes para todas las obras (no una tanda de consultas por obra).
+    const economia = await this.costControl.getEconomicsMany(
+      obras.map((p) => p.id),
+    );
+    const filas = obras.map((p) => ({ p, e: economia.get(p.id)! }));
     type Fila = (typeof filas)[number];
     return dataset<Fila>(
       [

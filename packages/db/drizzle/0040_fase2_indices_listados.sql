@@ -1,0 +1,8 @@
+CREATE INDEX "certifications_company_project_seq_idx" ON "certifications" USING btree ("company_id","project_id","seq" DESC NULLS FIRST) WHERE deleted_at IS NULL;--> statement-breakpoint
+CREATE INDEX "certifications_company_status_idx" ON "certifications" USING btree ("company_id","status") WHERE deleted_at IS NULL;--> statement-breakpoint
+CREATE INDEX "change_orders_company_created_idx" ON "change_orders" USING btree ("company_id","created_at" DESC NULLS FIRST) WHERE deleted_at IS NULL;--> statement-breakpoint
+CREATE INDEX "delivery_notes_company_note_date_idx" ON "delivery_notes" USING btree ("company_id","note_date" DESC NULLS FIRST,"created_at" DESC NULLS FIRST,"id" DESC NULLS FIRST) WHERE deleted_at IS NULL;--> statement-breakpoint
+CREATE INDEX "delivery_notes_company_status_idx" ON "delivery_notes" USING btree ("company_id","status") WHERE deleted_at IS NULL;--> statement-breakpoint
+CREATE INDEX "invoices_company_issue_date_idx" ON "invoices" USING btree ("company_id","issue_date" DESC NULLS FIRST,"created_at" DESC NULLS FIRST,"id" DESC NULLS FIRST) WHERE deleted_at IS NULL;--> statement-breakpoint
+CREATE INDEX "purchase_orders_company_order_date_idx" ON "purchase_orders" USING btree ("company_id","order_date" DESC NULLS FIRST,"seq" DESC NULLS FIRST) WHERE deleted_at IS NULL;--> statement-breakpoint
+CREATE INDEX "purchase_orders_company_status_idx" ON "purchase_orders" USING btree ("company_id","status") WHERE deleted_at IS NULL;

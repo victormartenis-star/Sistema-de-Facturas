@@ -281,6 +281,13 @@
       "when": 1794714015725,
       "tag": "0039_fase2_audit_cadena",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794752194637,
+      "tag": "0040_fase2_indices_listados",
+      "breakpoints": true
     }
   ]
 }

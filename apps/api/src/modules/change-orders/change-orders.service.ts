@@ -146,7 +146,7 @@ export class ChangeOrdersService {
         ? rows
         : rows.filter((r) => allowed.includes(r.projectId));
 
-    return Promise.all(visible.map((row) => this.hydrate(row)));
+    return this.hydrateMany(visible);
   }
 
   async get(id: string): Promise<ChangeOrderDto> {
@@ -423,6 +423,83 @@ export class ChangeOrdersService {
       ? (await this.findContact(row.direccionFacultativaContactId)).legalName
       : null;
     return toDto(row, finalLineas, phase, dfNombre);
+  }
+
+  /**
+   * `hydrate` para un listado: tres consultas por lote (líneas, fases y
+   * contactos) en lugar de hasta tres por fila.
+   */
+  private async hydrateMany(rows: ChangeOrder[]): Promise<ChangeOrderDto[]> {
+    if (rows.length === 0) return [];
+    const companyId = await this.dbs.getCompanyId();
+    const lineas = await this.dbs.db
+      .select()
+      .from(changeOrderLineas)
+      .where(
+        inArray(
+          changeOrderLineas.changeOrderId,
+          rows.map((r) => r.id),
+        ),
+      );
+    const lineasPorOrden = new Map<string, ChangeOrderLinea[]>();
+    for (const l of lineas) {
+      const lista = lineasPorOrden.get(l.changeOrderId) ?? [];
+      lista.push(l);
+      lineasPorOrden.set(l.changeOrderId, lista);
+    }
+
+    const idsFase = [...new Set(rows.map((r) => r.phaseId).filter((x) => !!x))];
+    const fases = new Map<string, { code: string; name: string }>();
+    if (idsFase.length > 0) {
+      const filas = await this.dbs.db
+        .select({
+          id: projectPhases.id,
+          code: projectPhases.code,
+          name: projectPhases.name,
+        })
+        .from(projectPhases)
+        .where(
+          and(
+            inArray(projectPhases.id, idsFase as string[]),
+            eq(projectPhases.companyId, companyId),
+            isNull(projectPhases.deletedAt),
+          ),
+        );
+      for (const f of filas) fases.set(f.id, f);
+    }
+
+    const idsContacto = [
+      ...new Set(
+        rows.map((r) => r.direccionFacultativaContactId).filter((x) => !!x),
+      ),
+    ];
+    const contactos = new Map<string, string>();
+    if (idsContacto.length > 0) {
+      const filas = await this.dbs.db
+        .select({ id: contacts.id, legalName: contacts.legalName })
+        .from(contacts)
+        .where(
+          and(
+            inArray(contacts.id, idsContacto as string[]),
+            eq(contacts.companyId, companyId),
+            isNull(contacts.deletedAt),
+          ),
+        );
+      for (const c of filas) contactos.set(c.id, c.legalName);
+    }
+
+    return rows.map((row) => {
+      const phase = row.phaseId ? (fases.get(row.phaseId) ?? null) : null;
+      let dfNombre: string | null = null;
+      if (row.direccionFacultativaContactId) {
+        const nombre = contactos.get(row.direccionFacultativaContactId);
+        // Mismo comportamiento que `hydrate`: un contacto borrado da 404.
+        if (nombre === undefined)
+          throw new NotFoundException('Contacto no encontrado');
+        dfNombre = nombre;
+      }
+      return toDto(row, lineasPorOrden.get(row.id) ?? [], phase, dfNombre);
+    });
   }
 
   private async findPhaseById(

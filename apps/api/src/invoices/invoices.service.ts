@@ -941,20 +941,19 @@ export class InvoicesService {
       sql`select pg_advisory_xact_lock(hashtext(${'rectificativa:' + companyId}))`,
     );
     const prefijo = `R-${year}-`;
-    const rows = await tx
-      .select({ n: invoices.invoiceNumber })
+    // El máximo se calcula en SQL: solo cuentan los números `R-AAAA-<dígitos>`.
+    const sufijo = sql`substr(${invoices.invoiceNumber}, ${prefijo.length + 1})`;
+    const [fila] = await tx
+      .select({ max: sql<string | null>`max((${sufijo})::numeric)` })
       .from(invoices)
       .where(
         and(
           eq(invoices.companyId, companyId),
           like(invoices.invoiceNumber, `${prefijo}%`),
+          sql`${sufijo} ~ '^[0-9]+$'`,
         ),
       );
-    let max = 0;
-    for (const r of rows) {
-      const n = Number(r.n.slice(prefijo.length));
-      if (Number.isInteger(n) && n > max) max = n;
-    }
+    const max = fila?.max ? Number(fila.max) : 0;
     return `${prefijo}${String(max + 1).padStart(4, '0')}`;
   }
 

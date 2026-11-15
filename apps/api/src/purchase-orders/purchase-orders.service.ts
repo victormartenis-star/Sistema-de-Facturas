@@ -383,13 +383,14 @@ export class PurchaseOrdersService {
     ids: Array<string | null | undefined>,
   ): Promise<void> {
     const unicos = [...new Set(ids.filter((i): i is string => !!i))].sort();
-    for (const id of unicos) {
-      await tx
-        .select({ id: purchaseOrders.id })
-        .from(purchaseOrders)
-        .where(eq(purchaseOrders.id, id))
-        .for('update');
-    }
+    if (unicos.length === 0) return;
+    // Una sola consulta; ORDER BY id fija el orden de bloqueo.
+    await tx
+      .select({ id: purchaseOrders.id })
+      .from(purchaseOrders)
+      .where(inArray(purchaseOrders.id, unicos))
+      .orderBy(purchaseOrders.id)
+      .for('update');
   }
 
   /**
