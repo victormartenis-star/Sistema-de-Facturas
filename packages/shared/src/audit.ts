@@ -95,6 +95,7 @@ export const AUDIT_INTEGRITY_MOTIVOS = [
   'ENTRY_HASH_MISMATCH',
   'HEAD_MISMATCH',
   'HEAD_MISSING',
+  'ANCLA_NO_COINCIDE',
 ] as const;
 export type AuditIntegrityMotivo = (typeof AUDIT_INTEGRITY_MOTIVOS)[number];
 
@@ -118,4 +119,6 @@ export interface AuditIntegrityReportDto {
   verificadoEn: string;
   duracionMs: number;
   primerPuntoRoto: AuditIntegrityBreakDto | null;
+  /** Anclas diarias comprobadas contra la cadena. */
+  anclas: number;
 }

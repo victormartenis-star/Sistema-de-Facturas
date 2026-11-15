@@ -1,6 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { and, asc, eq, gt } from 'drizzle-orm';
-import { auditChainHeads, AuditLogEntry, auditLog } from '@erp/db';
+import {
+  auditAnchors,
+  auditChainHeads,
+  AuditLogEntry,
+  auditLog,
+} from '@erp/db';
 import {
   AUDIT_GENESIS_HASH,
   AUDIT_HASH_VERSION,
@@ -33,6 +38,12 @@ export class AuditIntegrityService {
           .select()
           .from(auditChainHeads)
           .where(eq(auditChainHeads.companyId, empresa));
+
+        const anclas = await tx
+          .select()
+          .from(auditAnchors)
+          .where(eq(auditAnchors.companyId, empresa));
+        const anclaPorSeq = new Map(anclas.map((a) => [a.sequenceNumber, a]));
 
         let esperado = 1;
         let hashPrevio = AUDIT_GENESIS_HASH;
@@ -141,6 +152,16 @@ export class AuditIntegrityService {
                 );
               }
             }
+            const ancla = anclaPorSeq.get(n);
+            if (!roto && ancla && ancla.entryHash !== fila.entryHash) {
+              roto = romper(
+                fila,
+                'ANCLA_NO_COINCIDE',
+                `El ancla del ${ancla.anchorDate} no coincide con la cadena`,
+                ancla.entryHash,
+                fila.entryHash,
+              );
+            }
             if (roto) break recorrido;
             esperado++;
             verificadas++;
@@ -161,6 +182,19 @@ export class AuditIntegrityService {
               esperado: String(esperado - 1),
               encontrado: null,
             };
+          } else if (anclas.some((a) => a.sequenceNumber > esperado - 1)) {
+            const a = anclas
+              .filter((x) => x.sequenceNumber > esperado - 1)
+              .sort((x, y) => x.sequenceNumber - y.sequenceNumber)[0];
+            roto = {
+              id: null,
+              sequenceNumber: a.sequenceNumber,
+              occurredAt: null,
+              motivo: 'ANCLA_NO_COINCIDE',
+              detalle: `El ancla del ${a.anchorDate} apunta a una entrada que ya no existe (cola truncada)`,
+              esperado: a.entryHash,
+              encontrado: null,
+            };
           } else if (
             cabecera &&
             (cabecera.lastSequenceNumber !== esperado - 1 ||
@@ -179,7 +213,7 @@ export class AuditIntegrityService {
           }
         }
 
-        return { roto, verificadas, hashPrevio };
+        return { roto, verificadas, hashPrevio, anclas: anclas.length };
       },
       { isolationLevel: 'repeatable read', accessMode: 'read only' },
     );
@@ -193,6 +227,7 @@ export class AuditIntegrityService {
       verificadoEn: new Date().toISOString(),
       duracionMs: Date.now() - inicio,
       primerPuntoRoto: informe.roto,
+      anclas: informe.anclas,
     };
     this.logger.log(
       JSON.stringify({

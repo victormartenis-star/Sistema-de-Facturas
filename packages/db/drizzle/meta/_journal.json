@@ -295,6 +295,13 @@
       "when": 1794758213847,
       "tag": "0041_facturae_xsd_persistido",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1794760067418,
+      "tag": "0042_fase2_audit_anclas",
+      "breakpoints": true
     }
   ]
 }

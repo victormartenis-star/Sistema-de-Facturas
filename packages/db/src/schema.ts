@@ -1226,6 +1226,35 @@ export const auditChainHeads = pgTable(
   ],
 );
 
+/**
+ * Anclas diarias de la cadena de auditoría: una fila por (empresa, día UTC)
+ * con el último `sequence_number`/`entry_hash` de la empresa a ese cierre.
+ * Inmutable (triggers en la migración 0042). Viven en la misma base de datos:
+ * detectan reescrituras parciales de la cadena, no de un propietario con DDL
+ * que reescriba cadena y anclas; el anclaje externo queda fuera de alcance.
+ */
+export const auditAnchors = pgTable(
+  'audit_anchors',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id, { onDelete: 'restrict' }),
+    anchorDate: date('anchor_date').notNull(),
+    sequenceNumber: bigint('sequence_number', { mode: 'number' }).notNull(),
+    entryHash: char('entry_hash', { length: 64 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    unique('audit_anchors_company_date_unique').on(t.companyId, t.anchorDate),
+    check('audit_anchors_seq_check', sql`${t.sequenceNumber} >= 1`),
+    check('audit_anchors_hash_check', sql`${t.entryHash} ~ '^[0-9a-f]{64}$'`),
+  ],
+);
+export type AuditAnchor = typeof auditAnchors.$inferSelect;
+
 export type AuditLogEntry = typeof auditLog.$inferSelect;
 export type NewAuditLogEntry = typeof auditLog.$inferInsert;
 
