@@ -15,14 +15,17 @@ test.describe('Facturas', () => {
   test('filtra por tipo (compra / venta)', async ({ page }) => {
     await page.goto('/facturas');
 
-    // Busca el selector de tipo
-    const select = page.getByRole('combobox').first();
-    if (await select.isVisible()) {
-      await select.selectOption('compra');
-      await page.waitForTimeout(400);
-      await select.selectOption('venta');
-      await page.waitForTimeout(400);
-    }
+    // El tipo se elige con pestañas (no con un <select>): la activa lleva bg-amber-500.
+    const compra = page.getByRole('button', { name: 'Recibidas (compra)' });
+    const venta = page.getByRole('button', { name: 'Emitidas (venta)' });
+    await expect(compra).toHaveClass(/bg-amber-500/);
+
+    await venta.click();
+    await expect(venta).toHaveClass(/bg-amber-500/);
+    await expect(compra).not.toHaveClass(/bg-amber-500/);
+
+    await compra.click();
+    await expect(compra).toHaveClass(/bg-amber-500/);
   });
 
   test('abre modal de nueva factura y valida campos requeridos', async ({

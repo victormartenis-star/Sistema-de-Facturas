@@ -306,3 +306,22 @@ export async function createObraUser(
   const tokens = await loginUser(app, email, password);
   return { id: userId, tokens };
 }
+
+/**
+ * Sondea `condicion` hasta que devuelva `true` o venza el plazo. Sustituye a
+ * `sleep` fijos: espera exactamente lo que tarda el efecto (p. ej. una traza
+ * de auditoría persistida tras responder) y falla con mensaje claro si nunca llega.
+ */
+export async function esperarHasta(
+  condicion: () => Promise<boolean>,
+  { plazoMs = 3000, intervaloMs = 50 } = {},
+): Promise<void> {
+  const limite = Date.now() + plazoMs;
+  for (;;) {
+    if (await condicion()) return;
+    if (Date.now() >= limite) {
+      throw new Error(`esperarHasta: condición no cumplida en ${plazoMs} ms`);
+    }
+    await new Promise((r) => setTimeout(r, intervaloMs));
+  }
+}

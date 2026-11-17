@@ -14,11 +14,10 @@ test.describe('Auditoría', () => {
 
   test('filtra por tipo de entidad', async ({ page }) => {
     await page.goto('/configuracion/auditoria');
-    const select = page.getByRole('combobox').first();
-    if (await select.isVisible()) {
-      await select.selectOption('project');
-      await page.waitForTimeout(400);
-    }
+    const select = page.locator('select').first();
+    await expect(select).toBeVisible({ timeout: 8_000 });
+    await select.selectOption('project');
+    await expect(select).toHaveValue('project');
   });
 
   test('muestra registros o mensaje vacío', async ({ page }) => {

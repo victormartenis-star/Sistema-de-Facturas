@@ -15,11 +15,10 @@ test.describe('Contactos', () => {
   test('busca un contacto por texto', async ({ page }) => {
     await page.goto('/contactos');
     const searchBox = page.getByPlaceholder(/buscar/i);
-    if (await searchBox.isVisible()) {
-      await searchBox.fill('test');
-      // La lista debe reaccionar (puede quedar vacía, no importa)
-      await page.waitForTimeout(500);
-    }
+    await expect(searchBox).toBeVisible({ timeout: 8_000 });
+    await searchBox.fill('test');
+    // El valor se aplica; la lista puede quedar vacía, no es lo que se valida aquí.
+    await expect(searchBox).toHaveValue('test');
   });
 
   test('abre modal de nuevo contacto y lo cierra', async ({ page }) => {

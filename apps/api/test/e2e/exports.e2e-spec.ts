@@ -12,6 +12,7 @@ import {
   createProject,
   createTestApp,
   createUserWithRole,
+  esperarHasta,
   registerUser,
 } from './helpers';
 import { resetTestDb, seedCompany } from './reset-db';
@@ -335,12 +336,17 @@ describe('Exportaciones (integración) — GET /exports/:recurso', () => {
     const admin = await registerUser(app);
     await sembrar(admin.accessToken);
     await authed(app, admin.accessToken).get('/exports/obras').expect(200);
-    await new Promise((r) => setTimeout(r, 300));
-    const res = await authed(app, admin.accessToken)
-      .get('/audit?action=export')
-      .expect(200);
-    expect(res.body.length).toBeGreaterThan(0);
-    expect(res.body[0].meta.recurso).toBe('obras');
+    // La traza puede persistirse tras responder: se sondea la condición en
+    // lugar de dormir un tiempo fijo (evita flakiness en máquinas lentas).
+    let body: Array<{ meta: { recurso: string } }> = [];
+    await esperarHasta(async () => {
+      const res = await authed(app, admin.accessToken)
+        .get('/audit?action=export')
+        .expect(200);
+      body = res.body;
+      return body.length > 0;
+    });
+    expect(body[0].meta.recurso).toBe('obras');
   });
 
   describe('RBAC', () => {

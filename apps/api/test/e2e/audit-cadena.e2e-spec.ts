@@ -182,13 +182,23 @@ describe('Auditoría (integración) — cadena hash por empresa', () => {
     });
     await aListo;
     // B no debe esperar a A: si lo hiciera, este await no terminaría.
-    await Promise.race([
-      registrarEn(app, otra, entrada()),
-      new Promise((_, rej) =>
-        setTimeout(() => rej(new Error('B quedó bloqueada por A')), 4000),
-      ),
-    ]);
-    liberarA();
+    // El timer se cancela al resolver: un setTimeout huérfano de 4 s deja
+    // un open handle que Jest reporta al cerrar la suite.
+    let plazo: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        registrarEn(app, otra, entrada()),
+        new Promise((_, rej) => {
+          plazo = setTimeout(
+            () => rej(new Error('B quedó bloqueada por A')),
+            4000,
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(plazo);
+      liberarA();
+    }
     await txA;
     expect(await cadenaDe(companyId)).toHaveLength(1);
     expect(await cadenaDe(otra)).toHaveLength(1);
