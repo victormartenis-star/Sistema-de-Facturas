@@ -11,7 +11,7 @@ no juegas) y lanza asaltos contra provincias rivales con legiones, caballería, 
 cd juegos/imperium
 npm install
 npm run dev        # http://localhost:5173
-npm test           # Vitest: economía offline, combate, balística, A*, isométrico
+npm test           # Vitest: economía offline, combate, motor hardcore, balística, A*, isométrico
 npm run build      # typecheck + build de producción en dist/
 ```
 
@@ -48,6 +48,33 @@ tests/                      Pruebas de reglas del GDD
   con coste alto y se atacan si la ruta óptima las cruza; replanificación al caer cualquier edificio.
 - **Batalla**: zona roja de despliegue, fase de exploración sin reloj, 3 minutos, estrellas (50 %, Senado, 100 %),
   botín proporcional al daño, bendiciones de Marte/Minerva pagadas con Favor.
+
+## Batalla campal 3D (motor *hardcore*)
+
+`src/engine/HardcoreCombatEngine.ts` es una simulación pura (sin render, con semilla) en metros y segundos:
+
+- **Masa y colisiones**: separación ponderada por masa y choques casi inelásticos. Una carga convierte
+  ½·μ·v² en daño, derribo y pánico (un jinete de 560 kg arrolla a un guerrero de 88 kg).
+- **Moral (0-100)**: cae por bajas cercanas, flanqueos, piedras de onagro, caballería a menos de 15 m, fatiga,
+  hambre y la muerte del centurión/caudillo. Por debajo de 20 la unidad huye y arroja el escudo; con su centurión
+  vivo y sin enemigos cerca se reagrupa.
+- **Formaciones**: Línea, Testudo (proyectiles ×0.08, −50 % velocidad, ×2 impacto de caballería frontal),
+  Orbis (+200 % densidad defensiva en todas direcciones), Cuneus (×2.5 energía de impacto) y Orden abierto.
+- **Pila**: andanada automática a 20 m antes del choque; al clavarse en un escudo lo inutilizan (se suelta).
+- **Onagro**: tiro parabólico a 45° con gravedad real, área de 3.2 m, desmembramiento, derribo y pánico.
+- **Clima**: lluvia (caballería −40 %, más fatiga, barro), niebla (alcance ×0.5) y atardecer polvoriento.
+- **Logística**: si el Horreum no cubre dos horas de mantenimiento, las líneas de suministro están cortadas
+  (−30 moral inicial, deserción del 15 % y desgaste continuo).
+
+`src/battle3d/` es el render (Three.js): terreno con alturas deformables (surcos de caligae, cascos y ruedas,
+cráteres de onagro), textura de barro y sangre pintada en tiempo real, ejércitos instanciados con materiales PBR
+procedurales, cadáveres y escudos que persisten, pila y flechas clavados en el barro, lluvia, niebla y polvo.
+
+Cada unidad de la economía es un grupo real: legionario/vélite = contubernium de 8 hombres, equites = 4 jinetes.
+Los arietes se quedan en el castrum (son máquinas de asedio).
+
+Controles de batalla: clic en tus hombres = seleccionar centuria · clic en el terreno = marchar · clic sobre el
+enemigo = cargar · teclas 1-5 formaciones · C carga · H mantener · P pila · espacio pausa.
 
 ## Controles
 

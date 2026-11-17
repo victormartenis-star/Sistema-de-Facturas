@@ -212,7 +212,8 @@ export class Hud {
     const html = `
       <button class="boton-codex" data-accion="abrir-construir">🏗️<span>Construir</span></button>
       <button class="boton-codex" data-accion="abrir-ejercito">⚔️<span>Ejército ${espacioOcupado(estado)}/${limiteTropas(estado)}</span></button>
-      <button class="boton-codex boton-purpura" data-accion="buscar-batalla">🦅<span>¡A la Batalla!</span></button>
+      <button class="boton-codex boton-rojo" data-accion="batalla-campal">⚔️<span>Batalla campal</span></button>
+      <button class="boton-codex boton-purpura" data-accion="buscar-batalla">🦅<span>Asaltar provincia</span></button>
       <div class="fabri" title="Constructores (fabri) ocupados">🔨 ${obras}/${CONFIG_GENERAL.constructores}</div>
       <div class="zoom"><button class="boton-icono" data-accion="zoom-mas">＋</button><button class="boton-icono" data-accion="zoom-menos">－</button></div>`;
     this.establecer(this.accionesEl, html);

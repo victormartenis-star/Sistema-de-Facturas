@@ -11,6 +11,7 @@ import { Batalla, botinEntero } from './systems/Combat';
 import {
   acelerarObra,
   anadirRecursos,
+  consumoPorHora,
   construir,
   crearEstadoInicial,
   entrenar,
@@ -25,8 +26,9 @@ import {
 } from './systems/Economy';
 import { borrar, cargar, guardar } from './systems/SaveSystem';
 import { Hud } from './ui/Hud';
+import { BatallaCampal, type ResultadoCampal } from './battle3d/BatallaCampal';
 
-type Modo = 'aldea' | 'batalla';
+type Modo = 'aldea' | 'batalla' | 'campal';
 type Panel = { tipo: 'construir' } | { tipo: 'edificio'; id: number } | { tipo: 'ejercito' } | null;
 
 const PASO_COMBATE = 1 / 30;
@@ -88,7 +90,9 @@ class Juego {
     const resumen = simular(this.estado, ahora);
     for (const o of resumen.obrasTerminadas) this.hud.aviso(`🏗️ ${EDIFICIOS[o.tipo].nombre} alcanza el nivel ${o.nivel}`, 'exito');
 
-    if (this.modo === 'batalla' && this.batalla) {
+    if (this.modo === 'campal') {
+      // La batalla campal 3D tiene su propio bucle; la economía sigue corriendo.
+    } else if (this.modo === 'batalla' && this.batalla) {
       this.actualizarBatalla(dt, t);
       this.render.dibujarBatalla(this.batalla, ahora, {
         mostrarZona: !!this.unidadElegida && !this.batalla.resultado,
@@ -210,6 +214,9 @@ class Juego {
       case 'buscar-batalla':
         this.iniciarBatalla();
         break;
+      case 'batalla-campal':
+        this.iniciarCampal();
+        break;
       case 'siguiente-rival':
         if (puedePagar(this.estado, { denarios: 50 })) {
           this.estado.recursos.denarios -= 50;
@@ -294,6 +301,60 @@ class Juego {
     this.render.centrarEn(20, 20);
     this.hud.modoBatalla();
     this.sfx.metal();
+  }
+
+  private iniciarCampal(): void {
+    const ej = this.estado.ejercito;
+    if (ej.legionario + ej.velite + ej.equites + ej.onagro === 0) {
+      this.hud.aviso('Necesitas tropas de campaña: entrena legionarios, vélites o equites en la Castra', 'error');
+      return;
+    }
+    this.cancelarColocacion();
+    this.abrirPanel(null);
+    this.modo = 'campal';
+    const lienzo = document.querySelector<HTMLElement>('#lienzo')!;
+    const ui = document.querySelector<HTMLElement>('#ui')!;
+    lienzo.style.display = 'none';
+    ui.style.display = 'none';
+    // Líneas de suministro cortadas: menos trigo que dos horas de mantenimiento.
+    const hambre = this.estado.recursos.trigo < Math.max(1, consumoPorHora(this.estado, 'trigo') * 2);
+    new BatallaCampal(document.body, {
+      ejercito: { ...ej },
+      nivelSenado: nivelSenado(this.estado),
+      hambre,
+      onSonido: (t) => {
+        if (t === 'golpe') this.sfx.espada();
+        else if (t === 'impacto') this.sfx.construir();
+        else if (t === 'piedra') this.sfx.impactoPiedra();
+        else if (t === 'flecha') this.sfx.flecha();
+        else this.sfx.fanfarria(t === 'fanfarria');
+      },
+      onFin: (r) => {
+        lienzo.style.display = '';
+        ui.style.display = '';
+        this.modo = 'aldea';
+        this.render.redimensionar();
+        this.hud.modoAldea();
+        this.aplicarCampal(r);
+      },
+    });
+  }
+
+  private aplicarCampal(r: ResultadoCampal): void {
+    if (r.resultado.duration === 0) return; // se volvió sin combatir
+    for (const [t, n] of Object.entries(r.perdidas) as [TipoUnidad, number][]) this.estado.ejercito[t] = Math.max(0, this.estado.ejercito[t] - n);
+    const victoria = !r.abandonada && r.resultado.winner === 'rome';
+    if (victoria) {
+      // Botín del campamento enemigo y del campo de batalla.
+      const botin = anadirRecursos(this.estado, { denarios: r.enemigosCaidos * 12, trigo: r.enemigosCaidos * 8, favor: Math.round(r.enemigosCaidos / 4) });
+      this.estado.laureles += 25;
+      this.estado.batallasGanadas += 1;
+      this.hud.aviso(`Victoria: +${botin.denarios} denarios, +${botin.trigo} trigo, +25 laureles`, 'exito');
+    } else {
+      this.estado.laureles = Math.max(0, this.estado.laureles + CONFIG_BOTIN.laurelesDerrota);
+      this.hud.aviso(`Las legiones regresan diezmadas: ${r.hombresPerdidos} hombres perdidos`, 'error');
+    }
+    guardar(this.estado);
   }
 
   private desplegarEn(sx: number, sy: number, avisar: boolean): void {

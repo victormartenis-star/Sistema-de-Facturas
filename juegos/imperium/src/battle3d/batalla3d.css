@@ -1,0 +1,487 @@
+/* Batalla campal: hierro fundido, sangre seca, barro de calzada y lino crudo. */
+.campal {
+  --hierro: #2f3538;
+  --hierro-claro: #4a5256;
+  --sangre: #8b0000;
+  --sangre-seca: #4a0a06;
+  --barro: #4a3b32;
+  --lino: #d8cfbf;
+  --lino-apagado: #a39a8a;
+  --rojo-pompeyano: #7a1f1a;
+  --bronce: #8a6a3a;
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: #14171a;
+  color: var(--lino);
+  font-family: 'Cinzel', Georgia, serif;
+}
+.campal canvas {
+  display: block;
+  touch-action: none;
+}
+.campal button {
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* Superficie: hierro picado con remaches */
+.campal-barra,
+.campal-lista .escuadra,
+.campal-mando,
+.campal-registro,
+.campal-velocidad,
+.briefing-caja {
+  background:
+    radial-gradient(circle at 8px 8px, #5b6266 1.5px, transparent 2px) 0 0 / 100% 100% no-repeat,
+    radial-gradient(circle at calc(100% - 8px) 8px, #5b6266 1.5px, transparent 2px) 0 0 / 100% 100% no-repeat,
+    linear-gradient(180deg, rgba(47, 53, 56, 0.94), rgba(28, 31, 33, 0.94));
+  border: 1px solid #1a1d1f;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 4px 14px rgba(0, 0, 0, 0.6);
+}
+
+.campal-hud > * {
+  position: absolute;
+}
+
+.campal-barra {
+  top: calc(8px + env(safe-area-inset-top, 0px));
+  left: max(8px, env(safe-area-inset-left, 0px));
+  right: max(8px, env(safe-area-inset-right, 0px));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 14px;
+  flex-wrap: wrap;
+}
+.campal-barra .titulo b {
+  display: block;
+  letter-spacing: 0.06em;
+  font-size: 15px;
+}
+.campal-barra .titulo small {
+  color: var(--lino-apagado);
+  font-family: Georgia, serif;
+  font-size: 12px;
+}
+.fuerzas {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.bando {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 2px 8px;
+  align-items: baseline;
+  font-size: 12px;
+  min-width: 120px;
+}
+.bando b {
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.bando .barra {
+  grid-column: 1 / -1;
+  height: 4px;
+  background: #111;
+  display: block;
+}
+.bando .barra i {
+  display: block;
+  height: 100%;
+}
+.bando.roma .barra i {
+  background: var(--rojo-pompeyano);
+}
+.bando.germanos .barra i {
+  background: #6b5a3e;
+}
+.bando small {
+  grid-column: 1 / -1;
+  color: var(--lino-apagado);
+  font-family: Georgia, serif;
+}
+.reloj {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  color: var(--lino);
+  letter-spacing: 0.08em;
+}
+
+/* Lista de centurias */
+.campal-lista {
+  top: 86px;
+  left: max(8px, env(safe-area-inset-left, 0px));
+  width: 236px;
+  max-height: calc(100% - 260px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.escuadra {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  text-align: left;
+  border-left: 3px solid var(--hierro-claro) !important;
+}
+.escuadra.sel {
+  border-left-color: var(--lino) !important;
+  outline: 1px solid rgba(216, 207, 191, 0.5);
+}
+.escuadra .nombre {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+.escuadra .estado {
+  font-style: normal;
+  font-size: 10px;
+  padding: 1px 6px;
+  background: #1a1d1f;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  align-self: center;
+}
+.escuadra.combate .estado {
+  background: var(--sangre-seca);
+}
+.escuadra.panico {
+  border-left-color: var(--sangre) !important;
+}
+.escuadra.panico .estado {
+  background: var(--sangre);
+  animation: latido 0.8s infinite;
+}
+.escuadra.perdida {
+  opacity: 0.45;
+}
+.escuadra .datos {
+  font-family: Georgia, serif;
+  font-size: 11px;
+  color: var(--lino-apagado);
+}
+.medidor {
+  height: 3px;
+  background: #111;
+  display: block;
+}
+.medidor i {
+  display: block;
+  height: 100%;
+}
+.medidor.moral i {
+  background: linear-gradient(90deg, var(--sangre), #9a8a5a 40%, #7c8a62);
+}
+.medidor.fatiga i {
+  background: #5a5f62;
+}
+@keyframes latido {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Mando de la centuria */
+.campal-mando {
+  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 18px;
+  padding: 10px 14px;
+  max-width: calc(100% - 16px);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.campal-mando .grupo {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.campal-mando .etiqueta {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--lino-apagado);
+}
+.campal-mando .botones {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.campal-mando button,
+.campal-velocidad button {
+  background: linear-gradient(180deg, #3d4447, #23282a);
+  border: 1px solid #121415;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  padding: 6px 10px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.campal-mando button:hover:not([disabled]),
+.campal-velocidad button:hover {
+  background: linear-gradient(180deg, #4b5357, #2b3134);
+}
+.campal-mando button.activo,
+.campal-velocidad button.activo {
+  background: linear-gradient(180deg, #8c7f66, #5d5444);
+  color: #16130f;
+}
+.campal-mando button.carga {
+  background: linear-gradient(180deg, #7a1f1a, #4a0a06);
+}
+.campal-mando button[disabled] {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.campal-mando .vacio {
+  margin: 0;
+  font-family: Georgia, serif;
+  font-style: italic;
+  color: var(--lino-apagado);
+}
+.campal button:focus-visible {
+  outline: 2px solid var(--lino);
+  outline-offset: 1px;
+}
+
+.campal-velocidad {
+  top: 86px;
+  right: max(8px, env(safe-area-inset-right, 0px));
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+}
+.campal-velocidad .abandonar {
+  margin-left: 8px;
+  background: linear-gradient(180deg, #5a1612, #33100c);
+}
+
+.campal-registro {
+  bottom: 120px;
+  left: max(8px, env(safe-area-inset-left, 0px));
+  width: 300px;
+  padding: 6px 10px;
+  font-family: Georgia, serif;
+  font-size: 12px;
+  background: rgba(20, 23, 25, 0.75);
+}
+.campal-registro:empty {
+  display: none;
+}
+.campal-registro p {
+  margin: 2px 0;
+}
+.campal-registro time {
+  color: var(--lino-apagado);
+  font-variant-numeric: tabular-nums;
+  margin-right: 4px;
+}
+.campal-registro .malo {
+  color: #e08a7a;
+}
+.campal-registro .bueno {
+  color: #b9c79a;
+}
+.campal-ayuda {
+  bottom: calc(4px + env(safe-area-inset-bottom, 0px));
+  right: max(10px, env(safe-area-inset-right, 0px));
+  margin: 0;
+  font-family: Georgia, serif;
+  font-size: 11px;
+  color: rgba(216, 207, 191, 0.55);
+  max-width: 340px;
+  text-align: right;
+}
+
+/* Sesión informativa y resultado */
+.briefing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background:
+    radial-gradient(ellipse at center, rgba(74, 59, 50, 0.35), transparent 70%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.015) 0 1px, transparent 1px 3px),
+    #121416;
+  overflow-y: auto;
+}
+.briefing.resultado {
+  background: rgba(10, 11, 12, 0.72);
+}
+.briefing-caja {
+  width: min(720px, 100%);
+  padding: 24px 28px;
+}
+.briefing .sello {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--lino-apagado);
+}
+.briefing h1 {
+  margin: 4px 0 10px;
+  font-size: clamp(28px, 6vw, 44px);
+  letter-spacing: 0.08em;
+  text-wrap: balance;
+  font-weight: 900;
+}
+.briefing h1.victoria {
+  color: #c9bd9a;
+}
+.briefing h1.derrota {
+  color: #b5483a;
+}
+.briefing h2 {
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--lino-apagado);
+  margin: 0 0 8px;
+}
+.briefing .cronica,
+.briefing ul,
+.briefing .nota,
+.briefing .alerta {
+  font-family: Georgia, serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.briefing ul {
+  padding-left: 18px;
+  margin: 0 0 8px;
+}
+.briefing .nota {
+  color: var(--lino-apagado);
+}
+.briefing .alerta {
+  color: #e08a7a;
+  border-left: 3px solid var(--sangre);
+  padding-left: 8px;
+}
+.briefing-columnas {
+  display: grid;
+  grid-template-columns: 1fr 1.3fr;
+  gap: 24px;
+  margin: 12px 0;
+}
+.climas {
+  display: grid;
+  gap: 6px;
+}
+.opcion-clima {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 7px 9px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid #1a1d1f;
+  cursor: pointer;
+}
+.opcion-clima:has(input:checked) {
+  border-color: var(--lino-apagado);
+  background: rgba(74, 59, 50, 0.45);
+}
+.opcion-clima input {
+  accent-color: #8c7f66;
+  margin-top: 3px;
+}
+.opcion-clima span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+.opcion-clima small {
+  font-family: Georgia, serif;
+  color: var(--lino-apagado);
+  font-size: 12px;
+}
+.briefing-botones {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.boton-hierro {
+  padding: 10px 18px;
+  background: linear-gradient(180deg, #3d4447, #23282a);
+  border: 1px solid #121415;
+  letter-spacing: 0.08em;
+  font-size: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.boton-sangre {
+  background: linear-gradient(180deg, #7a1f1a, #4a0a06);
+}
+.cifras {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 10px 0 14px;
+}
+.cifras div {
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 10px;
+}
+.cifras b {
+  font-size: 26px;
+  font-variant-numeric: tabular-nums;
+}
+.cifras small {
+  font-family: Georgia, serif;
+  color: var(--lino-apagado);
+}
+
+@media (max-width: 760px) {
+  .briefing-columnas {
+    grid-template-columns: 1fr;
+  }
+  .campal-lista {
+    top: auto;
+    bottom: 150px;
+    width: auto;
+    right: 8px;
+    flex-direction: row;
+    overflow-x: auto;
+    max-height: none;
+  }
+  .campal-lista .escuadra {
+    min-width: 170px;
+  }
+  .campal-registro,
+  .campal-ayuda {
+    display: none;
+  }
+  .campal-velocidad {
+    top: auto;
+    bottom: 230px;
+  }
+  .fuerzas {
+    gap: 8px;
+  }
+  .bando {
+    min-width: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .escuadra.panico .estado {
+    animation: none;
+  }
+}
