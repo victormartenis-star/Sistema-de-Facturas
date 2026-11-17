@@ -1,0 +1,582 @@
+/* ───────── The Roman Codex: piedra esculpida, bronce oxidado y Cinzel ───────── */
+:root {
+  --marmol: #e8e8e6;
+  --purpura: #6a0dad;
+  --purpura-oscuro: #45087a;
+  --terracota: #c0392b;
+  --oro: #d4af37;
+  --oro-oscuro: #9c7f22;
+  --oliva: #556b2f;
+  --bronce: #8c6a3f;
+  --bronce-oxidado: #4f7f6a;
+  --piedra-1: #4a463f;
+  --piedra-2: #34312b;
+  --tinta: #f3ead2;
+  --apagado: #b9ad8c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #1d2412;
+  color: var(--tinta);
+  font-family: 'Cinzel', 'Trajan Pro', Georgia, serif;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#lienzo {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: grab;
+}
+#lienzo:active {
+  cursor: grabbing;
+}
+
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+#ui > * {
+  pointer-events: auto;
+}
+
+.oculto {
+  display: none !important;
+}
+
+/* Superficie de piedra con marco de bronce */
+.codex-barra,
+.codex-panel {
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.02) 0 2px, transparent 2px 6px),
+    linear-gradient(180deg, var(--piedra-1), var(--piedra-2));
+  border: 2px solid var(--bronce);
+  box-shadow:
+    inset 0 0 0 1px rgba(212, 175, 55, 0.35),
+    inset 0 0 18px rgba(0, 0, 0, 0.55),
+    0 6px 18px rgba(0, 0, 0, 0.5);
+  border-radius: 6px;
+}
+
+h2,
+h3 {
+  margin: 0;
+  color: var(--oro);
+  letter-spacing: 0.06em;
+  text-shadow: 0 1px 0 #000;
+}
+h2 small {
+  color: var(--apagado);
+  font-size: 0.65em;
+}
+
+/* Barra superior de recursos */
+#recursos {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  flex-wrap: wrap;
+}
+.imperio {
+  display: flex;
+  flex-direction: column;
+  min-width: 110px;
+}
+.imperio .nombre {
+  color: var(--oro);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  font-size: 13px;
+}
+.imperio .laurel {
+  font-size: 12px;
+  color: var(--apagado);
+}
+.lista-recursos {
+  display: flex;
+  gap: 10px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+.recurso {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 96px;
+  padding: 2px 8px;
+  border: 1px solid rgba(212, 175, 55, 0.4);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.25);
+}
+.recurso .icono {
+  font-size: 18px;
+}
+.recurso .valor {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  font-family: Georgia, serif;
+  min-width: 56px;
+}
+.medidor {
+  display: block;
+  height: 4px;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+.medidor > i {
+  display: block;
+  height: 100%;
+}
+.fase {
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--apagado);
+}
+
+/* Botones */
+button {
+  font-family: inherit;
+  color: inherit;
+}
+.boton-codex {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 5px;
+  border: 2px solid var(--oro-oscuro);
+  background: linear-gradient(180deg, #6b5a3a, #3e3322);
+  color: var(--tinta);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    0 2px 0 #000;
+  transition: transform 0.08s, filter 0.15s;
+}
+.boton-codex:hover:not([disabled]) {
+  filter: brightness(1.15);
+}
+.boton-codex:active:not([disabled]) {
+  transform: translateY(1px);
+}
+.boton-codex[disabled],
+.tarjeta[disabled],
+.unidad-boton[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.boton-purpura {
+  background: linear-gradient(180deg, #8a2ad0, var(--purpura-oscuro));
+  border-color: var(--oro);
+}
+.boton-rojo {
+  background: linear-gradient(180deg, #d24a3b, #7d2318);
+}
+.boton-pequeno {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+.boton-icono {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--bronce);
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+/* Barra inferior de acciones */
+#acciones {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  padding: 8px;
+  align-items: center;
+  max-width: calc(100% - 16px);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+#acciones .boton-codex {
+  font-size: 15px;
+}
+.fabri {
+  font-size: 13px;
+  color: var(--apagado);
+  padding: 0 6px;
+}
+.zoom {
+  display: flex;
+  gap: 4px;
+}
+
+/* Panel lateral */
+#panel {
+  position: absolute;
+  top: 78px;
+  right: 8px;
+  width: min(400px, calc(100% - 16px));
+  max-height: calc(100% - 160px);
+  overflow-y: auto;
+  padding: 12px;
+}
+.panel-cabecera {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--bronce);
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+}
+.pista {
+  font-family: Georgia, serif;
+  font-size: 13px;
+  color: var(--apagado);
+  font-style: italic;
+  margin: 4px 0 8px;
+}
+.rejilla-tarjetas {
+  display: grid;
+  gap: 6px;
+}
+.tarjeta {
+  display: flex;
+  gap: 10px;
+  text-align: left;
+  padding: 8px;
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.tarjeta:hover:not([disabled]) {
+  border-color: var(--oro);
+  background: rgba(106, 13, 173, 0.25);
+}
+.tarjeta-icono {
+  font-size: 26px;
+  width: 38px;
+  text-align: center;
+  position: relative;
+}
+.tarjeta-icono em {
+  position: absolute;
+  bottom: -2px;
+  right: -4px;
+  font-size: 11px;
+  font-style: normal;
+  background: var(--purpura);
+  border: 1px solid var(--oro);
+  border-radius: 8px;
+  padding: 0 5px;
+}
+.tarjeta-cuerpo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+.tarjeta-cuerpo small {
+  color: var(--apagado);
+}
+.detalle,
+.descripcion {
+  font-family: Georgia, serif;
+  font-size: 12px;
+  color: var(--apagado);
+}
+.descripcion {
+  font-style: italic;
+}
+.coste {
+  white-space: nowrap;
+  color: var(--tinta);
+}
+.coste.falta {
+  color: #ff7a66;
+}
+.motivo {
+  font-family: Georgia, serif;
+  font-size: 12px;
+  color: #ff9f8f;
+}
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.stats span {
+  font-family: Georgia, serif;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(212, 175, 55, 0.3);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.obra,
+.mejora {
+  border-top: 1px dashed var(--bronce);
+  padding-top: 8px;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.fila-botones {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.cola {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.en-cola {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--bronce);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: Georgia, serif;
+}
+
+/* HUD de batalla */
+#hud-batalla {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+#hud-batalla > * {
+  pointer-events: auto;
+}
+.info-batalla {
+  position: absolute;
+  top: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  padding: 6px 14px;
+  max-width: calc(100% - 16px);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.info-batalla small {
+  display: block;
+  color: var(--apagado);
+  font-size: 11px;
+}
+.reloj {
+  font-size: 22px;
+  color: var(--oro);
+  font-weight: 900;
+}
+.estrellas {
+  color: var(--oro);
+  font-size: 20px;
+  letter-spacing: 2px;
+}
+.estrellas.grandes {
+  font-size: 44px;
+  text-align: center;
+}
+.botin {
+  font-family: Georgia, serif;
+  font-size: 13px;
+}
+.barra-despliegue {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  max-width: calc(100% - 16px);
+}
+.unidades,
+.bendiciones {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.unidad-boton {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 74px;
+  padding: 4px;
+  font-size: 24px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 2px solid var(--bronce);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.unidad-boton b {
+  font-size: 13px;
+}
+.unidad-boton small {
+  font-size: 9px;
+  color: var(--apagado);
+}
+.unidad-boton.activa {
+  border-color: var(--oro);
+  background: rgba(106, 13, 173, 0.55);
+  box-shadow: 0 0 10px rgba(212, 175, 55, 0.6);
+}
+.pista-batalla {
+  position: absolute;
+  top: 140px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: Georgia, serif;
+  font-style: italic;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  text-align: center;
+  max-width: calc(100% - 32px);
+}
+
+/* Modal */
+#modal {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.modal-caja {
+  padding: 22px 28px;
+  max-width: 440px;
+  width: 100%;
+  font-family: Georgia, serif;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  text-align: center;
+}
+.modal-caja h2 {
+  font-family: 'Cinzel', serif;
+  font-size: 26px;
+}
+.titulo-victoria {
+  color: var(--oro) !important;
+  font-size: 34px !important;
+}
+.titulo-derrota {
+  color: #ff7a66 !important;
+  font-size: 34px !important;
+}
+.lista-resumen {
+  text-align: left;
+  margin: 0;
+  padding-left: 18px;
+}
+
+/* Avisos */
+#aviso {
+  position: absolute;
+  top: 82px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 5px;
+  border: 1px solid var(--oro);
+  background: rgba(30, 26, 20, 0.92);
+  font-size: 14px;
+  pointer-events: none;
+  max-width: calc(100% - 32px);
+  text-align: center;
+}
+.aviso-error {
+  border-color: var(--terracota) !important;
+  color: #ffb3a6;
+}
+.aviso-exito {
+  border-color: var(--bronce-oxidado) !important;
+  color: #c9f2d8;
+}
+
+@media (max-width: 640px) {
+  .imperio {
+    display: none;
+  }
+  #recursos {
+    gap: 6px;
+    padding: 5px 6px;
+    flex-wrap: nowrap;
+  }
+  .lista-recursos {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px;
+    min-width: 0;
+  }
+  .recurso {
+    min-width: 0;
+    padding: 2px 3px;
+    gap: 2px;
+    flex-direction: column;
+  }
+  .recurso .valor {
+    min-width: 0;
+    width: 100%;
+    align-items: center;
+    font-size: 11px;
+  }
+  .fase {
+    flex-direction: column;
+    font-size: 0;
+    gap: 3px;
+  }
+  .recurso .icono {
+    font-size: 14px;
+  }
+  #acciones .boton-codex span {
+    display: none;
+  }
+  .info-batalla {
+    top: 96px;
+    gap: 8px;
+  }
+}
