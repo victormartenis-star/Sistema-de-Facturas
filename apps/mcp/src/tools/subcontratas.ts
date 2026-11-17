@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   certSubcontrataCreateSchema,
+  certSubcontrataFacturarSchema,
   contratosSubcontrataQuerySchema,
   type CertSubcontrataDto,
   type ContratoSubcontrataResumenDto,
@@ -15,9 +16,66 @@ import { ejecutar } from '../comun';
  *
  * Deliberadamente NO se exponen `pagar` ni la devolución de garantía: son
  * salidas de dinero y quedan para una persona en la interfaz. El agente puede
- * consultar, medir (crear borradores) y aprobar.
+ * consultar, medir (crear borradores), aprobar y registrar la factura de
+ * compra que emite el subcontratista (un apunte de gasto, no un pago).
  */
 export function registrarSubcontratas(server: McpServer) {
+  server.registerTool(
+    'consultar_certificacion_subcontrata',
+    {
+      title: 'Consultar una certificación de subcontrata',
+      description:
+        'Detalle de una certificación de subcontrata: importes a origen, ' +
+        'periodo, retención, líquido, estado y `facturaCompra` (la factura ' +
+        'de compra viva generada desde ella: id, número, estado, base, ' +
+        'retención y total; null si aún no tiene).',
+      inputSchema: {
+        id: z.string().uuid().describe('Certificación de subcontrata'),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ id }) =>
+      ejecutar(() =>
+        pedir<CertSubcontrataDto>(`/subcontratas/certificaciones/${id}`),
+      ),
+  );
+
+  server.registerTool(
+    'generar_factura_compra_subcontrata',
+    {
+      title: 'Generar la factura de compra desde una certificación',
+      description:
+        'Registra y aprueba la factura de compra del subcontratista a partir ' +
+        'de una certificación APROBADA o PAGADA. La base es el periodo ' +
+        'certificado, la retención la de la certificación y la línea se ' +
+        'imputa a la obra del contrato; invoiceNumber e issueDate son los de ' +
+        'la factura que envió el subcontratista. Por defecto aplica ISP ' +
+        '(inversión del sujeto pasivo); con isp=false usa vatPct. Errores: 409 ' +
+        'si la certificación no está aprobada, ya tiene factura, la ' +
+        'subcontrata no tiene contacto o no está apta por PRL; 422 si la ' +
+        'retención supera el 20 %. Requiere rol admin, gerente o administración.',
+      inputSchema: {
+        id: z.string().uuid().describe('Certificación de subcontrata'),
+        ...certSubcontrataFacturarSchema.shape,
+      },
+      annotations: { readOnlyHint: false, idempotentHint: false },
+    },
+    async ({ id, ...cuerpo }) =>
+      ejecutar(() =>
+        pedirVersionado<CertSubcontrataDto>(
+          `/subcontratas/certificaciones/${id}/factura-compra`,
+          { method: 'POST', body: JSON.stringify(cuerpo) },
+          async () =>
+            (
+              await pedir<CertSubcontrataDto>(
+                `/subcontratas/certificaciones/${id}`,
+              )
+            ).version,
+          'certificación de subcontrata',
+        ),
+      ),
+  );
+
   server.registerTool(
     'listar_contratos_subcontrata',
     {

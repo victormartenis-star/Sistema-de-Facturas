@@ -39,11 +39,42 @@ describe('herramientas MCP de subcontratas', () => {
   it('no expone pagar ni devolver garantía (salidas de dinero)', () => {
     expect([...herramientas().keys()].sort()).toEqual([
       'aprobar_certificacion_subcontrata',
+      'consultar_certificacion_subcontrata',
       'consultar_retencion_garantia',
       'crear_certificacion_subcontrata',
+      'generar_factura_compra_subcontrata',
       'listar_certificaciones_subcontrata',
       'listar_contratos_subcontrata',
     ]);
+  });
+
+  it('generar factura: lee la versión, envía If-Match y el cuerpo sin el id', async () => {
+    fetchMock
+      .mockResolvedValueOnce(json({ id: CERT, version: 4 }))
+      .mockResolvedValueOnce(
+        json({ id: CERT, facturaCompra: { invoiceNumber: 'F-1' } }, 201),
+      );
+    const r = await herramientas().get('generar_factura_compra_subcontrata')!({
+      id: CERT,
+      invoiceNumber: 'F-1',
+      issueDate: '2026-11-30',
+      isp: true,
+    });
+    expect(r.isError).toBeFalsy();
+    const [url, init] = fetchMock.mock.calls[1];
+    expect(
+      String(url).endsWith(
+        `/subcontratas/certificaciones/${CERT}/factura-compra`,
+      ),
+    ).toBe(true);
+    expect(
+      ((init as RequestInit).headers as Record<string, string>)['If-Match'],
+    ).toBe('"4"');
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+      invoiceNumber: 'F-1',
+      issueDate: '2026-11-30',
+      isp: true,
+    });
   });
 
   it('listar contratos pasa los filtros en la query', async () => {

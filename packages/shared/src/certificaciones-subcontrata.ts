@@ -131,6 +131,68 @@ export const devolucionGarantiaCreateSchema = z
   })
   .strict();
 
+/**
+ * Datos de la factura que emite el subcontratista por una certificación.
+ * Base, retención y obra salen de la certificación (no se aceptan aquí).
+ */
+export const certSubcontrataFacturarSchema = z
+  .object({
+    /** Número de la factura del subcontratista (su numeración, no la nuestra). */
+    invoiceNumber: z
+      .string()
+      .trim()
+      .min(1, 'El número de factura es obligatorio')
+      .max(60, 'Máximo 60 caracteres'),
+    issueDate: isoDate,
+    dueDate: isoDate.nullish(),
+    /** Subcontratación de obra entre empresas: lo habitual es ISP (art. 84.Uno.2.f LIVA). */
+    isp: z.boolean().default(true),
+    /** Tipo de IVA si no hay ISP. */
+    vatPct: z
+      .number({ invalid_type_error: 'Debe ser un número' })
+      .min(0)
+      .max(100)
+      .default(21),
+    /** Vencimiento de la retención de garantía (por defecto, el estándar de la factura). */
+    retentionReleaseDate: isoDate.nullish(),
+  })
+  .strict();
+
+export type CertSubcontrataFacturarInput = z.input<
+  typeof certSubcontrataFacturarSchema
+>;
+
+/** Estados desde los que se puede registrar la factura de compra. */
+export const CERT_SUBCONTRATA_FACTURABLES: readonly CertSubcontrataStatus[] = [
+  'aprobada',
+  'pagada',
+];
+
+/** Retención máxima que admite una factura (`invoiceCreateSchema.retentionPct`). */
+export const RETENCION_MAXIMA_FACTURA_PCT = 20;
+
+/**
+ * `null` si la certificación admite generar su factura de compra; si no, el
+ * motivo (la API responde 409, o 422 para la retención fuera de rango).
+ */
+export function motivoNoFacturableCertSubcontrata(cert: {
+  status: CertSubcontrataStatus;
+  numero: number;
+  retencionPct: number;
+  facturaCompra: { invoiceNumber: string } | null;
+}): string | null {
+  if (!CERT_SUBCONTRATA_FACTURABLES.includes(cert.status)) {
+    return `La certificación nº ${cert.numero} está «${CERT_SUBCONTRATA_STATUS_LABELS[cert.status]}»: solo se factura una certificación aprobada o pagada`;
+  }
+  if (cert.facturaCompra) {
+    return `La certificación nº ${cert.numero} ya tiene la factura de compra ${cert.facturaCompra.invoiceNumber}: anúlala antes de generar otra`;
+  }
+  if (cert.retencionPct > RETENCION_MAXIMA_FACTURA_PCT) {
+    return `La retención de la certificación (${cert.retencionPct} %) supera el máximo de ${RETENCION_MAXIMA_FACTURA_PCT} % que admite una factura`;
+  }
+  return null;
+}
+
 export const contratosSubcontrataQuerySchema = z.object({
   proyectoId: z.string().uuid().optional(),
   proveedorId: z.string().uuid().optional(),
@@ -177,8 +239,20 @@ export interface CertSubcontrataDto {
   anuladaAt: string | null;
   motivoAnulacion: string | null;
   notas: string | null;
+  /** Factura de compra viva generada desde esta certificación (null si no hay). */
+  facturaCompra: FacturaCompraEnlaceDto | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Enlace certificación de subcontrata → factura de compra. */
+export interface FacturaCompraEnlaceDto {
+  id: string;
+  invoiceNumber: string;
+  status: string;
+  baseAmount: number;
+  totalAmount: number;
+  retentionAmount: number;
 }
 
 export interface DevolucionGarantiaDto {

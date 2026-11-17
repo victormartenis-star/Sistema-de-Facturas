@@ -8,9 +8,11 @@ import {
 import {
   canTransitionCertSubcontrata,
   certSubcontrataCreateSchema,
+  certSubcontrataFacturarSchema,
   certSubcontrataUpdateSchema,
   devolucionGarantiaCreateSchema,
   esCertSubcontrataVigente,
+  motivoNoFacturableCertSubcontrata,
 } from './certificaciones-subcontrata';
 
 describe('computeCertSubcontrata', () => {
@@ -159,5 +161,62 @@ describe('esquemas de entrada', () => {
         motivo: 'Fin del plazo de garantía',
       }).success,
     ).toBe(true);
+  });
+});
+
+describe('factura de compra desde certificación', () => {
+  const base = {
+    status: 'aprobada' as const,
+    numero: 3,
+    retencionPct: 5,
+    facturaCompra: null,
+  };
+
+  it('aprobada y pagada son facturables; borrador y anulada no', () => {
+    expect(motivoNoFacturableCertSubcontrata(base)).toBeNull();
+    expect(
+      motivoNoFacturableCertSubcontrata({ ...base, status: 'pagada' }),
+    ).toBeNull();
+    expect(
+      motivoNoFacturableCertSubcontrata({ ...base, status: 'borrador' }),
+    ).toMatch(/aprobada o pagada/);
+    expect(
+      motivoNoFacturableCertSubcontrata({ ...base, status: 'anulada' }),
+    ).toMatch(/Anulada/);
+  });
+
+  it('no admite una segunda factura viva ni retenciones por encima del 20 %', () => {
+    expect(
+      motivoNoFacturableCertSubcontrata({
+        ...base,
+        facturaCompra: { invoiceNumber: 'F-1' },
+      }),
+    ).toMatch(/ya tiene la factura de compra F-1/);
+    expect(
+      motivoNoFacturableCertSubcontrata({ ...base, retencionPct: 20 }),
+    ).toBeNull();
+    expect(
+      motivoNoFacturableCertSubcontrata({ ...base, retencionPct: 20.01 }),
+    ).toMatch(/supera el máximo/);
+  });
+
+  it('el esquema exige número y fecha, y por defecto aplica ISP con IVA 21', () => {
+    const r = certSubcontrataFacturarSchema.parse({
+      invoiceNumber: ' F-77 ',
+      issueDate: '2026-11-30',
+    });
+    expect(r).toEqual({
+      invoiceNumber: 'F-77',
+      issueDate: '2026-11-30',
+      isp: true,
+      vatPct: 21,
+    });
+    expect(
+      certSubcontrataFacturarSchema.safeParse({
+        invoiceNumber: 'F-77',
+        issueDate: '2026-11-30',
+        baseAmount: 1,
+      }).success,
+    ).toBe(false);
   });
 });

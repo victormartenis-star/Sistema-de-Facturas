@@ -414,6 +414,8 @@ export interface InvoiceDto {
   verifactuStatus: VerifactuStatus;
   /** Validación XSD del último Facturae generado: null = no evaluado. */
   facturaeXsdStatus: FacturaeXsdStatus | null;
+  /** Certificación de subcontrata de origen (solo compras generadas desde ella). */
+  certSubcontrataId: string | null;
   createdAt: string;
   updatedAt: string;
 }

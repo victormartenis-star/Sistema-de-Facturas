@@ -384,6 +384,15 @@ export const invoices = pgTable(
     facturaeXsdStatus: varchar('facturae_xsd_status', { length: 10 }),
     /** Errores del XSD (uno por línea) cuando `facturaeXsdStatus` es 'no_valido'. */
     facturaeXsdErrors: text('facturae_xsd_errors'),
+    /**
+     * Certificación de subcontrata de la que procede esta factura de compra
+     * (generada con `POST /subcontratas/certificaciones/:id/factura-compra`).
+     * La certificación sustituye a los albaranes como documento de conformidad.
+     */
+    certSubcontrataId: uuid('cert_subcontrata_id').references(
+      (): AnyPgColumn => certificacionesSubcontrata.id,
+      { onDelete: 'restrict' },
+    ),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -427,6 +436,20 @@ export const invoices = pgTable(
     uniqueIndex('invoices_company_venta_number_unique')
       .on(t.companyId, t.invoiceNumber)
       .where(sql`kind = 'venta' AND deleted_at IS NULL`),
+    // Una sola factura de compra viva por certificación de subcontrata: una
+    // anulada o rectificada deja de contar y permite volver a generarla.
+    uniqueIndex('invoices_cert_subcontrata_activa_unique')
+      .on(t.certSubcontrataId)
+      .where(
+        sql`cert_subcontrata_id IS NOT NULL AND deleted_at IS NULL AND status NOT IN ('anulada', 'rectificada')`,
+      ),
+    index('invoices_company_cert_subcontrata_idx')
+      .on(t.companyId, t.certSubcontrataId)
+      .where(sql`cert_subcontrata_id IS NOT NULL`),
+    check(
+      'invoices_cert_subcontrata_compra',
+      sql`${t.certSubcontrataId} IS NULL OR (${t.kind} = 'compra' AND ${t.rectifiesInvoiceId} IS NULL)`,
+    ),
   ],
 );
 

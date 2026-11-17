@@ -13,12 +13,14 @@ import {
 import {
   type CertSubcontrataAnularInput,
   type CertSubcontrataCreateInput,
+  type CertSubcontrataFacturarInput,
   type CertSubcontrataPagarInput,
   type CertSubcontrataUpdateInput,
   type ContratosSubcontrataQuery,
   type DevolucionGarantiaCreateInput,
   certSubcontrataAnularSchema,
   certSubcontrataCreateSchema,
+  certSubcontrataFacturarSchema,
   certSubcontrataPagarSchema,
   certSubcontrataUpdateSchema,
   contratosSubcontrataQuerySchema,
@@ -127,6 +129,23 @@ export class SubcontratasController {
     @VersionEsperada() version?: number,
   ) {
     return this.service.pagar(id, body, version);
+  }
+
+  /**
+   * Genera y aprueba la factura de compra del subcontratista desde una
+   * certificación aprobada o pagada. If-Match opcional (versión de la
+   * certificación); Idempotency-Key para reintentos seguros.
+   */
+  @Post('certificaciones/:id/factura-compra')
+  @Roles(...ROLES_FINANZAS)
+  @Idempotente()
+  facturar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(certSubcontrataFacturarSchema))
+    body: CertSubcontrataFacturarInput,
+    @VersionEsperada() version?: number,
+  ) {
+    return this.service.facturar(id, body, version);
   }
 
   @Post('certificaciones/:id/anular')

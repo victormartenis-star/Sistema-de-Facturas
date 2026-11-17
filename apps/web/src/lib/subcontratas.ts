@@ -27,30 +27,40 @@ export function puedeGestionarDinero(
   return !!rol && ROLES_FINANZAS.includes(rol);
 }
 
-export type AccionCert = 'editar' | 'eliminar' | 'aprobar' | 'pagar' | 'anular';
+export type AccionCert =
+  'editar' | 'eliminar' | 'aprobar' | 'pagar' | 'anular' | 'facturar';
 
 /**
- * Acciones visibles para una certificación. `anular` en una aprobada solo
- * si es la última no anulada del contrato (la API responde 409 si no).
+ * Acciones visibles para una certificación.
+ * - `anular` en una aprobada solo si es la última no anulada del contrato y
+ *   no tiene factura de compra viva (la API responde 409 si no).
+ * - `facturar` (generar la factura de compra) en aprobadas y pagadas sin
+ *   factura viva.
  */
 export function accionesCert(
-  cert: Pick<CertSubcontrataDto, 'id' | 'numero' | 'status'>,
+  cert: Pick<CertSubcontrataDto, 'id' | 'numero' | 'status'> & {
+    facturaCompra?: CertSubcontrataDto['facturaCompra'];
+  },
   todas: readonly Pick<CertSubcontrataDto, 'numero' | 'status'>[],
   rol: UserRole | null | undefined,
 ): AccionCert[] {
   const acciones: AccionCert[] = [];
   const medir = puedeMedir(rol);
   const dinero = puedeGestionarDinero(rol);
+  const conFactura = !!cert.facturaCompra;
   if (cert.status === 'borrador') {
     if (medir) acciones.push('editar', 'eliminar');
     if (dinero) acciones.push('aprobar');
+  }
+  if ((cert.status === 'aprobada' || cert.status === 'pagada') && dinero) {
+    if (!conFactura) acciones.push('facturar');
   }
   if (cert.status === 'aprobada' && dinero) {
     acciones.push('pagar');
     const esUltima = !todas.some(
       (c) => c.numero > cert.numero && c.status !== 'anulada',
     );
-    if (esUltima) acciones.push('anular');
+    if (esUltima && !conFactura) acciones.push('anular');
   }
   return acciones;
 }

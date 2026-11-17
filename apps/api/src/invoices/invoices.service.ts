@@ -23,6 +23,7 @@ import {
   categories,
   Contact,
   Invoice,
+  certificacionesSubcontrata,
   certifications,
   contacts,
   deliveryNotes,
@@ -269,6 +270,8 @@ export class InvoicesService {
     data: InvoiceCreateData,
     amounts: InvoiceAmounts,
     rectificacion?: RectificacionEnlace,
+    /** Compra generada desde una certificación de subcontrata. */
+    origen?: { certSubcontrataId: string },
   ): Promise<Invoice> {
     let row: Invoice;
     try {
@@ -297,6 +300,7 @@ export class InvoicesService {
             rectificationType: rectificacion.type,
             facturaeReasonCode: rectificacion.facturaeReasonCode ?? null,
           }),
+          ...(origen && { certSubcontrataId: origen.certSubcontrataId }),
         })
         .returning();
     } catch (err) {
@@ -558,7 +562,35 @@ export class InvoicesService {
       return;
     }
 
-    if (invoice.kind === 'compra') {
+    if (invoice.kind === 'compra' && invoice.certSubcontrataId) {
+      // Compra de subcontrata: el documento de conformidad es la
+      // certificación aprobada, no un albarán. La base debe ser exactamente
+      // la producción del periodo certificado.
+      const [cert] = await tx
+        .select({
+          importePeriodo: certificacionesSubcontrata.importePeriodo,
+          status: certificacionesSubcontrata.status,
+        })
+        .from(certificacionesSubcontrata)
+        .where(
+          and(
+            eq(certificacionesSubcontrata.id, invoice.certSubcontrataId),
+            eq(certificacionesSubcontrata.companyId, invoice.companyId),
+            isNull(certificacionesSubcontrata.deletedAt),
+          ),
+        );
+      if (!cert || !['aprobada', 'pagada'].includes(cert.status)) {
+        throw new ConflictException(
+          'No se puede aprobar: la certificación de subcontrata de origen ya no está aprobada',
+        );
+      }
+      const base = Number(invoice.baseAmount);
+      if (!amountsMatch(Number(cert.importePeriodo), base)) {
+        throw new ConflictException(
+          `No se puede aprobar: la base de la factura (${base.toFixed(2)} €) no cuadra con el periodo certificado (${Number(cert.importePeriodo).toFixed(2)} €)`,
+        );
+      }
+    } else if (invoice.kind === 'compra') {
       const notes = await tx
         .select()
         .from(deliveryNotes)
@@ -1452,6 +1484,7 @@ export class InvoicesService {
           invoice.verifactuStatus as InvoiceDto['verifactuStatus'],
         facturaeXsdStatus:
           invoice.facturaeXsdStatus as InvoiceDto['facturaeXsdStatus'],
+        certSubcontrataId: invoice.certSubcontrataId,
         createdAt: invoice.createdAt.toISOString(),
         updatedAt: invoice.updatedAt.toISOString(),
       };
@@ -1532,6 +1565,16 @@ export class InvoicesService {
     ) {
       throw new ConflictException(
         'La factura ya tiene una rectificativa total',
+      );
+    }
+    if (
+      err instanceof Error &&
+      'constraint' in err &&
+      (err as { constraint?: string }).constraint ===
+        'invoices_cert_subcontrata_activa_unique'
+    ) {
+      throw new ConflictException(
+        'La certificación de subcontrata ya tiene una factura de compra activa',
       );
     }
     if (

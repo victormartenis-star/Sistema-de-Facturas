@@ -9,6 +9,7 @@ import {
 import type { ExportRecurso, PaginaDto } from '@erp/shared';
 import type {
   CertSubcontrataCreateInput,
+  CertSubcontrataFacturarInput,
   CertSubcontrataDto,
   CertSubcontrataUpdateInput,
   ContratoSubcontrataResumenDto,
@@ -1909,6 +1910,27 @@ export const subcontratasApi = {
       headers: ifMatch(version),
       body: JSON.stringify({ fechaPago }),
     }),
+  /**
+   * Genera y aprueba la factura de compra del subcontratista desde una
+   * certificación aprobada o pagada (If-Match de la certificación).
+   */
+  facturarCompra: (
+    id: string,
+    input: CertSubcontrataFacturarInput,
+    version: number,
+    clave?: string,
+  ) =>
+    request<CertSubcontrataDto>(
+      `/subcontratas/certificaciones/${id}/factura-compra`,
+      {
+        method: 'POST',
+        headers: {
+          ...ifMatch(version),
+          ...idempotencyKey(clave ?? nuevoUuid()),
+        },
+        body: JSON.stringify(input),
+      },
+    ),
   anular: (id: string, motivo: string, version: number) =>
     request<CertSubcontrataDto>(`/subcontratas/certificaciones/${id}/anular`, {
       method: 'POST',

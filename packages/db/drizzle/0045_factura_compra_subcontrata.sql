@@ -1,0 +1,5 @@
+ALTER TABLE "invoices" ADD COLUMN "cert_subcontrata_id" uuid;--> statement-breakpoint
+ALTER TABLE "invoices" ADD CONSTRAINT "invoices_cert_subcontrata_id_certificaciones_subcontrata_id_fk" FOREIGN KEY ("cert_subcontrata_id") REFERENCES "public"."certificaciones_subcontrata"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "invoices_cert_subcontrata_activa_unique" ON "invoices" USING btree ("cert_subcontrata_id") WHERE cert_subcontrata_id IS NOT NULL AND deleted_at IS NULL AND status NOT IN ('anulada', 'rectificada');--> statement-breakpoint
+CREATE INDEX "invoices_company_cert_subcontrata_idx" ON "invoices" USING btree ("company_id","cert_subcontrata_id") WHERE cert_subcontrata_id IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "invoices" ADD CONSTRAINT "invoices_cert_subcontrata_compra" CHECK ("invoices"."cert_subcontrata_id" IS NULL OR ("invoices"."kind" = 'compra' AND "invoices"."rectifies_invoice_id" IS NULL));

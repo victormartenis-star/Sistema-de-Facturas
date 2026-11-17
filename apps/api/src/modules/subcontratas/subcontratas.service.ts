@@ -4,7 +4,16 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  notInArray,
+  sql,
+} from 'drizzle-orm';
 import {
   type CertificacionSubcontrata,
   type ContratoSubcontrata,
@@ -12,14 +21,17 @@ import {
   certificacionesSubcontrata,
   contratosSubcontrata,
   devolucionesGarantiaSubcontrata,
+  invoices,
   projects,
   proveedores,
 } from '@erp/db';
 import {
+  CERT_SUBCONTRATA_FACTURABLES,
   CERT_SUBCONTRATA_VIGENTES,
   CertSubcontrataInvalidaError,
   type CertSubcontrataAnularInput,
   type CertSubcontrataCreateInput,
+  type CertSubcontrataFacturarInput,
   type CertSubcontrataDto,
   type CertSubcontrataPagarInput,
   type CertSubcontrataStatus,
@@ -28,15 +40,19 @@ import {
   type ContratosSubcontrataQuery,
   type DevolucionGarantiaCreateInput,
   type DevolucionGarantiaDto,
+  type FacturaCompraEnlaceDto,
   type RetencionGarantiaDto,
   certSubcontrataAnularSchema,
   certSubcontrataCreateSchema,
+  certSubcontrataFacturarSchema,
   certSubcontrataPagarSchema,
   certSubcontrataUpdateSchema,
   computeCertSubcontrata,
   devolucionGarantiaCreateSchema,
   esCertSubcontrataVigente,
   motivoDevolucionInvalida,
+  motivoNoFacturableCertSubcontrata,
+  RETENCION_MAXIMA_FACTURA_PCT,
   resumenRetencionGarantia,
 } from '@erp/shared';
 import { AuditService } from '../../audit/audit.service';
@@ -47,10 +63,15 @@ import {
   incrementarVersion,
   verificarVersion,
 } from '../../common/version';
+import { ComplianceService } from '../../compliance/compliance.service';
 import { DbService } from '../../db/db.service';
+import { InvoicesService } from '../../invoices/invoices.service';
 import { ProveedoresService } from '../proveedores/proveedores.service';
 
-function aDto(c: CertificacionSubcontrata): CertSubcontrataDto {
+function aDto(
+  c: CertificacionSubcontrata,
+  facturaCompra: FacturaCompraEnlaceDto | null = null,
+): CertSubcontrataDto {
   return {
     id: c.id,
     version: c.version,
@@ -71,6 +92,7 @@ function aDto(c: CertificacionSubcontrata): CertSubcontrataDto {
     anuladaAt: c.anuladaAt?.toISOString() ?? null,
     motivoAnulacion: c.motivoAnulacion,
     notas: c.notas,
+    facturaCompra,
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
   };
@@ -140,6 +162,8 @@ export class SubcontratasService {
     private readonly dbs: DbService,
     private readonly audit: AuditService,
     private readonly proveedores: ProveedoresService,
+    private readonly invoices: InvoicesService,
+    private readonly compliance: ComplianceService,
   ) {}
 
   /* ─────────────────────────── contratos ─────────────────────────── */
@@ -255,13 +279,13 @@ export class SubcontratasService {
         ),
       )
       .orderBy(asc(certificacionesSubcontrata.numero));
-    return filas.map(aDto);
+    return this.dtos(this.dbs.db, filas);
   }
 
   async getCertificacion(id: string): Promise<CertSubcontrataDto> {
     const cert = await this.cert(this.dbs.db, id);
     await this.contrato(this.dbs.db, cert.contratoId);
-    return aDto(cert);
+    return this.dto(this.dbs.db, cert);
   }
 
   async create(
@@ -313,7 +337,7 @@ export class SubcontratasService {
         action: 'create',
         newData: instantanea(creada),
       });
-      return aDto(creada);
+      return this.dto(tx, creada);
     });
   }
 
@@ -380,7 +404,7 @@ export class SubcontratasService {
         oldData: instantanea(cert),
         newData: instantanea(editada),
       });
-      return aDto(editada);
+      return this.dto(tx, editada);
     });
   }
 
@@ -459,7 +483,7 @@ export class SubcontratasService {
         newData: instantanea(aprobada),
         meta: { accion: 'aprobar' },
       });
-      return aDto(aprobada);
+      return this.dto(tx, aprobada);
     });
   }
 
@@ -497,7 +521,7 @@ export class SubcontratasService {
         newData: { status: 'pagada', fechaPago },
         meta: { accion: 'pagar', importeLiquido: Number(cert.importeLiquido) },
       });
-      return aDto(pagada);
+      return this.dto(tx, pagada);
     });
   }
 
@@ -520,6 +544,12 @@ export class SubcontratasService {
       const resto = (await this.certsDelContrato(tx, cert.contratoId)).filter(
         (c) => c.id !== id,
       );
+      const factura = await this.facturaActiva(tx, id);
+      if (factura) {
+        throw new ConflictException(
+          `La certificación tiene la factura de compra ${factura.invoiceNumber}: anúlala o rectifícala antes de anular la certificación`,
+        );
+      }
       if (de === 'aprobada') {
         if (
           resto.some((c) => c.numero > cert.numero && c.status !== 'anulada')
@@ -570,8 +600,189 @@ export class SubcontratasService {
         newData: { status: 'anulada' },
         meta: { accion: 'anular', motivo },
       });
-      return aDto(anulada);
+      return this.dto(tx, anulada);
     });
+  }
+
+  /* ─────────────────── factura de compra ─────────────────── */
+
+  /**
+   * Registra la factura de compra del subcontratista a partir de una
+   * certificación aprobada (o pagada) y la aprueba en la misma transacción.
+   *
+   * - Base = periodo certificado; retención = la de la certificación (mismo
+   *   cálculo en céntimos: se comprueba que coinciden); imputación a la obra
+   *   del contrato. Número y fecha son los de la factura del subcontratista.
+   * - La certificación es el documento de conformidad: sustituye al cruce
+   *   con albaranes (`InvoicesService.aprobarEnTx`).
+   * - Homologación del contacto y PRL de la subcontrata se exigen antes,
+   *   igual que al aprobar cualquier compra.
+   * - Una sola factura viva por certificación (también índice único parcial).
+   * - La versión de la certificación sube: es una mutación de su estado.
+   */
+  async facturar(
+    id: string,
+    input: CertSubcontrataFacturarInput,
+    versionEsperada?: number,
+  ): Promise<CertSubcontrataDto> {
+    const data = certSubcontrataFacturarSchema.parse(input);
+    const previa = await this.cert(this.dbs.db, id);
+    verificarVersion(previa.version, versionEsperada);
+    const contrato = await this.contrato(this.dbs.db, previa.contratoId);
+    this.exigirFacturable(previa, await this.facturaActiva(this.dbs.db, id));
+
+    const [proveedor] = await this.dbs.db
+      .select({
+        contactId: proveedores.contactId,
+        razonSocial: proveedores.razonSocial,
+      })
+      .from(proveedores)
+      .where(
+        and(
+          eq(proveedores.id, contrato.proveedorId),
+          eq(proveedores.companyId, contrato.companyId),
+        ),
+      );
+    if (!proveedor?.contactId) {
+      throw new ConflictException(
+        `La subcontrata «${proveedor?.razonSocial ?? contrato.proveedorId}» no tiene contacto vinculado: enlaza su ficha con un contacto antes de registrar facturas`,
+      );
+    }
+    const accion = 'registrar la factura de compra';
+    await this.compliance.assertCanTransact(proveedor.contactId, accion);
+    await this.proveedores.assertAptoParaPago(proveedor.contactId, accion);
+
+    const [obra] = await this.dbs.db
+      .select({ code: projects.code })
+      .from(projects)
+      .where(eq(projects.id, contrato.proyectoId));
+    const prep = await this.invoices.prepararCreacion({
+      kind: 'compra',
+      contactId: proveedor.contactId,
+      invoiceNumber: data.invoiceNumber,
+      issueDate: data.issueDate,
+      dueDate: data.dueDate ?? null,
+      isp: data.isp,
+      retentionPct: Number(previa.retencionPct),
+      retentionReleaseDate: data.retentionReleaseDate ?? null,
+      notes: `Generada desde la certificación de subcontrata nº ${previa.numero} del contrato ${contrato.numeroContrato}`,
+      lines: [
+        {
+          description:
+            `Certificación nº ${previa.numero} — contrato ${contrato.numeroContrato}` +
+            `${obra ? ` (obra ${obra.code})` : ''}: ` +
+            `periodo ${previa.periodoDesde} a ${previa.periodoHasta}; ` +
+            `a origen ${Number(previa.importeOrigen).toFixed(2)} €, ` +
+            `anterior ${Number(previa.importeAnterior).toFixed(2)} €`,
+          baseAmount: Number(previa.importePeriodo),
+          vatPct: data.vatPct,
+          projectId: contrato.proyectoId,
+        },
+      ],
+      deliveryNoteIds: [],
+    });
+    // Mismo cálculo en céntimos a ambos lados: si no cuadra, algo se ha
+    // desviado y no se registra una factura que contradiga la certificación.
+    if (
+      Math.round(prep.amounts.retentionAmount * 100) !==
+      Math.round(Number(previa.retencionImporte) * 100)
+    ) {
+      throw new ConflictException(
+        `La retención calculada para la factura (${prep.amounts.retentionAmount.toFixed(2)} €) no coincide con la de la certificación (${Number(previa.retencionImporte).toFixed(2)} €)`,
+      );
+    }
+
+    return this.dbs.db.transaction(async (tx) => {
+      const { cert } = await this.bloquear(tx, id);
+      verificarVersion(cert.version, versionEsperada);
+      this.exigirFacturable(cert, await this.facturaActiva(tx, id));
+
+      const factura = await this.invoices.crearEnTx(
+        tx,
+        prep.companyId,
+        prep.data,
+        prep.amounts,
+        undefined,
+        { certSubcontrataId: id },
+      );
+      await this.invoices.aprobarEnTx(tx, factura, prep.contact);
+      const [actualizada] = await tx
+        .update(certificacionesSubcontrata)
+        .set({
+          updatedAt: new Date(),
+          version: incrementarVersion(certificacionesSubcontrata),
+        })
+        .where(
+          and(
+            eq(certificacionesSubcontrata.id, id),
+            condicionVersion(certificacionesSubcontrata, versionEsperada),
+          ),
+        )
+        .returning();
+      if (!actualizada) {
+        await falloActualizacion(
+          tx,
+          certificacionesSubcontrata,
+          id,
+          versionEsperada,
+          () => new ConflictException('La certificación ha cambiado: recarga'),
+          'Certificación no encontrada',
+        );
+      }
+      await this.audit.registrar(tx, [
+        {
+          entityType: 'invoice',
+          entityId: factura.id,
+          action: 'create',
+          newData: {
+            invoiceId: factura.id,
+            kind: 'compra',
+            status: 'borrador',
+            certSubcontrataId: id,
+            baseAmount: prep.amounts.baseAmount,
+            retentionAmount: prep.amounts.retentionAmount,
+            totalAmount: prep.amounts.totalAmount,
+          },
+        },
+        {
+          entityType: 'invoice',
+          entityId: factura.id,
+          action: 'update',
+          newData: { status: 'aprobada' },
+        },
+        {
+          entityType: 'cert_subcontrata',
+          entityId: id,
+          action: 'update',
+          newData: { facturaCompraId: factura.id },
+          meta: { accion: 'facturar', invoiceNumber: data.invoiceNumber },
+        },
+      ]);
+      return this.dto(tx, actualizada);
+    });
+  }
+
+  private exigirFacturable(
+    cert: CertificacionSubcontrata,
+    factura: FacturaCompraEnlaceDto | null,
+  ): void {
+    const motivo = motivoNoFacturableCertSubcontrata({
+      status: cert.status as CertSubcontrataStatus,
+      numero: cert.numero,
+      retencionPct: Number(cert.retencionPct),
+      facturaCompra: factura,
+    });
+    if (!motivo) return;
+    // Estado y duplicado son conflictos (409); la retención fuera de rango
+    // es un dato que la factura no admite (422).
+    const soloRetencion =
+      CERT_SUBCONTRATA_FACTURABLES.includes(
+        cert.status as CertSubcontrataStatus,
+      ) &&
+      !factura &&
+      Number(cert.retencionPct) > RETENCION_MAXIMA_FACTURA_PCT;
+    if (soloRetencion) throw new UnprocessableEntityException(motivo);
+    throw new ConflictException(motivo);
   }
 
   /* ─────────────────────── garantía ─────────────────────── */
@@ -718,6 +929,70 @@ export class SubcontratasService {
       : await consulta;
     if (!fila) throw new NotFoundException('Certificación no encontrada');
     return fila;
+  }
+
+  /** Facturas de compra vivas (ni anuladas ni rectificadas) de las certificaciones dadas. */
+  private async facturasActivas(
+    db: DbOrTx,
+    certIds: string[],
+  ): Promise<Map<string, FacturaCompraEnlaceDto>> {
+    const mapa = new Map<string, FacturaCompraEnlaceDto>();
+    if (certIds.length === 0) return mapa;
+    const filas = await db
+      .select({
+        id: invoices.id,
+        certSubcontrataId: invoices.certSubcontrataId,
+        invoiceNumber: invoices.invoiceNumber,
+        status: invoices.status,
+        baseAmount: invoices.baseAmount,
+        totalAmount: invoices.totalAmount,
+        retentionAmount: invoices.retentionAmount,
+      })
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.companyId, this.dbs.getCompanyId()),
+          inArray(invoices.certSubcontrataId, certIds),
+          isNull(invoices.deletedAt),
+          notInArray(invoices.status, ['anulada', 'rectificada']),
+        ),
+      );
+    for (const f of filas) {
+      mapa.set(f.certSubcontrataId as string, {
+        id: f.id,
+        invoiceNumber: f.invoiceNumber,
+        status: f.status,
+        baseAmount: Number(f.baseAmount),
+        totalAmount: Number(f.totalAmount),
+        retentionAmount: Number(f.retentionAmount),
+      });
+    }
+    return mapa;
+  }
+
+  private async facturaActiva(
+    db: DbOrTx,
+    certId: string,
+  ): Promise<FacturaCompraEnlaceDto | null> {
+    return (await this.facturasActivas(db, [certId])).get(certId) ?? null;
+  }
+
+  private async dtos(
+    db: DbOrTx,
+    filas: CertificacionSubcontrata[],
+  ): Promise<CertSubcontrataDto[]> {
+    const facturas = await this.facturasActivas(
+      db,
+      filas.map((f) => f.id),
+    );
+    return filas.map((f) => aDto(f, facturas.get(f.id) ?? null));
+  }
+
+  private async dto(
+    db: DbOrTx,
+    fila: CertificacionSubcontrata,
+  ): Promise<CertSubcontrataDto> {
+    return (await this.dtos(db, [fila]))[0];
   }
 
   /** Orden de bloqueo fijo: contrato → certificación. */

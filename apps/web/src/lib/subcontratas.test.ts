@@ -38,20 +38,41 @@ describe('accionesCert', () => {
     expect(accionesCert(b, [b], 'lector')).toEqual([]);
   });
 
-  it('aprobada: se paga siempre, se anula solo si es la última no anulada', () => {
+  it('aprobada: se factura y se paga; se anula solo si es la última no anulada', () => {
     const a1 = c(1, 'aprobada');
     const a2 = c(2, 'aprobada');
-    expect(accionesCert(a1, [a1, a2], 'admin')).toEqual(['pagar']);
-    expect(accionesCert(a2, [a1, a2], 'admin')).toEqual(['pagar', 'anular']);
+    expect(accionesCert(a1, [a1, a2], 'admin')).toEqual(['facturar', 'pagar']);
+    expect(accionesCert(a2, [a1, a2], 'admin')).toEqual([
+      'facturar',
+      'pagar',
+      'anular',
+    ]);
     expect(accionesCert(a1, [a1, c(2, 'anulada')], 'admin')).toEqual([
+      'facturar',
       'pagar',
       'anular',
     ]);
     expect(accionesCert(a2, [a1, a2], 'obra')).toEqual([]);
   });
 
-  it('pagada y anulada no tienen acciones', () => {
-    expect(accionesCert(c(1, 'pagada'), [], 'admin')).toEqual([]);
+  it('con factura de compra viva: ni se vuelve a facturar ni se anula', () => {
+    const conFactura = {
+      ...c(1, 'aprobada'),
+      facturaCompra: {
+        id: 'f1',
+        invoiceNumber: 'F-1',
+        status: 'aprobada',
+        baseAmount: 100,
+        totalAmount: 100,
+        retentionAmount: 5,
+      },
+    };
+    expect(accionesCert(conFactura, [conFactura], 'admin')).toEqual(['pagar']);
+  });
+
+  it('pagada solo se factura (si no lo está); anulada no tiene acciones', () => {
+    expect(accionesCert(c(1, 'pagada'), [], 'admin')).toEqual(['facturar']);
+    expect(accionesCert(c(1, 'pagada'), [], 'obra')).toEqual([]);
     expect(accionesCert(c(1, 'anulada'), [], 'admin')).toEqual([]);
   });
 });

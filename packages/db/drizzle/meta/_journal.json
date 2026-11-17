@@ -316,6 +316,13 @@
       "when": 1794925612471,
       "tag": "0044_subcontratas_certificaciones",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1794936876519,
+      "tag": "0045_factura_compra_subcontrata",
+      "breakpoints": true
     }
   ]
 }

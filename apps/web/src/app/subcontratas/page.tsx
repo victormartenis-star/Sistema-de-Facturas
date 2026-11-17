@@ -296,12 +296,158 @@ function ModalCampo({
   );
 }
 
+/**
+ * Registra la factura que envió el subcontratista por una certificación
+ * aprobada: la API la crea y la aprueba con la base y la retención de la
+ * certificación. Un 409 (versión, duplicado, PRL…) llega como problema
+ * RFC 7807 y se muestra con su detalle; el de versión ofrece recargar.
+ */
+function ModalFacturaCompra({
+  cert,
+  onClose,
+  onHecho,
+}: {
+  cert: CertSubcontrataDto;
+  onClose: () => void;
+  onHecho: () => void;
+}) {
+  const toast = useToast();
+  const avisarError = useAvisarError();
+  const [clave] = useState(nuevoUuid);
+  const [form, setForm] = useState({
+    invoiceNumber: '',
+    issueDate: hoy(),
+    isp: true,
+    vatPct: '21',
+  });
+  const iva = form.isp ? 0 : Number(form.vatPct) || 0;
+  const total = cert.importePeriodo * (1 + iva / 100);
+
+  const facturar = useMutation({
+    mutationFn: () =>
+      subcontratasApi.facturarCompra(
+        cert.id,
+        {
+          invoiceNumber: form.invoiceNumber,
+          issueDate: form.issueDate,
+          isp: form.isp,
+          vatPct: Number(form.vatPct) || 0,
+        },
+        cert.version,
+        clave,
+      ),
+    onSuccess: (r) => {
+      toast(
+        `Factura de compra ${r.facturaCompra?.invoiceNumber ?? ''} registrada y aprobada`,
+      );
+      onHecho();
+    },
+    onError: (e) => avisarError(e, onHecho),
+  });
+
+  return (
+    <Modal
+      open
+      title={`Factura de compra — certificación nº ${cert.numero}`}
+      onClose={onClose}
+    >
+      <form
+        className="space-y-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          facturar.mutate();
+        }}
+      >
+        <dl className="grid grid-cols-3 gap-2 rounded-lg bg-gray-50 p-3 text-xs">
+          <div>
+            <dt className="text-gray-500">Base (periodo)</dt>
+            <dd className="font-semibold tabular-nums">
+              {formatEur(cert.importePeriodo)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-gray-500">Retención ({cert.retencionPct} %)</dt>
+            <dd className="font-semibold tabular-nums">
+              {formatEur(cert.retencionImporte)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-gray-500">Total factura (est.)</dt>
+            <dd className="font-semibold tabular-nums">{formatEur(total)}</dd>
+          </div>
+        </dl>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelCls}>Nº de factura del subcontratista</label>
+            <input
+              required
+              maxLength={60}
+              className={fieldCls}
+              value={form.invoiceNumber}
+              onChange={(e) =>
+                setForm({ ...form, invoiceNumber: e.target.value })
+              }
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Fecha de la factura</label>
+            <input
+              type="date"
+              required
+              className={fieldCls}
+              value={form.issueDate}
+              onChange={(e) => setForm({ ...form, issueDate: e.target.value })}
+            />
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-sm text-gray-700">
+          <input
+            type="checkbox"
+            checked={form.isp}
+            onChange={(e) => setForm({ ...form, isp: e.target.checked })}
+          />
+          Inversión del sujeto pasivo (subcontratación de obra)
+        </label>
+        {!form.isp && (
+          <div>
+            <label className={labelCls}>Tipo de IVA (%)</label>
+            <input
+              inputMode="decimal"
+              className={fieldCls}
+              value={form.vatPct}
+              onChange={(e) => setForm({ ...form, vatPct: e.target.value })}
+            />
+          </div>
+        )}
+        <p className="text-xs text-gray-500">
+          La factura se imputa a la obra del contrato y queda aprobada, con sus
+          vencimientos de pago (ordinario y retención). La certificación hace de
+          documento de conformidad en lugar de los albaranes.
+        </p>
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" className={btnGhostCls} onClick={onClose}>
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            className={btnPrimaryCls}
+            disabled={facturar.isPending || !form.invoiceNumber.trim()}
+          >
+            Generar y aprobar
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 /* ───────────────────────── detalle ───────────────────────── */
 
 type Dialogo =
   | { tipo: 'nueva' }
   | { tipo: 'pagar'; cert: CertSubcontrataDto }
   | { tipo: 'anular'; cert: CertSubcontrataDto }
+  | { tipo: 'facturar'; cert: CertSubcontrataDto }
   | { tipo: 'devolver' }
   | null;
 
@@ -428,8 +574,28 @@ function DetalleContrato({
                           {formatDate(c.fechaPago)}
                         </span>
                       )}
+                      {c.facturaCompra && (
+                        <span
+                          className="mt-0.5 block text-[11px] text-gray-600"
+                          title={`Base ${formatEur(c.facturaCompra.baseAmount)} · retención ${formatEur(c.facturaCompra.retentionAmount)}`}
+                        >
+                          Factura {c.facturaCompra.invoiceNumber} ·{' '}
+                          {c.facturaCompra.status} ·{' '}
+                          {formatEur(c.facturaCompra.totalAmount)}
+                        </span>
+                      )}
                     </td>
                     <td className="py-2 text-right whitespace-nowrap">
+                      {acciones.includes('facturar') && (
+                        <button
+                          className={btnGhostCls}
+                          onClick={() =>
+                            setDialogo({ tipo: 'facturar', cert: c })
+                          }
+                        >
+                          Generar factura de compra
+                        </button>
+                      )}
                       {acciones.includes('aprobar') && (
                         <button
                           className={btnGhostCls}
@@ -570,6 +736,16 @@ function DetalleContrato({
               ),
             )
           }
+        />
+      )}
+      {dialogo?.tipo === 'facturar' && (
+        <ModalFacturaCompra
+          cert={dialogo.cert}
+          onClose={() => setDialogo(null)}
+          onHecho={() => {
+            recargar();
+            setDialogo(null);
+          }}
         />
       )}
       {dialogo?.tipo === 'anular' && (
