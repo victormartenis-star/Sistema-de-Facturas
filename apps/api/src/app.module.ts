@@ -26,6 +26,7 @@ import { PartesDiariosModule } from './modules/partes-diarios/partes-diarios.mod
 import { PhasesModule } from './phases/phases.module';
 import { ProjectsModule } from './projects/projects.module';
 import { ProveedoresModule } from './modules/proveedores/proveedores.module';
+import { SubcontratasModule } from './modules/subcontratas/subcontratas.module';
 import { PermisosModule } from './modules/permisos/permisos.module';
 import { ContratosObraModule } from './modules/contratos-obra/contratos-obra.module';
 import { ActasRecepcionModule } from './modules/actas-recepcion/actas-recepcion.module';
@@ -84,6 +85,7 @@ import { InformesModule } from './modules/informes/informes.module';
     UsersModule,
     CopilotoModule,
     ProveedoresModule,
+    SubcontratasModule,
     PermisosModule,
     ContratosObraModule,
     ActasRecepcionModule,

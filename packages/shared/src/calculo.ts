@@ -13,6 +13,7 @@
 import {
   applyPct,
   fromCents,
+  mulDivRound,
   repartirCents,
   sumCents,
   toCents,
@@ -394,6 +395,127 @@ export function computeCertification(
     periodAmount: fromCents(period),
     retentionAmount: computeRetention(fromCents(period), retentionPct),
   };
+}
+
+/* ─────────────────── certificaciones de subcontrata ─────────────────── */
+
+export interface CertSubcontrataImportes {
+  /** Producción acumulada a origen certificada hasta esta certificación. */
+  importeOrigen: number;
+  /** A origen de la certificación vigente anterior (0 si es la primera). */
+  importeAnterior: number;
+  /** `importeOrigen − importeAnterior`. */
+  importePeriodo: number;
+  /** Retención de garantía sobre el periodo. */
+  retencionImporte: number;
+  /** Lo que se paga al subcontratista: periodo − retención. */
+  importeLiquido: number;
+  /** % ejecutado del contrato a origen (2 decimales). */
+  pctEjecutado: number;
+}
+
+/** Motivo por el que una certificación de subcontrata no cuadra con su contrato. */
+export class CertSubcontrataInvalidaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CertSubcontrataInvalidaError';
+  }
+}
+
+/**
+ * Certificación de subcontrata **a origen** (lo que la constructora debe a
+ * su subcontratista). Mismo criterio que `computeCertification`, pero la
+ * medición entra en importe, no en %: el jefe de obra mide la producción
+ * acumulada del subcontratista contra su contrato.
+ *
+ * Reglas (lanzan `CertSubcontrataInvalidaError`, la API responde 422):
+ * - el a origen no puede bajar del anterior (una corrección a la baja se
+ *   hace anulando la última certificación);
+ * - el a origen no puede superar el importe del contrato (un exceso exige
+ *   antes ampliar el contrato);
+ * - un periodo a cero no es una certificación.
+ *
+ * Todo en céntimos enteros; la retención se redondea half-up.
+ */
+export function computeCertSubcontrata(
+  importeContrato: number,
+  importeOrigen: number,
+  importeAnterior: number,
+  retencionPct: number,
+): CertSubcontrataImportes {
+  const contrato = toCents(importeContrato);
+  const origen = toCents(importeOrigen);
+  const anterior = toCents(importeAnterior);
+  if (origen < 0n) {
+    throw new CertSubcontrataInvalidaError(
+      'El importe a origen no puede ser negativo',
+    );
+  }
+  if (origen > contrato) {
+    throw new CertSubcontrataInvalidaError(
+      `El importe a origen (${fromCents(origen)}) supera el importe del contrato (${fromCents(contrato)}): amplía antes el contrato`,
+    );
+  }
+  if (origen < anterior) {
+    throw new CertSubcontrataInvalidaError(
+      `El importe a origen (${fromCents(origen)}) es menor que el ya certificado (${fromCents(anterior)}): anula la última certificación para corregirla`,
+    );
+  }
+  const periodo = origen - anterior;
+  if (periodo === 0n) {
+    throw new CertSubcontrataInvalidaError(
+      'El periodo no tiene producción: el importe a origen es igual al ya certificado',
+    );
+  }
+  const retencion = applyPct(periodo, retencionPct);
+  return {
+    importeOrigen: fromCents(origen),
+    importeAnterior: fromCents(anterior),
+    importePeriodo: fromCents(periodo),
+    retencionImporte: fromCents(retencion),
+    importeLiquido: fromCents(periodo - retencion),
+    pctEjecutado:
+      contrato === 0n ? 0 : Number(mulDivRound(origen, 10000n, contrato)) / 100,
+  };
+}
+
+export interface ResumenRetencionGarantia {
+  /** Retenido por certificaciones aprobadas o pagadas. */
+  retenido: number;
+  /** Ya devuelto al subcontratista. */
+  devuelto: number;
+  /** Retenido pendiente de devolver. */
+  pendiente: number;
+}
+
+/** Saldo de la retención de garantía de un contrato de subcontrata. */
+export function resumenRetencionGarantia(
+  retenciones: readonly number[],
+  devoluciones: readonly number[],
+): ResumenRetencionGarantia {
+  const retenido = sumCents(retenciones.map((r) => toCents(r)));
+  const devuelto = sumCents(devoluciones.map((d) => toCents(d)));
+  return {
+    retenido: fromCents(retenido),
+    devuelto: fromCents(devuelto),
+    pendiente: fromCents(retenido - devuelto),
+  };
+}
+
+/**
+ * Valida una devolución de garantía contra el saldo pendiente. Devuelve
+ * `null` si es válida o el motivo del rechazo.
+ */
+export function motivoDevolucionInvalida(
+  importe: number,
+  pendiente: number,
+): string | null {
+  const i = toCents(importe);
+  if (i <= 0n) return 'El importe a devolver debe ser mayor que 0';
+  if (i > toCents(pendiente)) {
+    return `El importe a devolver (${fromCents(i)}) supera la retención pendiente (${pendiente})`;
+  }
+  return null;
 }
 
 /* ──────────────────────── inversores: TIR / VAN ──────────────────────── */

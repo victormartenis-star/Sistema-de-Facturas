@@ -1848,6 +1848,150 @@ export type NewContratoSubcontrata = typeof contratosSubcontrata.$inferInsert;
 export type DocumentoPRL = typeof documentosPRL.$inferSelect;
 export type NewDocumentoPRL = typeof documentosPRL.$inferInsert;
 
+/**
+ * Certificaciones de subcontrata (lado de coste de la producción): lo que la
+ * constructora debe a un subcontratista por lo ejecutado contra su contrato.
+ * Se certifica a origen; periodo, retención y líquido se calculan en
+ * `computeCertSubcontrata` (`@erp/shared`) y se guardan para auditoría.
+ * Los CHECK repiten la aritmética en la base: una fila descuadrada no entra
+ * ni por una vía que se salte la API.
+ */
+export const certSubcontrataStatusEnum = pgEnum('cert_subcontrata_status', [
+  'borrador',
+  'aprobada',
+  'pagada',
+  'anulada',
+]);
+
+export const certificacionesSubcontrata = pgTable(
+  'certificaciones_subcontrata',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    contratoId: uuid('contrato_id')
+      .notNull()
+      .references(() => contratosSubcontrata.id, { onDelete: 'restrict' }),
+    /** Correlativo dentro del contrato (1, 2, 3…). */
+    numero: integer('numero').notNull(),
+    fecha: date('fecha').notNull(),
+    periodoDesde: date('periodo_desde').notNull(),
+    periodoHasta: date('periodo_hasta').notNull(),
+    importeOrigen: numeric('importe_origen', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    importeAnterior: numeric('importe_anterior', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    importePeriodo: numeric('importe_periodo', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    /** % de garantía del contrato en el momento de certificar. */
+    retencionPct: numeric('retencion_pct', {
+      precision: 5,
+      scale: 2,
+    }).notNull(),
+    retencionImporte: numeric('retencion_importe', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    importeLiquido: numeric('importe_liquido', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    status: certSubcontrataStatusEnum('status').notNull().default('borrador'),
+    aprobadaAt: timestamp('aprobada_at', { withTimezone: true }),
+    fechaPago: date('fecha_pago'),
+    anuladaAt: timestamp('anulada_at', { withTimezone: true }),
+    motivoAnulacion: text('motivo_anulacion'),
+    notas: text('notas'),
+    version: integer('version').notNull().default(1),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('cert_subcontrata_contrato_numero_unique')
+      .on(t.contratoId, t.numero)
+      .where(sql`deleted_at IS NULL`),
+    /** Como mucho un borrador vivo por contrato. */
+    uniqueIndex('cert_subcontrata_un_borrador_unique')
+      .on(t.contratoId)
+      .where(sql`status = 'borrador' AND deleted_at IS NULL`),
+    index('cert_subcontrata_company_contrato_idx').on(
+      t.companyId,
+      t.contratoId,
+      t.numero,
+    ),
+    check('cert_subcontrata_numero_check', sql`${t.numero} >= 1`),
+    check(
+      'cert_subcontrata_periodo_check',
+      sql`${t.periodoDesde} <= ${t.periodoHasta}`,
+    ),
+    check(
+      'cert_subcontrata_importes_check',
+      sql`${t.importeOrigen} >= 0 AND ${t.importeAnterior} >= 0 AND ${t.importePeriodo} > 0 AND ${t.importePeriodo} = ${t.importeOrigen} - ${t.importeAnterior}`,
+    ),
+    check(
+      'cert_subcontrata_retencion_check',
+      sql`${t.retencionPct} BETWEEN 0 AND 50 AND ${t.retencionImporte} >= 0 AND ${t.importeLiquido} = ${t.importePeriodo} - ${t.retencionImporte}`,
+    ),
+    check(
+      'cert_subcontrata_estado_check',
+      // Una anulada conserva su `aprobada_at` si llegó a aprobarse (trazabilidad).
+      sql`(${t.status} NOT IN ('aprobada', 'pagada') OR ${t.aprobadaAt} IS NOT NULL) AND (${t.status} <> 'borrador' OR ${t.aprobadaAt} IS NULL) AND (${t.status} = 'pagada') = (${t.fechaPago} IS NOT NULL) AND (${t.status} = 'anulada') = (${t.anuladaAt} IS NOT NULL AND ${t.motivoAnulacion} IS NOT NULL)`,
+    ),
+    check('cert_subcontrata_version_check', sql`${t.version} >= 1`),
+  ],
+);
+
+export type CertificacionSubcontrata =
+  typeof certificacionesSubcontrata.$inferSelect;
+export type NewCertificacionSubcontrata =
+  typeof certificacionesSubcontrata.$inferInsert;
+
+/**
+ * Devoluciones de la retención de garantía al subcontratista. Solo inserción:
+ * una devolución errónea se compensa, no se edita (queda en auditoría).
+ */
+export const devolucionesGarantiaSubcontrata = pgTable(
+  'devoluciones_garantia_subcontrata',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    contratoId: uuid('contrato_id')
+      .notNull()
+      .references(() => contratosSubcontrata.id, { onDelete: 'restrict' }),
+    fecha: date('fecha').notNull(),
+    importe: numeric('importe', { precision: 14, scale: 2 }).notNull(),
+    motivo: text('motivo').notNull(),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('devoluciones_garantia_company_contrato_idx').on(
+      t.companyId,
+      t.contratoId,
+    ),
+    check('devoluciones_garantia_importe_check', sql`${t.importe} > 0`),
+  ],
+);
+
+export type DevolucionGarantiaSubcontrata =
+  typeof devolucionesGarantiaSubcontrata.$inferSelect;
+
 // ─── Permisos públicos y licencias (Fase 12) ───────────────────────────────
 /**
  * Trámites municipales/administrativos de una obra: licencia de obra, vado,

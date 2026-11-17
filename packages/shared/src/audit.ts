@@ -18,6 +18,8 @@ export const AUDIT_ENTITY_TYPES = [
   'budget',
   'certification',
   'certification_line',
+  'cert_subcontrata',
+  'devolucion_garantia',
   'invoice',
   'purchase_order',
   'delivery_note',

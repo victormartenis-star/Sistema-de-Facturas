@@ -36,6 +36,7 @@ import { ProjectsModule } from '../../src/projects/projects.module';
 import { PurchaseOrdersModule } from '../../src/purchase-orders/purchase-orders.module';
 import { TreasuryModule } from '../../src/treasury/treasury.module';
 import { UsersModule } from '../../src/users/users.module';
+import { SubcontratasModule } from '../../src/modules/subcontratas/subcontratas.module';
 
 /**
  * Módulo raíz recortado para las pruebas de integración: los mismos
@@ -108,6 +109,7 @@ import { UsersModule } from '../../src/users/users.module';
     BankReconciliationModule,
     SearchModule,
     InformesModule,
+    SubcontratasModule, // importa ProveedoresModule (PRL al aprobar y pagar)
   ],
 })
 export class TestAppModule {}

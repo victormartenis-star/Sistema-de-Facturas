@@ -9,6 +9,10 @@ import {
 import { BUDGET_STATUSES, BUDGET_TRANSITIONS } from './budgets';
 import { CERT_STATUSES, CERT_TRANSITIONS } from './certifications';
 import {
+  CERT_SUBCONTRATA_STATUSES,
+  CERT_SUBCONTRATA_TRANSITIONS,
+} from './certificaciones-subcontrata';
+import {
   DELIVERY_NOTE_STATUSES,
   DELIVERY_NOTE_TRANSITIONS,
 } from './delivery-notes';
@@ -64,6 +68,7 @@ const MATRICES = [
   ['delivery_note', DELIVERY_NOTE_STATUSES, DELIVERY_NOTE_TRANSITIONS],
   ['purchase_order', PURCHASE_ORDER_STATUSES, PURCHASE_ORDER_TRANSITIONS],
   ['milestone', MILESTONE_STATUSES, MILESTONE_TRANSITIONS],
+  ['cert_subcontrata', CERT_SUBCONTRATA_STATUSES, CERT_SUBCONTRATA_TRANSITIONS],
 ] as const;
 
 const transicionSuelta = transicion as (

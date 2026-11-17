@@ -33,6 +33,7 @@ export * from './actas-recepcion';
 export * from './incidencias-prl';
 export * from './invoices';
 export * from './certifications';
+export * from './certificaciones-subcontrata';
 export * from './delivery-notes';
 export * from './purchase-orders';
 export * from './treasury';

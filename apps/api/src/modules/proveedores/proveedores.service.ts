@@ -268,6 +268,7 @@ export class ProveedoresService {
     contratoId: string,
     body: ContratoSubcontrataUpdateInput,
   ): Promise<ContratoSubcontrata> {
+    const companyId = await this.getCompanyId();
     const [row] = await this.db
       .update(contratosSubcontrata)
       .set({
@@ -297,7 +298,14 @@ export class ProveedoresService {
         ...(body.notas !== undefined && { notas: body.notas }),
         updatedAt: new Date(),
       })
-      .where(eq(contratosSubcontrata.id, contratoId))
+      // Filtro por empresa: sin él, un id de otra empresa se editaba igual.
+      .where(
+        and(
+          eq(contratosSubcontrata.id, contratoId),
+          eq(contratosSubcontrata.companyId, companyId),
+          isNull(contratosSubcontrata.deletedAt),
+        ),
+      )
       .returning();
     if (!row) {
       throw new NotFoundException('Contrato no encontrado');

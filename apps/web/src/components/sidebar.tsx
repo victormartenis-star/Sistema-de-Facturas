@@ -30,6 +30,7 @@ import {
   IconUpload,
   IconUsers,
   IconWallet,
+  IconWrench,
   type IconProps,
 } from './icons';
 
@@ -78,6 +79,11 @@ const GESTION: NavItem[] = [
   { href: '/homologacion/alertas', label: 'Alertas PRL', icon: IconBell },
   { href: '/permisos', label: 'Permisos y licencias', icon: IconFileText },
   { href: '/contratos', label: 'Contratos de obra', icon: IconEuro },
+  {
+    href: '/subcontratas',
+    label: 'Certificaciones de subcontrata',
+    icon: IconWrench,
+  },
   {
     href: '/contradictorios',
     label: 'Contradictorios y Modificados',

@@ -309,6 +309,13 @@
       "when": 1794762907370,
       "tag": "0043_audit_anclas_firma",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1794925612471,
+      "tag": "0044_subcontratas_certificaciones",
+      "breakpoints": true
     }
   ]
 }

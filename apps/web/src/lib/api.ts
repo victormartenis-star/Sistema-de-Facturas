@@ -8,6 +8,15 @@ import {
 } from './api-error';
 import type { ExportRecurso, PaginaDto } from '@erp/shared';
 import type {
+  CertSubcontrataCreateInput,
+  CertSubcontrataDto,
+  CertSubcontrataUpdateInput,
+  ContratoSubcontrataResumenDto,
+  ContratosSubcontrataQuery,
+  DevolucionGarantiaCreateInput,
+  RetencionGarantiaDto,
+} from '@erp/shared';
+import type {
   AuditIntegrityReportDto,
   AuditLogDto,
   AuditQuery,
@@ -1847,4 +1856,80 @@ export const exportsApi = {
     a.click();
     URL.revokeObjectURL(url);
   },
+};
+
+/** Certificaciones de subcontrata y retención de garantía. */
+export const subcontratasApi = {
+  contratos: (filtros: ContratosSubcontrataQuery = {}) => {
+    const p = new URLSearchParams();
+    if (filtros.proyectoId) p.set('proyectoId', filtros.proyectoId);
+    if (filtros.proveedorId) p.set('proveedorId', filtros.proveedorId);
+    const qs = p.toString();
+    return request<ContratoSubcontrataResumenDto[]>(
+      `/subcontratas/contratos${qs ? `?${qs}` : ''}`,
+    );
+  },
+  certificaciones: (contratoId: string) =>
+    request<CertSubcontrataDto[]>(
+      `/subcontratas/contratos/${contratoId}/certificaciones`,
+    ),
+  /** `clave`: Idempotency-Key del intento; si falta se genera una nueva. */
+  crear: (
+    contratoId: string,
+    input: CertSubcontrataCreateInput,
+    clave?: string,
+  ) =>
+    request<CertSubcontrataDto>(
+      `/subcontratas/contratos/${contratoId}/certificaciones`,
+      {
+        method: 'POST',
+        headers: idempotencyKey(clave ?? nuevoUuid()),
+        body: JSON.stringify(input),
+      },
+    ),
+  editar: (id: string, input: CertSubcontrataUpdateInput, version: number) =>
+    request<CertSubcontrataDto>(`/subcontratas/certificaciones/${id}`, {
+      method: 'PATCH',
+      headers: ifMatch(version),
+      body: JSON.stringify(input),
+    }),
+  eliminar: (id: string, version: number) =>
+    request<void>(`/subcontratas/certificaciones/${id}`, {
+      method: 'DELETE',
+      headers: ifMatch(version),
+    }),
+  aprobar: (id: string, version: number) =>
+    request<CertSubcontrataDto>(`/subcontratas/certificaciones/${id}/aprobar`, {
+      method: 'POST',
+      headers: ifMatch(version),
+    }),
+  pagar: (id: string, fechaPago: string, version: number) =>
+    request<CertSubcontrataDto>(`/subcontratas/certificaciones/${id}/pagar`, {
+      method: 'POST',
+      headers: ifMatch(version),
+      body: JSON.stringify({ fechaPago }),
+    }),
+  anular: (id: string, motivo: string, version: number) =>
+    request<CertSubcontrataDto>(`/subcontratas/certificaciones/${id}/anular`, {
+      method: 'POST',
+      headers: ifMatch(version),
+      body: JSON.stringify({ motivo }),
+    }),
+  retenciones: (contratoId: string) =>
+    request<RetencionGarantiaDto>(
+      `/subcontratas/contratos/${contratoId}/retenciones`,
+    ),
+  devolverGarantia: (
+    contratoId: string,
+    input: DevolucionGarantiaCreateInput,
+    clave?: string,
+  ) =>
+    request<RetencionGarantiaDto>(
+      `/subcontratas/contratos/${contratoId}/devoluciones-garantia`,
+      {
+        method: 'POST',
+        headers: idempotencyKey(clave ?? nuevoUuid()),
+        body: JSON.stringify(input),
+      },
+    ),
 };
