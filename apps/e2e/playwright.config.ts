@@ -61,6 +61,11 @@ export default defineConfig({
     },
     {
       name: 'firefox',
+      // Reintento solo en Firefox: en local, la build de Firefox de Playwright
+      // falla a veces al preparar la página o al cerrar el contexto (error de
+      // protocolo ajeno a la app). Los tests pasan al repetirlos. Chromium no
+      // reintenta fuera de CI.
+      retries: 1,
       use: {
         ...devices['Desktop Firefox'],
         storageState: '.auth/user.json',
