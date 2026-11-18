@@ -232,7 +232,7 @@ describe('Idempotencia (integración) — Idempotency-Key', () => {
     // no el interceptor: no es un replay.
     expect(r2.status).toBe(409);
     expect(r2.headers['idempotent-replayed']).toBeUndefined();
-    expect(r2.body.code).toBe('CONFLICT');
+    expect(r2.body.code).toBe('INVOICE_NUMBER_DUPLICATED');
     expect(await contarFacturas()).toBe(1);
     const filas = await getDb().select().from(idempotencyKeys);
     expect(filas).toHaveLength(0);

@@ -141,7 +141,10 @@ function calcular(
     };
   } catch (e) {
     if (e instanceof CertSubcontrataInvalidaError) {
-      throw new UnprocessableEntityException(e.message);
+      throw new UnprocessableEntityException({
+        code: 'SUBCONTRACT_CERT_INVALID',
+        message: e.message,
+      });
     }
     throw e;
   }
@@ -297,15 +300,18 @@ export class SubcontratasService {
     return this.dbs.db.transaction(async (tx) => {
       const contrato = await this.contrato(tx, contratoId, true);
       if (contrato.status !== 'activo') {
-        throw new ConflictException(
-          'Solo se certifica sobre contratos de subcontrata activos',
-        );
+        throw new ConflictException({
+          code: 'SUBCONTRACT_NOT_ACTIVE',
+          message: 'Solo se certifica sobre contratos de subcontrata activos',
+        });
       }
       const previas = await this.certsDelContrato(tx, contratoId);
       if (previas.some((c) => c.status === 'borrador')) {
-        throw new ConflictException(
-          'El contrato ya tiene una certificación en borrador: apruébala o elimínala antes de crear otra',
-        );
+        throw new ConflictException({
+          code: 'SUBCONTRACT_CERT_DRAFT_EXISTS',
+          message:
+            'El contrato ya tiene una certificación en borrador: apruébala o elimínala antes de crear otra',
+        });
       }
       const importes = calcular(
         contrato,
@@ -351,16 +357,18 @@ export class SubcontratasService {
       const { contrato, cert } = await this.bloquear(tx, id);
       verificarVersion(cert.version, versionEsperada);
       if (cert.status !== 'borrador') {
-        throw new ConflictException(
-          'Solo se editan certificaciones en borrador',
-        );
+        throw new ConflictException({
+          code: 'SUBCONTRACT_CERT_NOT_DRAFT',
+          message: 'Solo se editan certificaciones en borrador',
+        });
       }
       const periodoDesde = data.periodoDesde ?? cert.periodoDesde;
       const periodoHasta = data.periodoHasta ?? cert.periodoHasta;
       if (periodoDesde > periodoHasta) {
-        throw new UnprocessableEntityException(
-          'El inicio del periodo no puede ser posterior al final',
-        );
+        throw new UnprocessableEntityException({
+          code: 'SUBCONTRACT_PERIOD_INVALID',
+          message: 'El inicio del periodo no puede ser posterior al final',
+        });
       }
       const previas = await this.certsDelContrato(tx, cert.contratoId);
       const importes = calcular(
@@ -413,9 +421,11 @@ export class SubcontratasService {
       const { cert } = await this.bloquear(tx, id);
       verificarVersion(cert.version, versionEsperada);
       if (cert.status !== 'borrador') {
-        throw new ConflictException(
-          'Solo se eliminan certificaciones en borrador: una aprobada se anula',
-        );
+        throw new ConflictException({
+          code: 'SUBCONTRACT_CERT_NOT_DRAFT',
+          message:
+            'Solo se eliminan certificaciones en borrador: una aprobada se anula',
+        });
       }
       await tx
         .update(certificacionesSubcontrata)
@@ -448,9 +458,10 @@ export class SubcontratasService {
       const { contrato, cert } = await this.bloquear(tx, id);
       verificarVersion(cert.version, versionEsperada);
       if (cert.status !== 'borrador') {
-        throw new ConflictException(
-          'Solo se aprueban certificaciones en borrador',
-        );
+        throw new ConflictException({
+          code: 'SUBCONTRACT_CERT_NOT_DRAFT',
+          message: 'Solo se aprueban certificaciones en borrador',
+        });
       }
       await this.exigirAptaPrl(contrato, 'aprobar la certificación');
       const previas = await this.certsDelContrato(tx, cert.contratoId);
@@ -498,9 +509,11 @@ export class SubcontratasService {
       const { contrato, cert } = await this.bloquear(tx, id);
       verificarVersion(cert.version, versionEsperada);
       if (fechaPago < cert.fecha) {
-        throw new UnprocessableEntityException(
-          'La fecha de pago no puede ser anterior a la de la certificación',
-        );
+        throw new UnprocessableEntityException({
+          code: 'SUBCONTRACT_PAYMENT_DATE_INVALID',
+          message:
+            'La fecha de pago no puede ser anterior a la de la certificación',
+        });
       }
       await this.exigirAptaPrl(contrato, 'pagar la certificación');
       const pagada = await cambiarEstado(
@@ -546,17 +559,20 @@ export class SubcontratasService {
       );
       const factura = await this.facturaActiva(tx, id);
       if (factura) {
-        throw new ConflictException(
-          `La certificación tiene la factura de compra ${factura.invoiceNumber}: anúlala o rectifícala antes de anular la certificación`,
-        );
+        throw new ConflictException({
+          code: 'SUBCONTRACT_CERT_HAS_INVOICE',
+          message: `La certificación tiene la factura de compra ${factura.invoiceNumber}: anúlala o rectifícala antes de anular la certificación`,
+        });
       }
       if (de === 'aprobada') {
         if (
           resto.some((c) => c.numero > cert.numero && c.status !== 'anulada')
         ) {
-          throw new ConflictException(
-            'Solo se anula la última certificación del contrato: hay certificaciones posteriores',
-          );
+          throw new ConflictException({
+            code: 'SUBCONTRACT_CERT_NOT_LAST',
+            message:
+              'Solo se anula la última certificación del contrato: hay certificaciones posteriores',
+          });
         }
         const quedaRetenido = resumenRetencionGarantia(
           resto
@@ -567,9 +583,11 @@ export class SubcontratasService {
           await this.devueltoDelContrato(tx, cert.contratoId),
         );
         if (quedaRetenido.pendiente < 0) {
-          throw new ConflictException(
-            'No se puede anular: ya se ha devuelto más garantía de la que quedaría retenida',
-          );
+          throw new ConflictException({
+            code: 'SUBCONTRACT_GUARANTEE_OVER_RELEASED',
+            message:
+              'No se puede anular: ya se ha devuelto más garantía de la que quedaría retenida',
+          });
         }
       }
       const anulada = await cambiarEstado(
@@ -644,9 +662,10 @@ export class SubcontratasService {
         ),
       );
     if (!proveedor?.contactId) {
-      throw new ConflictException(
-        `La subcontrata «${proveedor?.razonSocial ?? contrato.proveedorId}» no tiene contacto vinculado: enlaza su ficha con un contacto antes de registrar facturas`,
-      );
+      throw new ConflictException({
+        code: 'SUBCONTRACT_NO_CONTACT',
+        message: `La subcontrata «${proveedor?.razonSocial ?? contrato.proveedorId}» no tiene contacto vinculado: enlaza su ficha con un contacto antes de registrar facturas`,
+      });
     }
     const accion = 'registrar la factura de compra';
     await this.compliance.assertCanTransact(proveedor.contactId, accion);
@@ -687,9 +706,10 @@ export class SubcontratasService {
       Math.round(prep.amounts.retentionAmount * 100) !==
       Math.round(Number(previa.retencionImporte) * 100)
     ) {
-      throw new ConflictException(
-        `La retención calculada para la factura (${prep.amounts.retentionAmount.toFixed(2)} €) no coincide con la de la certificación (${Number(previa.retencionImporte).toFixed(2)} €)`,
-      );
+      throw new ConflictException({
+        code: 'SUBCONTRACT_RETENTION_MISMATCH',
+        message: `La retención calculada para la factura (${prep.amounts.retentionAmount.toFixed(2)} €) no coincide con la de la certificación (${Number(previa.retencionImporte).toFixed(2)} €)`,
+      });
     }
 
     return this.dbs.db.transaction(async (tx) => {
@@ -781,8 +801,15 @@ export class SubcontratasService {
       ) &&
       !factura &&
       Number(cert.retencionPct) > RETENCION_MAXIMA_FACTURA_PCT;
-    if (soloRetencion) throw new UnprocessableEntityException(motivo);
-    throw new ConflictException(motivo);
+    if (soloRetencion)
+      throw new UnprocessableEntityException({
+        code: 'SUBCONTRACT_RETENTION_NOT_INVOICEABLE',
+        message: motivo,
+      });
+    throw new ConflictException({
+      code: 'SUBCONTRACT_CERT_NOT_INVOICEABLE',
+      message: motivo,
+    });
   }
 
   /* ─────────────────────── garantía ─────────────────────── */
@@ -839,9 +866,11 @@ export class SubcontratasService {
     await this.dbs.db.transaction(async (tx) => {
       const contrato = await this.contrato(tx, contratoId, true);
       if (contrato.status !== 'completado') {
-        throw new ConflictException(
-          'La garantía solo se devuelve con el contrato de subcontrata completado',
-        );
+        throw new ConflictException({
+          code: 'SUBCONTRACT_GUARANTEE_NOT_RELEASABLE',
+          message:
+            'La garantía solo se devuelve con el contrato de subcontrata completado',
+        });
       }
       const certs = await this.certsDelContrato(tx, contratoId);
       const saldo = resumenRetencionGarantia(
@@ -853,7 +882,11 @@ export class SubcontratasService {
         await this.devueltoDelContrato(tx, contratoId),
       );
       const motivo = motivoDevolucionInvalida(data.importe, saldo.pendiente);
-      if (motivo) throw new UnprocessableEntityException(motivo);
+      if (motivo)
+        throw new UnprocessableEntityException({
+          code: 'SUBCONTRACT_GUARANTEE_AMOUNT_INVALID',
+          message: motivo,
+        });
       const [devolucion] = await tx
         .insert(devolucionesGarantiaSubcontrata)
         .values({
@@ -904,7 +937,10 @@ export class SubcontratasService {
       : await consulta;
     const obras = fila ? await this.dbs.getObrasAccesibles() : null;
     if (!fila || (obras !== null && !obras.includes(fila.proyectoId))) {
-      throw new NotFoundException('Contrato de subcontrata no encontrado');
+      throw new NotFoundException({
+        code: 'SUBCONTRACT_NOT_FOUND',
+        message: 'Contrato de subcontrata no encontrado',
+      });
     }
     return fila;
   }
@@ -927,7 +963,11 @@ export class SubcontratasService {
     const [fila] = paraActualizar
       ? await consulta.for('update')
       : await consulta;
-    if (!fila) throw new NotFoundException('Certificación no encontrada');
+    if (!fila)
+      throw new NotFoundException({
+        code: 'SUBCONTRACT_CERT_NOT_FOUND',
+        message: 'Certificación no encontrada',
+      });
     return fila;
   }
 
@@ -1078,9 +1118,10 @@ export class SubcontratasService {
       contrato.proveedorId,
     );
     if (!apto) {
-      throw new ConflictException(
-        `No se puede ${accion}: la subcontrata no está apta por PRL. ${razones.join('; ')}.`,
-      );
+      throw new ConflictException({
+        code: 'SUBCONTRACT_PRL_NOT_APT',
+        message: `No se puede ${accion}: la subcontrata no está apta por PRL. ${razones.join('; ')}.`,
+      });
     }
   }
 }

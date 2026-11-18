@@ -68,7 +68,10 @@ export class CertificationLinesService {
       .where(and(...filters))
       .limit(1);
     if (!cert)
-      throw new NotFoundException(`Certificación ${certId} no encontrada`);
+      throw new NotFoundException({
+        code: 'CERTIFICATION_NOT_FOUND',
+        message: `Certificación ${certId} no encontrada`,
+      });
     return cert;
   }
 
@@ -89,12 +92,17 @@ export class CertificationLinesService {
         .where(eq(certifications.id, certId))
         .for('update');
       if (!locked) {
-        throw new NotFoundException(`Certificación ${certId} no encontrada`);
+        throw new NotFoundException({
+          code: 'CERTIFICATION_NOT_FOUND',
+          message: `Certificación ${certId} no encontrada`,
+        });
       }
       if (!canEditCertification(locked.status)) {
-        throw new ConflictException(
-          'La certificación ya está facturada: sus líneas no se pueden modificar',
-        );
+        throw new ConflictException({
+          code: 'CERTIFICATION_LINES_LOCKED',
+          message:
+            'La certificación ya está facturada: sus líneas no se pueden modificar',
+        });
       }
       return fn(tx);
     });
@@ -120,9 +128,10 @@ export class CertificationLinesService {
       .where(eq(budgetItems.id, input.budgetItemId))
       .limit(1);
     if (!item)
-      throw new NotFoundException(
-        `Partida ${input.budgetItemId} no encontrada`,
-      );
+      throw new NotFoundException({
+        code: 'BUDGET_ITEM_NOT_FOUND',
+        message: `Partida ${input.budgetItemId} no encontrada`,
+      });
     // Bloqueo de ejecución/gasto: no se certifica una partida con un
     // contradictorio/modificado todavía pendiente de la Dirección
     // Facultativa (Fase 17, ver Módulo Contradictorios y Modificados).
@@ -146,9 +155,10 @@ export class CertificationLinesService {
     } catch (err: unknown) {
       const pg = err as { code?: string };
       if (pg.code === '23505')
-        throw new ConflictException(
-          `Ya existe una línea para la partida ${input.budgetItemId} en esta certificación`,
-        );
+        throw new ConflictException({
+          code: 'CERTIFICATION_LINE_DUPLICATED',
+          message: `Ya existe una línea para la partida ${input.budgetItemId} en esta certificación`,
+        });
       throw err;
     }
   }
@@ -189,7 +199,11 @@ export class CertificationLinesService {
           certificationLines,
           lineId,
           versionEsperada,
-          () => new NotFoundException(`Línea ${lineId} no encontrada`),
+          () =>
+            new NotFoundException({
+              code: 'CERTIFICATION_LINE_NOT_FOUND',
+              message: `Línea ${lineId} no encontrada`,
+            }),
           `Línea ${lineId} no encontrada`,
         );
       }
@@ -219,7 +233,11 @@ export class CertificationLinesService {
           certificationLines,
           lineId,
           versionEsperada,
-          () => new NotFoundException(`Línea ${lineId} no encontrada`),
+          () =>
+            new NotFoundException({
+              code: 'CERTIFICATION_LINE_NOT_FOUND',
+              message: `Línea ${lineId} no encontrada`,
+            }),
           `Línea ${lineId} no encontrada`,
         );
       }

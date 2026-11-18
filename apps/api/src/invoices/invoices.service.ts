@@ -218,7 +218,11 @@ export class InvoicesService {
       motive: input.rectificationMotive,
       type: input.rectificationType,
     });
-    if (errores.length > 0) throw new BadRequestException(errores[0]);
+    if (errores.length > 0)
+      throw new BadRequestException({
+        code: 'INVOICE_CLASSIFICATION_INVALID',
+        message: errores[0],
+      });
   }
 
   /**
@@ -248,7 +252,10 @@ export class InvoicesService {
       // igual (companyId es válido) pero queda huérfana — invisible para el
       // propio usuario `obra` que la creó, porque ninguna de sus líneas
       // pertenece a una obra a la que tiene acceso.
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
     await this.validarImputaciones(companyId, data.lines);
     const amounts = computeInvoiceAmounts(
@@ -338,9 +345,11 @@ export class InvoicesService {
     const { invoice } = await this.findWithContact(id);
     verificarVersion(invoice.version, versionEsperada);
     if (invoice.status !== 'borrador') {
-      throw new ConflictException(
-        'Solo se pueden editar facturas en borrador; anúlala si necesitas corregirla',
-      );
+      throw new ConflictException({
+        code: 'INVOICE_NOT_EDITABLE',
+        message:
+          'Solo se pueden editar facturas en borrador; anúlala si necesitas corregirla',
+      });
     }
     this.rechazarClasificacionRectificativa(input);
     const data = invoiceUpdateSchema.parse(input);
@@ -360,7 +369,10 @@ export class InvoicesService {
           data.lines.map((l) => l.projectId ?? null),
         )
       ) {
-        throw new NotFoundException('Obra no encontrada');
+        throw new NotFoundException({
+          code: 'PROJECT_NOT_FOUND',
+          message: 'Obra no encontrada',
+        });
       }
       await this.validarImputaciones(invoice.companyId, data.lines);
     }
@@ -491,7 +503,10 @@ export class InvoicesService {
     const { invoice } = await this.findWithContact(id);
     verificarVersion(invoice.version, versionEsperada);
     if (invoice.status !== 'borrador') {
-      throw new ConflictException('Solo se aprueban facturas en borrador');
+      throw new ConflictException({
+        code: 'INVOICE_NOT_DRAFT',
+        message: 'Solo se aprueban facturas en borrador',
+      });
     }
     const contact = await this.findContact(invoice.contactId);
 
@@ -552,7 +567,10 @@ export class InvoicesService {
       !canTransitionInvoice(locked.status as InvoiceStatus, 'aprobada') ||
       locked.status !== 'borrador'
     ) {
-      throw new ConflictException('Solo se aprueban facturas en borrador');
+      throw new ConflictException({
+        code: 'INVOICE_NOT_DRAFT',
+        message: 'Solo se aprueban facturas en borrador',
+      });
     }
     verificarVersion(locked.version, versionEsperada);
     const invoice = locked;
@@ -580,15 +598,18 @@ export class InvoicesService {
           ),
         );
       if (!cert || !['aprobada', 'pagada'].includes(cert.status)) {
-        throw new ConflictException(
-          'No se puede aprobar: la certificación de subcontrata de origen ya no está aprobada',
-        );
+        throw new ConflictException({
+          code: 'SUBCONTRACT_CERT_NOT_APPROVED',
+          message:
+            'No se puede aprobar: la certificación de subcontrata de origen ya no está aprobada',
+        });
       }
       const base = Number(invoice.baseAmount);
       if (!amountsMatch(Number(cert.importePeriodo), base)) {
-        throw new ConflictException(
-          `No se puede aprobar: la base de la factura (${base.toFixed(2)} €) no cuadra con el periodo certificado (${Number(cert.importePeriodo).toFixed(2)} €)`,
-        );
+        throw new ConflictException({
+          code: 'PURCHASE_INVOICE_BASE_MISMATCH_CERT',
+          message: `No se puede aprobar: la base de la factura (${base.toFixed(2)} €) no cuadra con el periodo certificado (${Number(cert.importePeriodo).toFixed(2)} €)`,
+        });
       }
     } else if (invoice.kind === 'compra') {
       const notes = await tx
@@ -598,18 +619,21 @@ export class InvoicesService {
           and(eq(deliveryNotes.invoiceId, id), isNull(deliveryNotes.deletedAt)),
         );
       if (notes.length === 0) {
-        throw new ConflictException(
-          'No se puede aprobar: la factura de compra no tiene albaranes asociados. Vincula los albaranes validados del proveedor.',
-        );
+        throw new ConflictException({
+          code: 'PURCHASE_INVOICE_NO_DELIVERY_NOTES',
+          message:
+            'No se puede aprobar: la factura de compra no tiene albaranes asociados. Vincula los albaranes validados del proveedor.',
+        });
       }
       const notesTotal = round2(
         notes.reduce((s, n) => s + Number(n.amount), 0),
       );
       const base = Number(invoice.baseAmount);
       if (!amountsMatch(notesTotal, base)) {
-        throw new ConflictException(
-          `No se puede aprobar: la base de la factura (${base.toFixed(2)} €) no cuadra con la suma de los albaranes (${notesTotal.toFixed(2)} €)`,
-        );
+        throw new ConflictException({
+          code: 'PURCHASE_INVOICE_BASE_MISMATCH_NOTES',
+          message: `No se puede aprobar: la base de la factura (${base.toFixed(2)} €) no cuadra con la suma de los albaranes (${notesTotal.toFixed(2)} €)`,
+        });
       }
       await cambiarEstadoMasivo(
         tx,
@@ -661,7 +685,10 @@ export class InvoicesService {
       )
       .for('update');
     if (!orig) {
-      throw new NotFoundException('Factura original no encontrada');
+      throw new NotFoundException({
+        code: 'INVOICE_NOT_FOUND',
+        message: 'Factura original no encontrada',
+      });
     }
     const bloqueo = invoiceRectifyBlockReason(
       {
@@ -670,7 +697,11 @@ export class InvoicesService {
       },
       kind,
     );
-    if (bloqueo) throw new ConflictException(bloqueo);
+    if (bloqueo)
+      throw new ConflictException({
+        code: 'INVOICE_NOT_RECTIFIABLE',
+        message: bloqueo,
+      });
 
     let originalPaid = { ordinario: 0, retencion: 0 };
     if (kind === 'total') {
@@ -804,7 +835,10 @@ export class InvoicesService {
         data.lines.map((l) => l.projectId ?? null),
       )
     ) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
     if (data.lines) {
       await this.validarImputaciones(invoice.companyId, data.lines);
@@ -864,7 +898,11 @@ export class InvoicesService {
       .from(invoices)
       .where(and(eq(invoices.id, originalId), isNull(invoices.deletedAt)))
       .for('update');
-    if (!orig) throw new NotFoundException('Factura no encontrada');
+    if (!orig)
+      throw new NotFoundException({
+        code: 'INVOICE_NOT_FOUND',
+        message: 'Factura no encontrada',
+      });
     const bloqueo = invoiceRectifyBlockReason(
       {
         status: orig.status as InvoiceStatus,
@@ -872,7 +910,11 @@ export class InvoicesService {
       },
       p.clase,
     );
-    if (bloqueo) throw new ConflictException(bloqueo);
+    if (bloqueo)
+      throw new ConflictException({
+        code: 'INVOICE_NOT_RECTIFIABLE',
+        message: bloqueo,
+      });
 
     const existentes = await tx
       .select({
@@ -890,14 +932,17 @@ export class InvoicesService {
       );
     if (p.clase === 'total') {
       if (existentes.some((e) => e.rectificationKind === 'total')) {
-        throw new ConflictException(
-          'La factura ya tiene una rectificativa total',
-        );
+        throw new ConflictException({
+          code: 'INVOICE_ALREADY_RECTIFIED_TOTAL',
+          message: 'La factura ya tiene una rectificativa total',
+        });
       }
       if (existentes.length > 0) {
-        throw new ConflictException(
-          'La factura ya tiene rectificativas por diferencias: no se puede rectificar en total',
-        );
+        throw new ConflictException({
+          code: 'INVOICE_HAS_DIFFERENCE_RECTIFICATIONS',
+          message:
+            'La factura ya tiene rectificativas por diferencias: no se puede rectificar en total',
+        });
       }
     }
 
@@ -994,7 +1039,10 @@ export class InvoicesService {
     const { invoice } = await this.findWithContact(id);
     verificarVersion(invoice.version, versionEsperada);
     if (invoice.status !== 'aprobada') {
-      throw new ConflictException('Solo se pueden liquidar facturas aprobadas');
+      throw new ConflictException({
+        code: 'INVOICE_NOT_APPROVED',
+        message: 'Solo se pueden liquidar facturas aprobadas',
+      });
     }
     await this.dbs.db.transaction(async (tx) => {
       // WHERE status = 'aprobada': si una anulación concurrente ganó, 409.
@@ -1038,9 +1086,11 @@ export class InvoicesService {
       return this.get(id);
     }
     if (invoice.rectifiesInvoiceId && invoice.status !== 'borrador') {
-      throw new ConflictException(
-        'Una factura rectificativa aprobada no se anula: emite otra rectificativa por diferencias',
-      );
+      throw new ConflictException({
+        code: 'RECTIFICATION_NOT_CANCELLABLE',
+        message:
+          'Una factura rectificativa aprobada no se anula: emite otra rectificativa por diferencias',
+      });
     }
     const paid = await this.dbs.db
       .select({ id: paymentMilestones.id })
@@ -1057,11 +1107,16 @@ export class InvoicesService {
       status: invoice.status as InvoiceStatus,
       hasPaidMilestones: paid.length > 0,
     });
-    if (bloqueo) throw new ConflictException(bloqueo);
+    if (bloqueo)
+      throw new ConflictException({
+        code: 'INVOICE_NOT_CANCELLABLE',
+        message: bloqueo,
+      });
     if (invoice.status !== 'borrador' && !data.motivo) {
-      throw new BadRequestException(
-        'El motivo de anulación es obligatorio fuera de borrador',
-      );
+      throw new BadRequestException({
+        code: 'CANCELLATION_REASON_REQUIRED',
+        message: 'El motivo de anulación es obligatorio fuera de borrador',
+      });
     }
     await this.dbs.db.transaction(async (tx) => {
       const [locked] = await tx
@@ -1071,9 +1126,11 @@ export class InvoicesService {
         .for('update');
       if (locked) verificarVersion(locked.version, versionEsperada);
       if (!locked || locked.status !== invoice.status) {
-        throw new ConflictException(
-          'La factura ha cambiado de estado: recarga e inténtalo de nuevo',
-        );
+        throw new ConflictException({
+          code: 'INVOICE_STATE_CHANGED',
+          message:
+            'La factura ha cambiado de estado: recarga e inténtalo de nuevo',
+        });
       }
       await tx
         .delete(paymentMilestones)
@@ -1122,7 +1179,10 @@ export class InvoicesService {
     const { invoice } = await this.findWithContact(id);
     verificarVersion(invoice.version, versionEsperada);
     if (invoice.status !== 'borrador') {
-      throw new ConflictException('Solo se pueden eliminar borradores');
+      throw new ConflictException({
+        code: 'INVOICE_NOT_DRAFT',
+        message: 'Solo se pueden eliminar borradores',
+      });
     }
     await this.dbs.db.transaction(async (tx) => {
       await tx
@@ -1215,9 +1275,10 @@ export class InvoicesService {
       prohibidos.push('las líneas de una rectificativa total');
     }
     if (prohibidos.length > 0) {
-      throw new BadRequestException(
-        `En una factura rectificativa no se puede modificar ${prohibidos.join(', ')}: se heredan de la original`,
-      );
+      throw new BadRequestException({
+        code: 'RECTIFICATION_INHERITED_FIELDS',
+        message: `En una factura rectificativa no se puede modificar ${prohibidos.join(', ')}: se heredan de la original`,
+      });
     }
   }
 
@@ -1251,7 +1312,10 @@ export class InvoicesService {
           ),
         );
       if (found.length !== obras.length) {
-        throw new NotFoundException('Obra no encontrada');
+        throw new NotFoundException({
+          code: 'PROJECT_NOT_FOUND',
+          message: 'Obra no encontrada',
+        });
       }
     }
     if (fases.length > 0) {
@@ -1266,7 +1330,10 @@ export class InvoicesService {
           ),
         );
       if (found.length !== fases.length) {
-        throw new NotFoundException('Fase no encontrada');
+        throw new NotFoundException({
+          code: 'PHASE_NOT_FOUND',
+          message: 'Fase no encontrada',
+        });
       }
     }
     if (cats.length > 0) {
@@ -1280,7 +1347,10 @@ export class InvoicesService {
           ),
         );
       if (found.length !== cats.length) {
-        throw new NotFoundException('Categoría no encontrada');
+        throw new NotFoundException({
+          code: 'CATEGORY_NOT_FOUND',
+          message: 'Categoría no encontrada',
+        });
       }
     }
   }
@@ -1303,18 +1373,23 @@ export class InvoicesService {
         ),
       );
     if (notes.length !== noteIds.length) {
-      throw new NotFoundException('Algún albarán seleccionado no existe');
+      throw new NotFoundException({
+        code: 'DELIVERY_NOTE_NOT_FOUND',
+        message: 'Algún albarán seleccionado no existe',
+      });
     }
     for (const note of notes) {
       if (note.contactId !== contactId) {
-        throw new ConflictException(
-          `El albarán ${note.noteNumber} pertenece a otro proveedor`,
-        );
+        throw new ConflictException({
+          code: 'DELIVERY_NOTE_OTHER_SUPPLIER',
+          message: `El albarán ${note.noteNumber} pertenece a otro proveedor`,
+        });
       }
       if (note.status !== 'validado' || note.invoiceId !== null) {
-        throw new ConflictException(
-          `El albarán ${note.noteNumber} no está validado y libre: no se puede puntear`,
-        );
+        throw new ConflictException({
+          code: 'DELIVERY_NOTE_NOT_AVAILABLE',
+          message: `El albarán ${note.noteNumber} no está validado y libre: no se puede puntear`,
+        });
       }
     }
     await tx
@@ -1508,7 +1583,10 @@ export class InvoicesService {
       )
       .limit(1);
     if (!row) {
-      throw new NotFoundException('Factura no encontrada');
+      throw new NotFoundException({
+        code: 'INVOICE_NOT_FOUND',
+        message: 'Factura no encontrada',
+      });
     }
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null) {
@@ -1522,7 +1600,10 @@ export class InvoicesService {
           lines.map((l) => l.projectId),
         )
       ) {
-        throw new NotFoundException('Factura no encontrada');
+        throw new NotFoundException({
+          code: 'INVOICE_NOT_FOUND',
+          message: 'Factura no encontrada',
+        });
       }
     }
     return row;
@@ -1551,7 +1632,10 @@ export class InvoicesService {
       )
       .limit(1);
     if (!row) {
-      throw new NotFoundException('Contacto no encontrado');
+      throw new NotFoundException({
+        code: 'CONTACT_NOT_FOUND',
+        message: 'Contacto no encontrado',
+      });
     }
     return row;
   }
@@ -1563,9 +1647,10 @@ export class InvoicesService {
       (err as { constraint?: string }).constraint ===
         'invoices_rectifies_total_unique'
     ) {
-      throw new ConflictException(
-        'La factura ya tiene una rectificativa total',
-      );
+      throw new ConflictException({
+        code: 'INVOICE_ALREADY_RECTIFIED_TOTAL',
+        message: 'La factura ya tiene una rectificativa total',
+      });
     }
     if (
       err instanceof Error &&
@@ -1573,18 +1658,21 @@ export class InvoicesService {
       (err as { constraint?: string }).constraint ===
         'invoices_cert_subcontrata_activa_unique'
     ) {
-      throw new ConflictException(
-        'La certificación de subcontrata ya tiene una factura de compra activa',
-      );
+      throw new ConflictException({
+        code: 'SUBCONTRACT_CERT_ALREADY_INVOICED',
+        message:
+          'La certificación de subcontrata ya tiene una factura de compra activa',
+      });
     }
     if (
       err instanceof Error &&
       'code' in err &&
       (err as { code?: string }).code === UNIQUE_VIOLATION
     ) {
-      throw new ConflictException(
-        `Ya existe una factura con el número "${num}" para ese contacto`,
-      );
+      throw new ConflictException({
+        code: 'INVOICE_NUMBER_DUPLICATED',
+        message: `Ya existe una factura con el número "${num}" para ese contacto`,
+      });
     }
     throw err;
   }

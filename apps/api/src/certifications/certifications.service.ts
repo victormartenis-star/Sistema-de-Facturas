@@ -177,9 +177,11 @@ export class CertificationsService {
     const data = certificationCreateSchema.parse(input);
     const project = await this.findProject(data.projectId);
     if (project.contractAmount === null) {
-      throw new ConflictException(
-        'La obra no tiene importe de contrato: es necesario para certificar a origen',
-      );
+      throw new ConflictException({
+        code: 'PROJECT_WITHOUT_CONTRACT_AMOUNT',
+        message:
+          'La obra no tiene importe de contrato: es necesario para certificar a origen',
+      });
     }
 
     // Se bloquea la fila de la obra: dos altas simultáneas se serializan y la
@@ -208,7 +210,11 @@ export class CertificationsService {
           previousPct: prevPct,
           isRectification: false,
         });
-        if (bloqueoPct) throw new ConflictException(bloqueoPct);
+        if (bloqueoPct)
+          throw new ConflictException({
+            code: 'CERTIFICATION_PCT_INVALID',
+            message: bloqueoPct,
+          });
 
         const retentionPct = data.retentionPct ?? Number(project.retentionPct);
         const { cumulativeAmount, periodAmount, retentionAmount } =
@@ -244,9 +250,11 @@ export class CertificationsService {
       });
     } catch (err) {
       if ((err as { code?: string }).code === UNIQUE_VIOLATION) {
-        throw new ConflictException(
-          'Ya existe una certificación con ese número en la obra: reintenta',
-        );
+        throw new ConflictException({
+          code: 'CERTIFICATION_NUMBER_DUPLICATED',
+          message:
+            'Ya existe una certificación con ese número en la obra: reintenta',
+        });
       }
       throw err;
     }
@@ -268,15 +276,18 @@ export class CertificationsService {
     const orig = await this.find(id);
     verificarVersion(orig.version, versionEsperada);
     if (orig.status !== 'facturada' || !orig.invoiceId) {
-      throw new ConflictException(
-        'Solo se rectifica una certificación facturada',
-      );
+      throw new ConflictException({
+        code: 'CERTIFICATION_NOT_INVOICED',
+        message: 'Solo se rectifica una certificación facturada',
+      });
     }
     const project = await this.findProject(orig.projectId);
     if (project.contractAmount === null) {
-      throw new ConflictException(
-        'La obra no tiene importe de contrato: es necesario para certificar a origen',
-      );
+      throw new ConflictException({
+        code: 'PROJECT_WITHOUT_CONTRACT_AMOUNT',
+        message:
+          'La obra no tiene importe de contrato: es necesario para certificar a origen',
+      });
     }
 
     let row: Certification;
@@ -291,9 +302,10 @@ export class CertificationsService {
           )
           .for('update');
         if (!locked || locked.status !== 'facturada') {
-          throw new ConflictException(
-            'Solo se rectifica una certificación facturada',
-          );
+          throw new ConflictException({
+            code: 'CERTIFICATION_NOT_INVOICED',
+            message: 'Solo se rectifica una certificación facturada',
+          });
         }
         const [prev] = await tx
           .select()
@@ -307,16 +319,21 @@ export class CertificationsService {
           .orderBy(desc(certifications.seq))
           .limit(1);
         if (prev.status !== 'facturada') {
-          throw new ConflictException(
-            `Factura o elimina antes la certificación nº ${prev.seq} (borrador) para poder rectificar`,
-          );
+          throw new ConflictException({
+            code: 'CERTIFICATION_PREVIOUS_DRAFT',
+            message: `Factura o elimina antes la certificación nº ${prev.seq} (borrador) para poder rectificar`,
+          });
         }
         const bloqueoPct = certificationPctBlockReason({
           cumulativePct: data.cumulativePct,
           previousPct: Number(prev.cumulativePct),
           isRectification: true,
         });
-        if (bloqueoPct) throw new ConflictException(bloqueoPct);
+        if (bloqueoPct)
+          throw new ConflictException({
+            code: 'CERTIFICATION_PCT_INVALID',
+            message: bloqueoPct,
+          });
 
         const retentionPct = Number(orig.retentionPct);
         const { cumulativeAmount, periodAmount, retentionAmount } =
@@ -356,9 +373,11 @@ export class CertificationsService {
       });
     } catch (err) {
       if ((err as { code?: string }).code === UNIQUE_VIOLATION) {
-        throw new ConflictException(
-          'Ya existe una certificación con ese número en la obra: reintenta',
-        );
+        throw new ConflictException({
+          code: 'CERTIFICATION_NUMBER_DUPLICATED',
+          message:
+            'Ya existe una certificación con ese número en la obra: reintenta',
+        });
       }
       throw err;
     }
@@ -382,22 +401,28 @@ export class CertificationsService {
       .where(eq(certifications.id, cert.rectifiesCertificationId as string))
       .limit(1);
     if (!origCert?.invoiceId) {
-      throw new ConflictException(
-        'La certificación corregida ya no tiene factura: rectifica la factura directamente',
-      );
+      throw new ConflictException({
+        code: 'CERTIFICATION_INVOICE_MISSING',
+        message:
+          'La certificación corregida ya no tiene factura: rectifica la factura directamente',
+      });
     }
     // get() aplica el acceso por obra y el 404 habitual.
     const origInvoice = await this.invoicesService.get(origCert.invoiceId);
     if (data.contactId !== origInvoice.contactId) {
-      throw new ConflictException(
-        'La rectificativa se emite al mismo cliente que la factura original',
-      );
+      throw new ConflictException({
+        code: 'RECTIFICATION_CLIENT_MISMATCH',
+        message:
+          'La rectificativa se emite al mismo cliente que la factura original',
+      });
     }
     const period = Number(cert.periodAmount);
     if (period === 0) {
-      throw new ConflictException(
-        'La certificación rectificativa no cambia el importe: no hay nada que facturar',
-      );
+      throw new ConflictException({
+        code: 'RECTIFICATION_NO_AMOUNT_CHANGE',
+        message:
+          'La certificación rectificativa no cambia el importe: no hay nada que facturar',
+      });
     }
     const project = await this.findProject(cert.projectId);
     const description =
@@ -414,10 +439,17 @@ export class CertificationsService {
         .from(certifications)
         .where(and(eq(certifications.id, id), isNull(certifications.deletedAt)))
         .for('update');
-      if (!locked) throw new NotFoundException('Certificación no encontrada');
+      if (!locked)
+        throw new NotFoundException({
+          code: 'CERTIFICATION_NOT_FOUND',
+          message: 'Certificación no encontrada',
+        });
       verificarVersion(locked.version, versionEsperada);
       if (locked.status !== 'borrador') {
-        throw new ConflictException('La certificación ya está facturada');
+        throw new ConflictException({
+          code: 'CERTIFICATION_ALREADY_INVOICED',
+          message: 'La certificación ya está facturada',
+        });
       }
       const { row: invoice, contact } =
         await this.invoicesService.crearRectificativaEnTx(
@@ -490,7 +522,10 @@ export class CertificationsService {
     const cert = await this.find(id);
     verificarVersion(cert.version, versionEsperada);
     if (cert.status !== 'borrador') {
-      throw new ConflictException('La certificación ya está facturada');
+      throw new ConflictException({
+        code: 'CERTIFICATION_ALREADY_INVOICED',
+        message: 'La certificación ya está facturada',
+      });
     }
     const data = certificationInvoiceSchema.parse(input);
     if (cert.rectifiesCertificationId) {
@@ -538,10 +573,17 @@ export class CertificationsService {
         .from(certifications)
         .where(and(eq(certifications.id, id), isNull(certifications.deletedAt)))
         .for('update');
-      if (!locked) throw new NotFoundException('Certificación no encontrada');
+      if (!locked)
+        throw new NotFoundException({
+          code: 'CERTIFICATION_NOT_FOUND',
+          message: 'Certificación no encontrada',
+        });
       verificarVersion(locked.version, versionEsperada);
       if (locked.status !== 'borrador') {
-        throw new ConflictException('La certificación ya está facturada');
+        throw new ConflictException({
+          code: 'CERTIFICATION_ALREADY_INVOICED',
+          message: 'La certificación ya está facturada',
+        });
       }
       const invoice = await this.invoicesService.crearEnTx(
         tx,
@@ -590,9 +632,11 @@ export class CertificationsService {
     const cert = await this.find(id);
     verificarVersion(cert.version, versionEsperada);
     if (cert.status !== 'borrador') {
-      throw new ConflictException(
-        'No se puede eliminar una certificación facturada: rectifica antes su factura',
-      );
+      throw new ConflictException({
+        code: 'CERTIFICATION_INVOICED_NOT_DELETABLE',
+        message:
+          'No se puede eliminar una certificación facturada: rectifica antes su factura',
+      });
     }
     // Misma exclusión por obra que `create`: sin ella, un alta simultánea
     // puede dejar de ser la "última" justo después de comprobarlo.
@@ -610,9 +654,10 @@ export class CertificationsService {
         .orderBy(desc(certifications.seq))
         .limit(1);
       if (last && last.seq !== cert.seq) {
-        throw new ConflictException(
-          'Solo se puede eliminar la última certificación de la obra',
-        );
+        throw new ConflictException({
+          code: 'CERTIFICATION_NOT_LAST',
+          message: 'Solo se puede eliminar la última certificación de la obra',
+        });
       }
       // Solo borradores: la condición va en el UPDATE (una facturación
       // concurrente no deja una certificación facturada borrada).
@@ -673,11 +718,17 @@ export class CertificationsService {
       )
       .limit(1);
     if (!row) {
-      throw new NotFoundException('Certificación no encontrada');
+      throw new NotFoundException({
+        code: 'CERTIFICATION_NOT_FOUND',
+        message: 'Certificación no encontrada',
+      });
     }
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(row.projectId)) {
-      throw new NotFoundException('Certificación no encontrada');
+      throw new NotFoundException({
+        code: 'CERTIFICATION_NOT_FOUND',
+        message: 'Certificación no encontrada',
+      });
     }
     return row;
   }
@@ -686,7 +737,10 @@ export class CertificationsService {
     const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
     const [row] = await this.dbs.db
       .select()
@@ -700,7 +754,10 @@ export class CertificationsService {
       )
       .limit(1);
     if (!row) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
     return row;
   }
