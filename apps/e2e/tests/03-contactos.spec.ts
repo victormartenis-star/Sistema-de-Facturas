@@ -14,7 +14,7 @@ test.describe('Contactos', () => {
 
   test('busca un contacto por texto', async ({ page }) => {
     await page.goto('/contactos');
-    const searchBox = page.getByPlaceholder(/buscar/i);
+    const searchBox = page.getByPlaceholder('Buscar por nombre o NIF');
     await expect(searchBox).toBeVisible({ timeout: 8_000 });
     await searchBox.fill('test');
     // El valor se aplica; la lista puede quedar vacía, no es lo que se valida aquí.
