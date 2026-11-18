@@ -28,8 +28,6 @@ const MAX_LONGITUD_CLAVE = 255;
 const BLOQUEO_SEGUNDOS = 60;
 /** Vigencia de una clave. */
 const VIGENCIA_HORAS = 24;
-/** Máximo de filas caducadas que borra cada petición con clave. */
-const LIMPIEZA_LOTE = 50;
 
 type Adquisicion =
   { id: string } | { replay: { status: number; body: unknown } };
@@ -89,8 +87,6 @@ export class IdempotenciaInterceptor implements NestInterceptor {
     const ruta = (req.originalUrl ?? req.url).split('?')[0];
     const hash = hashCuerpo(req.body);
     const db = getDb();
-
-    await this.limpiarCaducadas();
 
     const adq = await this.adquirir(
       companyId,
@@ -154,18 +150,6 @@ export class IdempotenciaInterceptor implements NestInterceptor {
         ).pipe(mergeMap(() => throwError(() => err))),
       ),
     );
-  }
-
-  private async limpiarCaducadas(): Promise<void> {
-    try {
-      await getDb().execute(sql`
-        DELETE FROM idempotency_keys WHERE id IN (
-          SELECT id FROM idempotency_keys
-          WHERE expires_at < now() LIMIT ${LIMPIEZA_LOTE}
-        )`);
-    } catch (e) {
-      this.logger.warn(`Limpieza de claves caducadas fallida: ${String(e)}`);
-    }
   }
 
   /** Id de la fila de la que esta petición es dueña, o la respuesta a repetir. */
