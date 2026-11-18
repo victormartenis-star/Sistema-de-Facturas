@@ -1087,6 +1087,13 @@ export const budgetItems = pgTable(
   },
   (t) => [
     index('budget_items_phase_id_idx').on(t.phaseId),
+    // Desglose del presupuesto: filtra por presupuesto y ordena por nivel y
+    // orden; el índice sirve ambas cosas sin ordenar en memoria.
+    index('budget_items_budget_level_order_idx').on(
+      t.budgetId,
+      t.level,
+      t.sortOrder,
+    ),
     // Código único dentro de un presupuesto
     unique().on(t.budgetId, t.code),
   ],

@@ -176,7 +176,10 @@ export class ProjectsService {
     ];
     if (allowed !== null) {
       if (!allowed.includes(id))
-        throw new NotFoundException('Obra no encontrada');
+        throw new NotFoundException({
+          code: 'PROJECT_NOT_FOUND',
+          message: 'Obra no encontrada',
+        });
     }
     const [row] = await this.dbs.db
       .select()
@@ -184,7 +187,10 @@ export class ProjectsService {
       .where(and(...filters))
       .limit(1);
     if (!row) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
     return row;
   }
@@ -195,7 +201,10 @@ export class ProjectsService {
       'code' in err &&
       (err as { code?: string }).code === UNIQUE_VIOLATION
     ) {
-      throw new ConflictException(`Ya existe una obra con el código "${code}"`);
+      throw new ConflictException({
+        code: 'PROJECT_CODE_DUPLICATED',
+        message: `Ya existe una obra con el código "${code}"`,
+      });
     }
     throw err;
   }

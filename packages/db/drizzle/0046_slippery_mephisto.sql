@@ -1,0 +1,1 @@
+CREATE INDEX "budget_items_budget_level_order_idx" ON "budget_items" USING btree ("budget_id","level","sort_order");

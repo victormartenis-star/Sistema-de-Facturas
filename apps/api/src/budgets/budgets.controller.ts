@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -82,7 +83,10 @@ export class BudgetsController {
     @Body('name') name?: string,
   ): Promise<Bc3ImportResultDto> {
     if (!file) {
-      throw new Error('Se requiere el archivo .bc3');
+      throw new BadRequestException({
+        code: 'BC3_FILE_REQUIRED',
+        message: 'Se requiere el archivo .bc3',
+      });
     }
     // BC3 suele ser Latin-1; intentamos decodificarlo correctamente
     const content = decodeFileContent(file.buffer);

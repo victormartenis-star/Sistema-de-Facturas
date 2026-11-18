@@ -231,7 +231,11 @@ export class BudgetsService {
         budget.status as BudgetStatus,
         campos,
       );
-      if (bloqueo) throw new ConflictException(bloqueo);
+      if (bloqueo)
+        throw new ConflictException({
+          code: 'BUDGET_NOT_EDITABLE',
+          message: bloqueo,
+        });
 
       if (data.status !== undefined && data.status !== budget.status) {
         const motivo = motivoTransicionInvalida(
@@ -241,7 +245,11 @@ export class BudgetsService {
           BUDGET_STATUS_LABELS,
           'El presupuesto',
         );
-        if (motivo) throw new ConflictException(motivo);
+        if (motivo)
+          throw new ConflictException({
+            code: 'BUDGET_INVALID_TRANSITION',
+            message: motivo,
+          });
       }
 
       if (data.status === 'activo' && budget.status !== 'activo') {
@@ -250,9 +258,10 @@ export class BudgetsService {
           .from(budgetItems)
           .where(eq(budgetItems.budgetId, id));
         if (n === 0) {
-          throw new ConflictException(
-            'No se puede activar un presupuesto sin partidas',
-          );
+          throw new ConflictException({
+            code: 'BUDGET_EMPTY',
+            message: 'No se puede activar un presupuesto sin partidas',
+          });
         }
         await cambiarEstadoMasivo(
           tx,
@@ -325,9 +334,10 @@ export class BudgetsService {
       const budget = await this.lockBudget(tx, id);
       verificarVersion(budget.version, versionEsperada);
       if (!canDeleteBudget(budget.status as BudgetStatus)) {
-        throw new ConflictException(
-          `Solo se puede borrar un presupuesto en borrador (este está ${budget.status}). Ciérralo en lugar de borrarlo`,
-        );
+        throw new ConflictException({
+          code: 'BUDGET_NOT_DRAFT',
+          message: `Solo se puede borrar un presupuesto en borrador (este está ${budget.status}). Ciérralo en lugar de borrarlo`,
+        });
       }
       await tx
         .update(budgets)
@@ -408,10 +418,12 @@ export class BudgetsService {
     const { items, warnings, rootCode } = parseBc3(fileContent);
 
     if (items.length === 0) {
-      throw new BadRequestException(
-        `El archivo BC3 no contiene partidas válidas.` +
+      throw new BadRequestException({
+        code: 'BC3_IMPORT_INVALID',
+        message:
+          `El archivo BC3 no contiene partidas válidas.` +
           (warnings.length ? ' ' + warnings.join(' ') : ''),
-      );
+      });
     }
 
     // Presupuesto y partidas en una sola transacción: si un lote falla no
@@ -457,9 +469,10 @@ export class BudgetsService {
       });
     } catch (err) {
       if ((err as { code?: string }).code === UNIQUE_VIOLATION) {
-        throw new BadRequestException(
-          'El archivo BC3 contiene códigos de partida repetidos',
-        );
+        throw new BadRequestException({
+          code: 'BC3_DUPLICATE_CODES',
+          message: 'El archivo BC3 contiene códigos de partida repetidos',
+        });
       }
       throw err;
     }
@@ -491,7 +504,11 @@ export class BudgetsService {
         const bloqueo = budgetItemStructureBlockReason(
           budget.status as BudgetStatus,
         );
-        if (bloqueo) throw new ConflictException(bloqueo);
+        if (bloqueo)
+          throw new ConflictException({
+            code: 'BUDGET_ITEM_STRUCTURE_LOCKED',
+            message: bloqueo,
+          });
         const [created] = await tx
           .insert(budgetItems)
           .values({
@@ -533,7 +550,11 @@ export class BudgetsService {
         budget.status as BudgetStatus,
         campos,
       );
-      if (bloqueo) throw new ConflictException(bloqueo);
+      if (bloqueo)
+        throw new ConflictException({
+          code: 'BUDGET_ITEM_LOCKED',
+          message: bloqueo,
+        });
 
       // Se relee la partida ya con el presupuesto bloqueado.
       const [existing] = await tx
@@ -541,7 +562,11 @@ export class BudgetsService {
         .from(budgetItems)
         .where(eq(budgetItems.id, itemId))
         .limit(1);
-      if (!existing) throw new NotFoundException('Partida no encontrada');
+      if (!existing)
+        throw new NotFoundException({
+          code: 'BUDGET_ITEM_NOT_FOUND',
+          message: 'Partida no encontrada',
+        });
       verificarVersion(existing.version, versionEsperada);
 
       const totalAmount = centsToNumeric(
@@ -601,7 +626,11 @@ export class BudgetsService {
       const bloqueo = budgetItemStructureBlockReason(
         budget.status as BudgetStatus,
       );
-      if (bloqueo) throw new ConflictException(bloqueo);
+      if (bloqueo)
+        throw new ConflictException({
+          code: 'BUDGET_ITEM_STRUCTURE_LOCKED',
+          message: bloqueo,
+        });
       const borradas = await tx
         .delete(budgetItems)
         .where(
@@ -631,7 +660,11 @@ export class BudgetsService {
       .from(budgets)
       .where(and(eq(budgets.id, id), isNull(budgets.deletedAt)))
       .for('update');
-    if (!row) throw new NotFoundException('Presupuesto no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'BUDGET_NOT_FOUND',
+        message: 'Presupuesto no encontrado',
+      });
     return row;
   }
 
@@ -641,7 +674,10 @@ export class BudgetsService {
     const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
     const [row] = await this.dbs.db
       .select()
@@ -654,7 +690,11 @@ export class BudgetsService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Obra no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     return row;
   }
 
@@ -671,10 +711,17 @@ export class BudgetsService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Presupuesto no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'BUDGET_NOT_FOUND',
+        message: 'Presupuesto no encontrado',
+      });
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(row.projectId)) {
-      throw new NotFoundException('Presupuesto no encontrado');
+      throw new NotFoundException({
+        code: 'BUDGET_NOT_FOUND',
+        message: 'Presupuesto no encontrado',
+      });
     }
     return row;
   }
@@ -687,10 +734,17 @@ export class BudgetsService {
       .innerJoin(budgets, eq(budgetItems.budgetId, budgets.id))
       .where(and(eq(budgetItems.id, id), eq(budgets.companyId, companyId)))
       .limit(1);
-    if (!row) throw new NotFoundException('Partida no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'BUDGET_ITEM_NOT_FOUND',
+        message: 'Partida no encontrada',
+      });
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(row.projectId)) {
-      throw new NotFoundException('Partida no encontrada');
+      throw new NotFoundException({
+        code: 'BUDGET_ITEM_NOT_FOUND',
+        message: 'Partida no encontrada',
+      });
     }
     return row.item;
   }
@@ -701,9 +755,10 @@ export class BudgetsService {
       'code' in err &&
       (err as { code?: string }).code === UNIQUE_VIOLATION
     ) {
-      throw new ConflictException(
-        `Ya existe una partida con el código "${code}" en este presupuesto`,
-      );
+      throw new ConflictException({
+        code: 'BUDGET_ITEM_CODE_DUPLICATED',
+        message: `Ya existe una partida con el código "${code}" en este presupuesto`,
+      });
     }
     throw err;
   }
