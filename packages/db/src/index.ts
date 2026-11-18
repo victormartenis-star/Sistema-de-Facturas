@@ -52,6 +52,15 @@ function instrumentPool(target: Pool): void {
   }) as Pool['query'];
 }
 
+/**
+ * Entero positivo desde el entorno; si falta o no es válido, el valor por
+ * defecto. Evita que un `DB_POOL_MAX=abc` deje el pool sin límite.
+ */
+function entero(variable: string, porDefecto: number): number {
+  const valor = Number(process.env[variable]);
+  return Number.isInteger(valor) && valor > 0 ? valor : porDefecto;
+}
+
 export function getDb(): Db {
   if (!db) {
     const url = process.env.DATABASE_URL;
@@ -60,8 +69,11 @@ export function getDb(): Db {
     }
     pool = new Pool({
       connectionString: url,
-      max: 10,
-      connectionTimeoutMillis: 5000,
+      max: entero('DB_POOL_MAX', 10),
+      // Libera conexiones ociosas tras 30 s: el pool no retiene conexiones
+      // de más tras picos y Postgres no acumula sesiones muertas.
+      idleTimeoutMillis: entero('DB_POOL_IDLE_TIMEOUT_MS', 30_000),
+      connectionTimeoutMillis: entero('DB_POOL_CONNECTION_TIMEOUT_MS', 5000),
     });
     // Un error en un cliente inactivo (reinicio de Postgres, corte de red)
     // se emite en el Pool; sin manejador Node lo trata como excepción no

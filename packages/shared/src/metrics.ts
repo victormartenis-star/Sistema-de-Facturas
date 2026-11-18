@@ -66,3 +66,38 @@ export function extractSqlOperation(sql: string | null | undefined): string {
   const match = /^\s*([A-Za-z]+)/.exec(sql ?? '');
   return match ? match[1].toUpperCase() : UNKNOWN_SQL_OPERATION;
 }
+
+/** Umbral por defecto (ms) a partir del cual una consulta se registra como lenta. */
+export const UMBRAL_CONSULTA_LENTA_MS_POR_DEFECTO = 200;
+
+/** Longitud máxima del texto de una consulta en el log de consultas lentas. */
+export const LONGITUD_MAX_SQL_LOG = 500;
+
+/**
+ * `true` si la duración supera el umbral (estrictamente). Un valor no finito
+ * o negativo nunca cuenta como lenta.
+ */
+export function esConsultaLenta(
+  duracionMs: number,
+  umbralMs: number = UMBRAL_CONSULTA_LENTA_MS_POR_DEFECTO,
+): boolean {
+  return (
+    Number.isFinite(duracionMs) && duracionMs >= 0 && duracionMs > umbralMs
+  );
+}
+
+/**
+ * Texto de una consulta apto para un log: colapsa espacios, sustituye los
+ * literales de cadena por `'?'` (por si alguna consulta `sql.raw` incrusta
+ * valores) y lo trunca. Las consultas parametrizadas de Drizzle ya llevan
+ * `$1…$n`, así que sus valores nunca aparecen en el texto.
+ */
+export function sqlParaLog(sql: string | null | undefined): string {
+  const limpio = (sql ?? '')
+    .replace(/'(?:[^']|'')*'/g, "'?'")
+    .replace(/\s+/g, ' ')
+    .trim();
+  return limpio.length > LONGITUD_MAX_SQL_LOG
+    ? `${limpio.slice(0, LONGITUD_MAX_SQL_LOG)}…`
+    : limpio;
+}
