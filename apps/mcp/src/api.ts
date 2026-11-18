@@ -27,10 +27,49 @@ export class ErrorApi extends Error {
     readonly estado: number,
     readonly cuerpo: unknown,
     mensaje: string,
+    /** Cabecera X-Request-Id de la respuesta (o la generada), para citarla. */
+    readonly requestId?: string,
   ) {
     super(mensaje);
     this.name = 'ErrorApi';
   }
+}
+
+/**
+ * Datos estructurados de un rechazo de la API (RFC 7807): el agente puede
+ * ramificar por `errorCode` sin parsear el texto.
+ */
+export interface ErrorDeDominio {
+  status: number;
+  errorCode?: string;
+  detail: string;
+  correlationId?: string;
+}
+
+export function errorDeDominio(e: ErrorApi): ErrorDeDominio {
+  const c = (e.cuerpo ?? {}) as Record<string, unknown>;
+  const codigo =
+    typeof c.errorCode === 'string'
+      ? c.errorCode
+      : typeof c.code === 'string'
+        ? c.code
+        : undefined;
+  const detail =
+    typeof c.detail === 'string'
+      ? c.detail
+      : Array.isArray(c.message)
+        ? c.message.join('; ')
+        : typeof c.message === 'string'
+          ? c.message
+          : e.message;
+  const correlationId =
+    typeof c.correlationId === 'string' ? c.correlationId : e.requestId;
+  return {
+    status: e.estado,
+    ...(codigo ? { errorCode: codigo } : {}),
+    detail,
+    ...(correlationId ? { correlationId } : {}),
+  };
 }
 
 /** Extrae el texto de error de una respuesta de Nest. */
@@ -119,7 +158,12 @@ export async function pedir<T>(
     if (res.status === 403) {
       mensaje += ' — El token es valido pero su perfil no tiene ese permiso.';
     }
-    throw new ErrorApi(res.status, cuerpo, mensaje);
+    throw new ErrorApi(
+      res.status,
+      cuerpo,
+      mensaje,
+      res.headers.get('x-request-id') ?? requestId,
+    );
   }
   return cuerpo as T;
 }
@@ -171,6 +215,7 @@ export async function pedirVersionado<T>(
         `versión obsoleta: vuelve a leer el ${entidad} y reintenta ` +
           `(otro usuario lo modificó entre tu lectura y este cambio)` +
           refDe(e.cuerpo),
+        e.requestId,
       );
     }
     throw e;

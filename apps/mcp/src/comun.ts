@@ -1,4 +1,4 @@
-import { ErrorApi } from './api';
+import { ErrorApi, errorDeDominio, type ErrorDeDominio } from './api';
 
 /** Resultado de herramienta con el objeto serializado como texto. */
 export function ok(datos: unknown) {
@@ -7,11 +7,16 @@ export function ok(datos: unknown) {
   };
 }
 
-/** Resultado de error. isError deja que el modelo reaccione en vez de cortar. */
-export function fallo(mensaje: string) {
+/**
+ * Resultado de error. isError deja que el modelo reaccione en vez de cortar.
+ * `datos` (si lo hay) va en `structuredContent`: el agente ramifica por
+ * `errorCode` sin parsear el texto.
+ */
+export function fallo(mensaje: string, datos?: ErrorDeDominio) {
   return {
     content: [{ type: 'text' as const, text: mensaje }],
     isError: true,
+    ...(datos ? { structuredContent: { ...datos } } : {}),
   };
 }
 
@@ -27,7 +32,15 @@ export async function ejecutar<T>(fn: () => Promise<T>) {
     return ok(await fn());
   } catch (e) {
     if (e instanceof ErrorApi) {
-      return fallo(e.estado ? `[${e.estado}] ${e.message}` : e.message);
+      const datos = errorDeDominio(e);
+      const codigo = datos.errorCode
+        ? `
+código: ${datos.errorCode}`
+        : '';
+      return fallo(
+        (e.estado ? `[${e.estado}] ${e.message}` : e.message) + codigo,
+        datos,
+      );
     }
     return fallo(`Error inesperado: ${String(e)}`);
   }
