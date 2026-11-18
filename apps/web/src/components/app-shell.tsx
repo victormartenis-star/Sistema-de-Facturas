@@ -40,12 +40,16 @@ export function AppShell({ children }: { children: ReactNode }) {
             Modo solo lectura: puedes consultar pero no modificar datos
           </div>
         )}
+        {/* Cabecera en flujo: el buscador y la campana ya no flotan sobre el
+            contenido, así que no tapan los botones de acción de las páginas. */}
+        <header className="mx-auto flex max-w-6xl items-center justify-end gap-3 px-4 pt-4 lg:px-8">
+          <GlobalSearch />
+          <NotificationsBell />
+        </header>
         <main className="mx-auto max-w-6xl px-4 py-8 lg:px-8">{children}</main>
       </div>
       <Copiloto />
       <OfflineSyncIndicator />
-      <GlobalSearch />
-      <NotificationsBell />
     </>
   );
 }

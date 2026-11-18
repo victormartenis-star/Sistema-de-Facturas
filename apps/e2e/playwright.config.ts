@@ -75,6 +75,9 @@ export default defineConfig({
           command: 'npm run build -w @erp/api && npm run start -w @erp/api',
           port: 3001,
           reuseExistingServer: false,
+          // La suite hace decenas de logins desde una misma IP: se sube el
+          // límite de /auth/login solo para este entorno de prueba.
+          env: { AUTH_LOGIN_RATE_LIMIT: '1000' },
           // El runner de CI es más lento y variable que un portátil: margen
           // amplio para que un `tsc` frío no dispare un fallo por timeout.
           timeout: 180_000,

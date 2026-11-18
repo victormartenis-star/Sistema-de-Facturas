@@ -32,7 +32,10 @@ test.describe('Panel principal', () => {
 
   test('el sidebar tiene los enlaces de configuración', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByRole('link', { name: /auditoría/i })).toBeVisible();
+    // Exacto: /auditoría/i coincide también con «Auditoría de contratos».
+    await expect(
+      page.getByRole('link', { name: 'Auditoría', exact: true }),
+    ).toBeVisible();
     await expect(page.getByRole('link', { name: /usuarios/i })).toBeVisible();
   });
 });

@@ -67,7 +67,7 @@ export function GlobalSearch() {
   };
 
   return (
-    <div ref={containerRef} className="fixed top-4 right-16 z-40 w-64">
+    <div ref={containerRef} className="relative z-40 w-64">
       <div className="relative">
         <IconSearch
           size={14}

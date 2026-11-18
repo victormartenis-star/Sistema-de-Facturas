@@ -52,7 +52,7 @@ export function NotificationsBell() {
   };
 
   return (
-    <div className="fixed top-4 right-4 z-40">
+    <div className="relative z-40">
       <button
         onClick={() => setOpen((v) => !v)}
         className="relative flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 shadow-sm transition hover:bg-gray-50"

@@ -26,8 +26,23 @@ import { AuthenticatedRequest } from './jwt-auth.guard';
 import { Public } from './public.decorator';
 import { PermiteLector } from './read-only.guard';
 
-/** Límite estricto para los dos puntos de entrada de credenciales: 5/min por IP en vez de los 100/min globales. */
-const AUTH_THROTTLE = { default: { limit: 5, ttl: 60_000 } };
+/**
+ * Límite estricto para los dos puntos de entrada de credenciales: 5/min por IP
+ * en vez de los 100/min globales. `AUTH_LOGIN_RATE_LIMIT` lo cambia solo para
+ * entornos de prueba que hacen muchos logins desde una misma IP (E2E de
+ * Playwright); en producción se deja sin definir. Un valor no válido cae al 5.
+ */
+const LIMITE_LOGIN_POR_DEFECTO = 5;
+const limiteLogin = Number(process.env.AUTH_LOGIN_RATE_LIMIT);
+const AUTH_THROTTLE = {
+  default: {
+    limit:
+      Number.isInteger(limiteLogin) && limiteLogin > 0
+        ? limiteLogin
+        : LIMITE_LOGIN_POR_DEFECTO,
+    ttl: 60_000,
+  },
+};
 
 @Controller('auth')
 export class AuthController {
