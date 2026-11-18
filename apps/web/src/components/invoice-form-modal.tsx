@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
+import { crearGuardaEnvio } from '@/lib/envio-unico';
 import {
   ISP_LEGEND,
   type CategoryDto,
@@ -280,8 +281,16 @@ export function InvoiceFormModal({
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
 
+  // Guarda de doble envío: se libera cuando la mutación termina (éxito o error).
+  const [guarda] = useState(crearGuardaEnvio);
+  useEffect(() => {
+    if (!saving) guarda.liberar();
+  }, [saving, guarda]);
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    // Doble clic: el segundo llega antes de que `saving` deshabilite el botón.
+    if (saving || !guarda.intentar()) return;
     onSave({
       kind,
       contactId,

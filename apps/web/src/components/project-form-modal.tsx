@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { crearGuardaEnvio } from '@/lib/envio-unico';
 import {
   PROJECT_STATUSES,
   PROJECT_STATUS_LABELS,
@@ -88,8 +89,15 @@ export function ProjectFormModal({
   const set = (key: keyof typeof EMPTY) => (value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
 
+  // Guarda de doble envío: se libera cuando la mutación termina (éxito o error).
+  const [guarda] = useState(crearGuardaEnvio);
+  useEffect(() => {
+    if (!saving) guarda.liberar();
+  }, [saving, guarda]);
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving || !guarda.intentar()) return;
     onSave({
       code: form.code,
       name: form.name,

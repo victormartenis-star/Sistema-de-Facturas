@@ -142,3 +142,34 @@ describe('ifMatch', () => {
     expect(ifMatch(null)).toEqual({});
   });
 });
+
+describe('errorDeRespuesta con códigos de dominio (RFC 7807)', () => {
+  it('muestra el detail de negocio, no un texto genérico, y conserva el errorCode', () => {
+    const e = errorDeRespuesta(
+      409,
+      {
+        type: 'https://erp-dintel/errores/INVOICE_NOT_DRAFT',
+        title: 'Conflicto',
+        status: 409,
+        detail: 'Solo se aprueban facturas en borrador',
+        errorCode: 'INVOICE_NOT_DRAFT',
+        correlationId: 'abc-123',
+      },
+      'Error 409',
+      'abc-123',
+    );
+    expect(e.message).toBe('Solo se aprueban facturas en borrador');
+    expect(e.code).toBe('INVOICE_NOT_DRAFT');
+    expect(e.correlationId).toBe('abc-123');
+    expect(esConflictoVersion(e)).toBe(false);
+  });
+
+  it('un 409 de estado con código de dominio no se confunde con conflicto de versión', () => {
+    const e = errorDeRespuesta(409, {
+      detail: 'La obra no tiene importe de contrato',
+      errorCode: 'PROJECT_WITHOUT_CONTRACT_AMOUNT',
+    });
+    expect(e.message).toBe('La obra no tiene importe de contrato');
+    expect(e.message).not.toBe(MENSAJE_CONFLICTO_VERSION);
+  });
+});
