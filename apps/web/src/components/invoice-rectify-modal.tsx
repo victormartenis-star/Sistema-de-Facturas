@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { crearGuardaEnvio } from '@/lib/envio-unico';
 import {
   FACTURAE_REASON_CODES,
   RECTIFICATION_KINDS,
@@ -88,6 +89,12 @@ export function InvoiceRectifyModal({
     );
   }, [open, invoice]);
 
+  // Guarda de doble envío: se libera al terminar la mutación (éxito o error).
+  const [guarda] = useState(crearGuardaEnvio);
+  useEffect(() => {
+    if (!saving) guarda.liberar();
+  }, [saving, guarda]);
+
   if (!invoice) return null;
 
   const deltas = lines.filter((l) => Number(l.baseAmount) !== 0);
@@ -107,6 +114,7 @@ export function InvoiceRectifyModal({
       deltas.every((l) => Number.isFinite(Number(l.baseAmount))));
 
   function enviar() {
+    if (saving || !guarda.intentar()) return;
     onSave(
       clase === 'total'
         ? {

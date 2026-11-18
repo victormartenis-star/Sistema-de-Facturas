@@ -8,7 +8,8 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { crearGuardaEnvio } from '@/lib/envio-unico';
 import {
   CERT_STATUSES,
   CERT_STATUS_LABELS,
@@ -142,9 +143,16 @@ function NuevaCertModal({
       ? `Debe ser mayor que ${lastPct.toFixed(2)} % y ≤ 100 %`
       : null;
 
+  // Guarda de doble envío: se libera al terminar la mutación (éxito o error).
+  const [guarda] = useState(crearGuardaEnvio);
+  useEffect(() => {
+    if (!mutation.isPending) guarda.liberar();
+  }, [mutation.isPending, guarda]);
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (isNaN(pctVal) || pctVal <= lastPct || pctVal > 100) return;
+    if (!guarda.intentar()) return;
     mutation.mutate({
       projectId,
       certDate,
@@ -284,12 +292,19 @@ function FacturarModal({
     onError: (e) => toast(errText(e), 'error'),
   });
 
+  // Guarda de doble envío: se libera al terminar la mutación (éxito o error).
+  const [guarda] = useState(crearGuardaEnvio);
+  useEffect(() => {
+    if (!mutation.isPending) guarda.liberar();
+  }, [mutation.isPending, guarda]);
+
   if (!cert) return null;
 
   const neto = cert.periodAmount - cert.retentionAmount;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!guarda.intentar()) return;
     mutation.mutate({
       contactId,
       invoiceNumber,
@@ -457,8 +472,15 @@ function NuevaLineaModal({
     onError: (e) => toast(errText(e), 'error'),
   });
 
+  // Guarda de doble envío: se libera al terminar la mutación (éxito o error).
+  const [guarda] = useState(crearGuardaEnvio);
+  useEffect(() => {
+    if (!mutation.isPending) guarda.liberar();
+  }, [mutation.isPending, guarda]);
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!guarda.intentar()) return;
     mutation.mutate({
       budgetItemId,
       cumulativePct: parseFloat(cumulativePct),
@@ -710,6 +732,12 @@ function RectificarCertModal({
   const codigosPermitidos = allowedFacturaeReasonCodes(rectMotive);
   const codigoOk = (codigosPermitidos as string[]).includes(reasonCode);
 
+  // Guarda de doble envío: se libera al terminar la mutación (éxito o error).
+  const [guarda] = useState(crearGuardaEnvio);
+  useEffect(() => {
+    if (!mutation.isPending) guarda.liberar();
+  }, [mutation.isPending, guarda]);
+
   if (!cert) return null;
 
   return (
@@ -722,6 +750,7 @@ function RectificarCertModal({
         className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
+          if (!guarda.intentar()) return;
           mutation.mutate({
             certDate,
             cumulativePct: pctVal,

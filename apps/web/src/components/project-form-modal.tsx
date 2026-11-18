@@ -80,6 +80,13 @@ export function ProjectFormModal({
     );
   }, [open, project]);
 
+  // Guarda de doble envío: se libera cuando la mutación termina (éxito o error).
+  // Los hooks van ANTES del `return null` de `!open` (regla de hooks).
+  const [guarda] = useState(crearGuardaEnvio);
+  useEffect(() => {
+    if (!saving) guarda.liberar();
+  }, [saving, guarda]);
+
   if (!open) return null;
 
   const fieldErrors = error instanceof ApiError ? error.fieldErrors : [];
@@ -88,12 +95,6 @@ export function ProjectFormModal({
 
   const set = (key: keyof typeof EMPTY) => (value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
-
-  // Guarda de doble envío: se libera cuando la mutación termina (éxito o error).
-  const [guarda] = useState(crearGuardaEnvio);
-  useEffect(() => {
-    if (!saving) guarda.liberar();
-  }, [saving, guarda]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();

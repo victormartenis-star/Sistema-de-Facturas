@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { crearGuardaEnvio } from '@/lib/envio-unico';
 import {
   CONTACT_KINDS,
   CONTACT_KIND_LABELS,
@@ -86,6 +87,12 @@ export function ContactFormModal({
     );
   }, [open, contact]);
 
+  // Guarda de doble envío: se libera al terminar la mutación (éxito o error).
+  const [guarda] = useState(crearGuardaEnvio);
+  useEffect(() => {
+    if (!saving) guarda.liberar();
+  }, [saving, guarda]);
+
   if (!open) return null;
 
   const fieldErrors = error instanceof ApiError ? error.fieldErrors : [];
@@ -97,6 +104,7 @@ export function ContactFormModal({
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving || !guarda.intentar()) return;
     onSave({
       kind: form.kind,
       legalName: form.legalName,

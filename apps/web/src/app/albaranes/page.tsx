@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import { crearGuardaEnvio } from '@/lib/envio-unico';
 import {
   DELIVERY_NOTE_STATUSES,
   DELIVERY_NOTE_STATUS_LABELS,
@@ -111,6 +112,12 @@ function NoteFormModal({
     setDescription(note?.description ?? '');
   }, [open, note]);
 
+  // Guarda de doble envío: se libera al terminar la mutación (éxito o error).
+  const [guarda] = useState(crearGuardaEnvio);
+  useEffect(() => {
+    if (!saving) guarda.liberar();
+  }, [saving, guarda]);
+
   return (
     <Modal
       open={open}
@@ -125,6 +132,7 @@ function NoteFormModal({
         className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
+          if (saving || !guarda.intentar()) return;
           onSave({
             contactId,
             projectId: projectId || null,

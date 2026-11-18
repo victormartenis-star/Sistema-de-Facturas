@@ -1,7 +1,8 @@
 'use client';
 
 import { useMutation } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { crearGuardaEnvio } from '@/lib/envio-unico';
 import type { ContactDto, ProjectDto, PurchaseOrderDto } from '@erp/shared';
 import { ApiError, purchaseOrdersApi } from '@/lib/api';
 import { useAvisarError, useToast } from '@/components/toast';
@@ -117,6 +118,12 @@ export function OrderFormModal({
       <p className="mt-1 text-xs text-red-600">{fieldErrors[name]}</p>
     ) : null;
 
+  // Guarda de doble envío: se libera al terminar la mutación (éxito o error).
+  const [guarda] = useState(crearGuardaEnvio);
+  useEffect(() => {
+    if (!save.isPending) guarda.liberar();
+  }, [save.isPending, guarda]);
+
   return (
     <Modal
       open
@@ -127,6 +134,7 @@ export function OrderFormModal({
         className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
+          if (save.isPending || !guarda.intentar()) return;
           setFieldErrors({});
           save.mutate();
         }}
