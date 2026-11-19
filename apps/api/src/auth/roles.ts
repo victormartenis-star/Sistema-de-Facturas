@@ -40,14 +40,20 @@ export class RolesGuard implements CanActivate {
     // `@Roles` significa "cualquier usuario autenticado".
     if (user && isPortalRole(user.role)) {
       if (!required || !required.includes(user.role)) {
-        throw new ForbiddenException('No tienes permiso para esta operación');
+        throw new ForbiddenException({
+          code: 'PERMISSION_DENIED',
+          message: 'No tienes permiso para esta operación',
+        });
       }
       return true;
     }
 
     if (!required || required.length === 0) return true;
     if (!user || !required.includes(user.role)) {
-      throw new ForbiddenException('No tienes permiso para esta operación');
+      throw new ForbiddenException({
+        code: 'PERMISSION_DENIED',
+        message: 'No tienes permiso para esta operación',
+      });
     }
     return true;
   }

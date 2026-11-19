@@ -63,7 +63,10 @@ export class UsersService {
       return toDto(row);
     } catch (err) {
       if ((err as { code?: string }).code === UNIQUE_VIOLATION) {
-        throw new ConflictException('Ya existe un usuario con ese email');
+        throw new ConflictException({
+          code: 'USER_EMAIL_DUPLICATED',
+          message: 'Ya existe un usuario con ese email',
+        });
       }
       throw err;
     }
@@ -83,7 +86,11 @@ export class UsersService {
         ),
       )
       .returning();
-    if (!row) throw new NotFoundException('Usuario no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'USER_NOT_FOUND',
+        message: 'Usuario no encontrado',
+      });
     return toDto(row);
   }
 
@@ -100,7 +107,11 @@ export class UsersService {
         ),
       )
       .returning({ id: users.id });
-    if (!row) throw new NotFoundException('Usuario no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'USER_NOT_FOUND',
+        message: 'Usuario no encontrado',
+      });
     // Revocar acceso a obras del usuario eliminado
     await this.dbs.db
       .delete(userProjectAccess)
@@ -166,7 +177,11 @@ export class UsersService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Usuario no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'USER_NOT_FOUND',
+        message: 'Usuario no encontrado',
+      });
     return row;
   }
 }

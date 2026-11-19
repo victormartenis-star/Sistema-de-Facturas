@@ -81,7 +81,10 @@ export class AuthService {
 
     // Rechazo rápido (camino normal con el registro cerrado): sin hash ni bloqueo.
     if ((await this.contarUsuarios(this.dbs.db, companyId)) > 0) {
-      throw new ForbiddenException(MSG_REGISTRO_CERRADO);
+      throw new ForbiddenException({
+        code: 'REGISTRATION_CLOSED',
+        message: MSG_REGISTRO_CERRADO,
+      });
     }
     const passwordHash = await hashPassword(input.password);
     const role: UserRole = 'admin';
@@ -93,7 +96,10 @@ export class AuthService {
           sql`select pg_advisory_xact_lock(hashtext(${'bootstrap-registro:' + companyId}))`,
         );
         if ((await this.contarUsuarios(tx, companyId)) > 0) {
-          throw new ForbiddenException(MSG_REGISTRO_CERRADO);
+          throw new ForbiddenException({
+            code: 'REGISTRATION_CLOSED',
+            message: MSG_REGISTRO_CERRADO,
+          });
         }
         const [row] = await tx
           .insert(users)
@@ -109,7 +115,10 @@ export class AuthService {
       });
     } catch (err) {
       if ((err as { code?: string }).code === UNIQUE_VIOLATION) {
-        throw new ConflictException('Ya existe un usuario con ese email');
+        throw new ConflictException({
+          code: 'USER_EMAIL_DUPLICATED',
+          message: 'Ya existe un usuario con ese email',
+        });
       }
       throw err;
     }
@@ -133,7 +142,10 @@ export class AuthService {
     const ok =
       user && (await verifyPassword(input.password, user.passwordHash));
     if (!user || !ok) {
-      throw new UnauthorizedException('Email o contraseña incorrectos');
+      throw new UnauthorizedException({
+        code: 'INVALID_CREDENTIALS',
+        message: 'Email o contraseña incorrectos',
+      });
     }
     await this.dbs.db
       .update(users)
@@ -160,7 +172,10 @@ export class AuthService {
       )
       .limit(1);
     if (!row) {
-      throw new UnauthorizedException('Refresh token no válido o caducado');
+      throw new UnauthorizedException({
+        code: 'INVALID_REFRESH_TOKEN',
+        message: 'Refresh token no válido o caducado',
+      });
     }
     await db
       .update(refreshTokens)
@@ -186,7 +201,10 @@ export class AuthService {
   verifyAccessToken(token: string): AccessTokenPayload {
     const payload = verifyJwt<AccessTokenPayload>(token, this.secret);
     if (!payload?.sub) {
-      throw new UnauthorizedException('Token no válido o caducado');
+      throw new UnauthorizedException({
+        code: 'INVALID_ACCESS_TOKEN',
+        message: 'Token no válido o caducado',
+      });
     }
     return payload;
   }
@@ -198,7 +216,10 @@ export class AuthService {
       .where(and(eq(users.id, userId), isNull(users.deletedAt)))
       .limit(1);
     if (!user || !user.isActive) {
-      throw new UnauthorizedException('Usuario no disponible');
+      throw new UnauthorizedException({
+        code: 'USER_UNAVAILABLE',
+        message: 'Usuario no disponible',
+      });
     }
     return toUserDto(user);
   }
@@ -220,11 +241,17 @@ export class AuthService {
       .where(and(eq(users.id, userId), isNull(users.deletedAt)))
       .limit(1);
     if (!user || !user.isActive) {
-      throw new UnauthorizedException('Usuario no disponible');
+      throw new UnauthorizedException({
+        code: 'USER_UNAVAILABLE',
+        message: 'Usuario no disponible',
+      });
     }
     const ok = await verifyPassword(currentPassword, user.passwordHash);
     if (!ok) {
-      throw new UnauthorizedException('La contraseña actual no es correcta');
+      throw new UnauthorizedException({
+        code: 'CURRENT_PASSWORD_INCORRECT',
+        message: 'La contraseña actual no es correcta',
+      });
     }
     await this.dbs.db
       .update(users)

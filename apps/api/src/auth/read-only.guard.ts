@@ -43,6 +43,9 @@ export class ReadOnlyGuard implements CanActivate {
     );
     if (permitido) return true;
 
-    throw new ForbiddenException('Tu perfil es de solo lectura');
+    throw new ForbiddenException({
+      code: 'READ_ONLY_PROFILE',
+      message: 'Tu perfil es de solo lectura',
+    });
   }
 }

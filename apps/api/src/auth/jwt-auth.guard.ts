@@ -34,7 +34,10 @@ export class JwtAuthGuard implements CanActivate {
     const header = req.headers.authorization;
     const [scheme, token] = header?.split(' ') ?? [];
     if (scheme !== 'Bearer' || !token) {
-      throw new UnauthorizedException('Falta la cabecera Authorization');
+      throw new UnauthorizedException({
+        code: 'AUTHORIZATION_HEADER_MISSING',
+        message: 'Falta la cabecera Authorization',
+      });
     }
     req.user = this.auth.verifyAccessToken(token);
     return true;

@@ -30,9 +30,10 @@ export class DbService implements OnModuleDestroy {
   getCompanyId(): string {
     const ctx = getRequestContext();
     if (!ctx) {
-      throw new UnauthorizedException(
-        'No hay usuario autenticado en el contexto de la petición',
-      );
+      throw new UnauthorizedException({
+        code: 'NO_AUTHENTICATED_USER',
+        message: 'No hay usuario autenticado en el contexto de la petición',
+      });
     }
     return ctx.companyId;
   }
@@ -44,9 +45,10 @@ export class DbService implements OnModuleDestroy {
   getContext() {
     const ctx = getRequestContext();
     if (!ctx) {
-      throw new UnauthorizedException(
-        'No hay usuario autenticado en el contexto de la petición',
-      );
+      throw new UnauthorizedException({
+        code: 'NO_AUTHENTICATED_USER',
+        message: 'No hay usuario autenticado en el contexto de la petición',
+      });
     }
     return ctx;
   }
@@ -88,9 +90,10 @@ export class DbService implements OnModuleDestroy {
       .where(eq(users.id, ctx.userId))
       .limit(1);
     if (!row?.contactId) {
-      throw new UnauthorizedException(
-        'Este usuario de portal no tiene una subcontrata asignada',
-      );
+      throw new UnauthorizedException({
+        code: 'PORTAL_USER_WITHOUT_SUBCONTRACT',
+        message: 'Este usuario de portal no tiene una subcontrata asignada',
+      });
     }
     return row.contactId;
   }
