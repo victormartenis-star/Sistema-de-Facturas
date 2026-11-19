@@ -2,7 +2,13 @@ import { HttpException, INestApplication } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { auditChainHeads, auditLog, getDb, projects } from '@erp/db';
 import { AuditService } from '../../src/audit/audit.service';
-import { authed, createProject, createTestApp, registerUser } from './helpers';
+import {
+  authed,
+  createProject,
+  createTestApp,
+  ifMatch,
+  registerUser,
+} from './helpers';
 import { resetTestDb, seedCompany } from './reset-db';
 import {
   AUDIT_GENESIS_HASH,
@@ -308,6 +314,7 @@ describe('Auditoría (integración) — cadena hash por empresa', () => {
     const obra = await createProject(app, admin.accessToken);
     await authed(app, admin.accessToken)
       .delete(`/projects/${obra.id}`)
+      .set('If-Match', ifMatch(obra.version))
       .expect(204);
     const filas = await cadenaDe(companyId);
     expect(filas.map((f) => f.action)).toEqual(['create', 'delete']);

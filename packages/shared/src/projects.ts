@@ -80,4 +80,6 @@ export interface ProjectDto {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Versión para control optimista (If-Match). */
+  version: number;
 }

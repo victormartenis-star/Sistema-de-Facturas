@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { and, asc, eq, ilike, isNull, or, SQL } from 'drizzle-orm';
-import { Contact, contacts } from '@erp/db';
+import { Contact, contacts, DbOrTx } from '@erp/db';
 import {
   ContactCreateInput,
   ContactDto,
@@ -13,7 +13,22 @@ import {
   contactCreateSchema,
   contactUpdateSchema,
 } from '@erp/shared';
+import { AuditService } from '../audit/audit.service';
+import {
+  condicionVersion,
+  falloActualizacion,
+  incrementarVersion,
+  verificarVersion,
+} from '../common/version';
 import { DbService } from '../db/db.service';
+
+/** 404 de contacto con su código de dominio. */
+function contactoNoEncontrado(): NotFoundException {
+  return new NotFoundException({
+    code: 'CONTACT_NOT_FOUND',
+    message: 'Contacto no encontrado',
+  });
+}
 
 function toDto(row: Contact): ContactDto {
   return {
@@ -29,6 +44,7 @@ function toDto(row: Contact): ContactDto {
     defaultCategoryId: row.defaultCategoryId,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    version: row.version,
   };
 }
 
@@ -36,7 +52,10 @@ const UNIQUE_VIOLATION = '23505';
 
 @Injectable()
 export class ContactsService {
-  constructor(private readonly dbs: DbService) {}
+  constructor(
+    private readonly dbs: DbService,
+    private readonly audit: AuditService,
+  ) {}
 
   async list(search?: string, kind?: ContactKind): Promise<ContactDto[]> {
     const companyId = await this.dbs.getCompanyId();
@@ -94,45 +113,127 @@ export class ContactsService {
     }
   }
 
-  async update(id: string, input: ContactUpdateInput): Promise<ContactDto> {
+  async update(
+    id: string,
+    input: ContactUpdateInput,
+    versionEsperada?: number,
+  ): Promise<ContactDto> {
     await this.find(id);
     const data = contactUpdateSchema.parse(input);
+    const companyId = await this.dbs.getCompanyId();
     try {
-      const [row] = await this.dbs.db
-        .update(contacts)
-        .set({
-          ...(data.kind !== undefined && { kind: data.kind }),
-          ...(data.legalName !== undefined && { legalName: data.legalName }),
-          ...(data.tradeName !== undefined && {
-            tradeName: data.tradeName ?? null,
-          }),
-          ...(data.taxId !== undefined && { taxId: data.taxId || null }),
-          ...(data.email !== undefined && { email: data.email ?? null }),
-          ...(data.phone !== undefined && { phone: data.phone ?? null }),
-          ...(data.iban !== undefined && { iban: data.iban || null }),
-          ...(data.paymentTermsDays !== undefined && {
-            paymentTermsDays: data.paymentTermsDays,
-          }),
-          ...(data.defaultCategoryId !== undefined && {
-            defaultCategoryId: data.defaultCategoryId ?? null,
-          }),
-          updatedAt: new Date(),
-        })
-        .where(eq(contacts.id, id))
-        .returning();
+      const row = await this.dbs.db.transaction(async (tx) => {
+        const actual = await this.bloquearContacto(tx, id, companyId);
+        verificarVersion(actual.version, versionEsperada);
+        const [actualizado] = await tx
+          .update(contacts)
+          .set({
+            ...(data.kind !== undefined && { kind: data.kind }),
+            ...(data.legalName !== undefined && { legalName: data.legalName }),
+            ...(data.tradeName !== undefined && {
+              tradeName: data.tradeName ?? null,
+            }),
+            ...(data.taxId !== undefined && { taxId: data.taxId || null }),
+            ...(data.email !== undefined && { email: data.email ?? null }),
+            ...(data.phone !== undefined && { phone: data.phone ?? null }),
+            ...(data.iban !== undefined && { iban: data.iban || null }),
+            ...(data.paymentTermsDays !== undefined && {
+              paymentTermsDays: data.paymentTermsDays,
+            }),
+            ...(data.defaultCategoryId !== undefined && {
+              defaultCategoryId: data.defaultCategoryId ?? null,
+            }),
+            version: incrementarVersion(contacts),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(contacts.id, id),
+              condicionVersion(contacts, versionEsperada),
+            ),
+          )
+          .returning();
+        if (!actualizado) {
+          return falloActualizacion(
+            tx,
+            contacts,
+            id,
+            versionEsperada,
+            () => contactoNoEncontrado(),
+            'Contacto no encontrado',
+          );
+        }
+        await this.audit.registrar(tx, {
+          entityType: 'contact',
+          entityId: id,
+          action: 'update',
+          newData: actualizado,
+        });
+        return actualizado;
+      });
       return toDto(row);
     } catch (err) {
       this.rethrowDuplicateTaxId(err, data.taxId ?? '');
     }
   }
 
-  /** Borrado lógico; el histórico de facturas seguirá apuntando al contacto. */
-  async remove(id: string): Promise<void> {
+  /** Borrado lógico (deleted_at); el histórico de facturas sigue apuntando al contacto. Versionado. */
+  async remove(id: string, versionEsperada?: number): Promise<void> {
     await this.find(id);
-    await this.dbs.db
-      .update(contacts)
-      .set({ deletedAt: new Date(), updatedAt: new Date() })
-      .where(eq(contacts.id, id));
+    const companyId = await this.dbs.getCompanyId();
+    await this.dbs.db.transaction(async (tx) => {
+      const actual = await this.bloquearContacto(tx, id, companyId);
+      verificarVersion(actual.version, versionEsperada);
+      const [borrado] = await tx
+        .update(contacts)
+        .set({
+          deletedAt: new Date(),
+          updatedAt: new Date(),
+          version: incrementarVersion(contacts),
+        })
+        .where(
+          and(eq(contacts.id, id), condicionVersion(contacts, versionEsperada)),
+        )
+        .returning();
+      if (!borrado) {
+        await falloActualizacion(
+          tx,
+          contacts,
+          id,
+          versionEsperada,
+          () => contactoNoEncontrado(),
+          'Contacto no encontrado',
+        );
+      }
+      await this.audit.registrar(tx, {
+        entityType: 'contact',
+        entityId: id,
+        action: 'delete',
+        oldData: actual,
+      });
+    });
+  }
+
+  /** Lee la fila con bloqueo (FOR UPDATE) dentro de la transacción; 404 si no es de la empresa o está borrada. */
+  private async bloquearContacto(
+    tx: DbOrTx,
+    id: string,
+    companyId: string,
+  ): Promise<Contact> {
+    const [fila] = await tx
+      .select()
+      .from(contacts)
+      .where(
+        and(
+          eq(contacts.id, id),
+          eq(contacts.companyId, companyId),
+          isNull(contacts.deletedAt),
+        ),
+      )
+      .for('update')
+      .limit(1);
+    if (!fila) throw contactoNoEncontrado();
+    return fila;
   }
 
   private async find(id: string): Promise<Contact> {
@@ -149,7 +250,7 @@ export class ContactsService {
       )
       .limit(1);
     if (!row) {
-      throw new NotFoundException('Contacto no encontrado');
+      throw contactoNoEncontrado();
     }
     return row;
   }
@@ -160,9 +261,10 @@ export class ContactsService {
       'code' in err &&
       (err as { code?: string }).code === UNIQUE_VIOLATION
     ) {
-      throw new ConflictException(
-        `Ya existe un contacto con el NIF/CIF "${taxId}"`,
-      );
+      throw new ConflictException({
+        code: 'CONTACT_TAX_ID_DUPLICATED',
+        message: `Ya existe un contacto con el NIF/CIF "${taxId}"`,
+      });
     }
     throw err;
   }

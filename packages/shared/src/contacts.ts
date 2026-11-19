@@ -57,6 +57,8 @@ export interface ContactDto {
   defaultCategoryId: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Versión para control optimista (If-Match). */
+  version: number;
 }
 
 export interface CategoryDto {

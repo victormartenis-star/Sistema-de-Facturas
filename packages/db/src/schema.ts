@@ -76,6 +76,7 @@ export const projects = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
+    version: integer('version').notNull().default(1),
   },
   // Único parcial: permite reutilizar el código de una obra borrada lógicamente
   (t) => [
@@ -146,6 +147,7 @@ export const contacts = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
+    version: integer('version').notNull().default(1),
   },
   // Único parcial: un NIF/CIF activo por empresa (los borrados no bloquean)
   (t) => [

@@ -18,6 +18,7 @@ import {
   contactCreateSchema,
   contactUpdateSchema,
 } from '@erp/shared';
+import { VersionEsperada } from '../common/version';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { ContactsService } from './contacts.service';
 
@@ -51,13 +52,17 @@ export class ContactsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(contactUpdateSchema))
     body: ContactUpdateInput,
+    @VersionEsperada({ exigible: true }) version?: number,
   ) {
-    return this.service.update(id, body);
+    return this.service.update(id, body, version);
   }
 
   @Delete(':id')
   @HttpCode(204)
-  async remove(@Param('id', ParseUUIDPipe) id: string) {
-    await this.service.remove(id);
+  async remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @VersionEsperada({ exigible: true }) version?: number,
+  ) {
+    await this.service.remove(id, version);
   }
 }

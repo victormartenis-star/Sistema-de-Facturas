@@ -13,7 +13,21 @@ import {
   ProjectUpdateInput,
 } from '@erp/shared';
 import { AuditService } from '../audit/audit.service';
+import {
+  condicionVersion,
+  falloActualizacion,
+  incrementarVersion,
+  verificarVersion,
+} from '../common/version';
 import { DbService } from '../db/db.service';
+
+/** 404 de obra con su código de dominio (existe, es de otra empresa o está borrada). */
+function obraNoEncontrada(): NotFoundException {
+  return new NotFoundException({
+    code: 'PROJECT_NOT_FOUND',
+    message: 'Obra no encontrada',
+  });
+}
 
 function toDto(row: Project): ProjectDto {
   return {
@@ -29,6 +43,7 @@ function toDto(row: Project): ProjectDto {
     notes: row.notes,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    version: row.version,
   };
 }
 
@@ -108,10 +123,31 @@ export class ProjectsService {
     }
   }
 
-  async update(id: string, input: ProjectUpdateInput): Promise<ProjectDto> {
+  async update(
+    id: string,
+    input: ProjectUpdateInput,
+    versionEsperada?: number,
+  ): Promise<ProjectDto> {
     await this.find(id);
+    const companyId = await this.dbs.getCompanyId();
     try {
       const row = await this.dbs.db.transaction(async (tx) => {
+        // Se bloquea la fila y se valida la versión antes de escribir: dos
+        // ediciones concurrentes no se pisan en silencio (control optimista).
+        const [actual] = await tx
+          .select()
+          .from(projects)
+          .where(
+            and(
+              eq(projects.id, id),
+              eq(projects.companyId, companyId),
+              isNull(projects.deletedAt),
+            ),
+          )
+          .for('update')
+          .limit(1);
+        if (!actual) throw obraNoEncontrada();
+        verificarVersion(actual.version, versionEsperada);
         const [actualizada] = await tx
           .update(projects)
           .set({
@@ -131,10 +167,26 @@ export class ProjectsService {
               retentionPct: input.retentionPct.toFixed(2),
             }),
             ...(input.notes !== undefined && { notes: input.notes ?? null }),
+            version: incrementarVersion(projects),
             updatedAt: new Date(),
           })
-          .where(eq(projects.id, id))
+          .where(
+            and(
+              eq(projects.id, id),
+              condicionVersion(projects, versionEsperada),
+            ),
+          )
           .returning();
+        if (!actualizada) {
+          return falloActualizacion(
+            tx,
+            projects,
+            id,
+            versionEsperada,
+            () => obraNoEncontrada(),
+            'Obra no encontrada',
+          );
+        }
         await this.audit.registrar(tx, {
           entityType: 'project',
           entityId: id,
@@ -149,19 +201,51 @@ export class ProjectsService {
     }
   }
 
-  /** Borrado lógico (deleted_at), como marca 02-base-de-datos.md. */
-  async remove(id: string): Promise<void> {
-    const existing = await this.find(id);
+  /** Borrado lógico (deleted_at), como marca 02-base-de-datos.md. Versionado. */
+  async remove(id: string, versionEsperada?: number): Promise<void> {
+    await this.find(id);
+    const companyId = await this.dbs.getCompanyId();
     await this.dbs.db.transaction(async (tx) => {
-      await tx
+      const [actual] = await tx
+        .select()
+        .from(projects)
+        .where(
+          and(
+            eq(projects.id, id),
+            eq(projects.companyId, companyId),
+            isNull(projects.deletedAt),
+          ),
+        )
+        .for('update')
+        .limit(1);
+      if (!actual) throw obraNoEncontrada();
+      verificarVersion(actual.version, versionEsperada);
+      const [borrada] = await tx
         .update(projects)
-        .set({ deletedAt: new Date(), updatedAt: new Date() })
-        .where(eq(projects.id, id));
+        .set({
+          deletedAt: new Date(),
+          updatedAt: new Date(),
+          version: incrementarVersion(projects),
+        })
+        .where(
+          and(eq(projects.id, id), condicionVersion(projects, versionEsperada)),
+        )
+        .returning();
+      if (!borrada) {
+        await falloActualizacion(
+          tx,
+          projects,
+          id,
+          versionEsperada,
+          () => obraNoEncontrada(),
+          'Obra no encontrada',
+        );
+      }
       await this.audit.registrar(tx, {
         entityType: 'project',
         entityId: id,
         action: 'delete',
-        oldData: existing,
+        oldData: actual,
       });
     });
   }
