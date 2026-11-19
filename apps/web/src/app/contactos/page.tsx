@@ -79,7 +79,7 @@ export default function ContactosPage() {
   const saveMutation = useMutation({
     mutationFn: (values: ContactFormValues) =>
       editing
-        ? contactsApi.update(editing.id, values)
+        ? contactsApi.update(editing.id, values, editing.version)
         : contactsApi.create(values),
     onSuccess: () => {
       toast(editing ? 'Contacto actualizado' : 'Contacto creado');
@@ -89,7 +89,7 @@ export default function ContactosPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => contactsApi.remove(id),
+    mutationFn: (c: ContactDto) => contactsApi.remove(c.id, c.version),
     onSuccess: () => {
       toast('Contacto eliminado');
       qc.invalidateQueries({ queryKey: ['contacts'] });
@@ -301,7 +301,7 @@ export default function ContactosPage() {
         title={`¿Eliminar el contacto "${deleteTarget?.legalName ?? ''}"?`}
         description="Podrás recuperarlo más adelante: es un borrado lógico."
         loading={deleteMutation.isPending}
-        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget)}
         onCancel={() => setDeleteTarget(null)}
       />
     </div>

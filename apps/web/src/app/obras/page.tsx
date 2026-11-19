@@ -59,7 +59,7 @@ export default function ObrasPage() {
   const saveMutation = useMutation({
     mutationFn: (values: ProjectFormValues) =>
       editing
-        ? projectsApi.update(editing.id, values)
+        ? projectsApi.update(editing.id, values, editing.version)
         : projectsApi.create(values),
     onSuccess: () => {
       toast(editing ? 'Obra actualizada' : 'Obra creada');
@@ -69,7 +69,7 @@ export default function ObrasPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => projectsApi.remove(id),
+    mutationFn: (p: ProjectDto) => projectsApi.remove(p.id, p.version),
     onSuccess: () => {
       toast('Obra eliminada');
       qc.invalidateQueries({ queryKey: ['projects'] });
@@ -269,7 +269,7 @@ export default function ObrasPage() {
         title={`¿Eliminar la obra "${deleteTarget?.name ?? ''}"?`}
         description={`Código ${deleteTarget?.code ?? ''}. Podrás recuperarla más adelante: es un borrado lógico.`}
         loading={deleteMutation.isPending}
-        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget)}
         onCancel={() => setDeleteTarget(null)}
       />
     </div>

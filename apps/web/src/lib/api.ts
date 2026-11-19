@@ -397,13 +397,17 @@ export const projectsApi = {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  update: (id: string, input: ProjectUpdateInput) =>
+  update: (id: string, input: ProjectUpdateInput, version: number) =>
     request<ProjectDto>(`/projects/${id}`, {
       method: 'PATCH',
+      headers: ifMatch(version),
       body: JSON.stringify(input),
     }),
-  remove: (id: string) =>
-    request<void>(`/projects/${id}`, { method: 'DELETE' }),
+  remove: (id: string, version: number) =>
+    request<void>(`/projects/${id}`, {
+      method: 'DELETE',
+      headers: ifMatch(version),
+    }),
 };
 
 export const contactsApi = {
@@ -419,13 +423,17 @@ export const contactsApi = {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  update: (id: string, input: ContactUpdateInput) =>
+  update: (id: string, input: ContactUpdateInput, version: number) =>
     request<ContactDto>(`/contacts/${id}`, {
       method: 'PATCH',
+      headers: ifMatch(version),
       body: JSON.stringify(input),
     }),
-  remove: (id: string) =>
-    request<void>(`/contacts/${id}`, { method: 'DELETE' }),
+  remove: (id: string, version: number) =>
+    request<void>(`/contacts/${id}`, {
+      method: 'DELETE',
+      headers: ifMatch(version),
+    }),
 };
 
 export const categoriesApi = {
