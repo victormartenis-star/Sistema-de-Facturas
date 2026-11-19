@@ -35,6 +35,15 @@ export function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/**
+ * Suma de importes en céntimos enteros: evita que la coma flotante deje
+ * restos (p. ej. 1335.2499999999998 en lugar de 1335.25) en totales visibles.
+ */
+export function sumarImportes(importes: readonly number[]): number {
+  const centimos = importes.reduce((acc, n) => acc + Math.round(n * 100), 0);
+  return centimos / 100;
+}
+
 /** Tolerancia de cuadre entre importes: un céntimo de redondeo. */
 export const MATCHING_TOLERANCE = 0.01;
 

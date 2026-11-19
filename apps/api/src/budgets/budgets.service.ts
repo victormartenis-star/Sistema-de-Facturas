@@ -43,6 +43,7 @@ import {
   lineAmountCents,
   motivoTransicionInvalida,
   round2,
+  sumarImportes,
 } from '@erp/shared';
 import { cambiarEstado, cambiarEstadoMasivo } from '../common/cambiar-estado';
 import { DbService } from '../db/db.service';
@@ -398,7 +399,7 @@ export class BudgetsService {
       return {
         copy: created,
         count: items.length,
-        total: items.reduce((sum, item) => sum + Number(item.totalAmount), 0),
+        total: sumarImportes(items.map((item) => Number(item.totalAmount))),
       };
     });
 
@@ -479,7 +480,7 @@ export class BudgetsService {
 
     const dto = budgetToDto(
       budget,
-      round2(items.reduce((s, i) => s + i.totalAmount, 0)),
+      sumarImportes(items.map((i) => i.totalAmount)),
       items.length,
     );
 

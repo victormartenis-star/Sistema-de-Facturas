@@ -16,6 +16,7 @@ import {
   planRectificationMilestones,
   repartirImporte,
   round2,
+  sumarImportes,
   startOfMonth,
   startOfWeek,
 } from './calculo';
@@ -603,5 +604,22 @@ describe('repartirImporte', () => {
     expect(repartirImporte(5, [0, 0])).toEqual([5, 0]);
     expect(repartirImporte(0, [])).toEqual([]);
     expect(() => repartirImporte(1, [])).toThrow(RangeError);
+  });
+});
+
+describe('sumarImportes', () => {
+  it('suma importes de céntimos sin error de coma flotante', () => {
+    // Con suma directa en coma flotante queda 1335.2499999999998.
+    expect(
+      sumarImportes([0.1, 0.2, 0.3, 1234.56, 0.07, 99.99, 0.01, 0.01, 0.01]),
+    ).toBe(1335.25);
+  });
+
+  it('vacío es 0', () => {
+    expect(sumarImportes([])).toBe(0);
+  });
+
+  it('admite importes negativos (rectificativas) sin deriva', () => {
+    expect(sumarImportes([10.1, -0.1, 0.2])).toBe(10.2);
   });
 });
