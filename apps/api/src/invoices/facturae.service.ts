@@ -78,19 +78,24 @@ export class FacturaeService {
     const invoice = await this.invoicesService.get(invoiceId);
 
     if (invoice.kind !== 'venta') {
-      throw new BadRequestException(
-        'Facturae solo se genera para facturas de venta (el documento que emite la propia empresa)',
-      );
+      throw new BadRequestException({
+        code: 'FACTURAE_NOT_SALES_INVOICE',
+        message:
+          'Facturae solo se genera para facturas de venta (el documento que emite la propia empresa)',
+      });
     }
     if (invoice.status === 'borrador') {
-      throw new BadRequestException(
-        'No se puede generar Facturae de una factura en borrador: apruébala primero',
-      );
+      throw new BadRequestException({
+        code: 'FACTURAE_INVOICE_DRAFT',
+        message:
+          'No se puede generar Facturae de una factura en borrador: apruébala primero',
+      });
     }
     if (invoice.status === 'anulada') {
-      throw new BadRequestException(
-        'No se puede generar Facturae de una factura anulada',
-      );
+      throw new BadRequestException({
+        code: 'FACTURAE_INVOICE_CANCELLED',
+        message: 'No se puede generar Facturae de una factura anulada',
+      });
     }
 
     const corrective = invoice.rectifiesInvoiceId
@@ -104,12 +109,17 @@ export class FacturaeService {
       .where(eq(companies.id, companyId))
       .limit(1);
     if (!company) {
-      throw new NotFoundException('Empresa no encontrada');
+      throw new NotFoundException({
+        code: 'COMPANY_NOT_FOUND',
+        message: 'Empresa no encontrada',
+      });
     }
     if (!company.taxId?.trim()) {
-      throw new BadRequestException(
-        'La empresa no tiene NIF/CIF configurado: es obligatorio para Facturae',
-      );
+      throw new BadRequestException({
+        code: 'COMPANY_TAX_ID_MISSING',
+        message:
+          'La empresa no tiene NIF/CIF configurado: es obligatorio para Facturae',
+      });
     }
 
     const [contact] = await this.dbs.db
@@ -124,12 +134,16 @@ export class FacturaeService {
       )
       .limit(1);
     if (!contact) {
-      throw new NotFoundException('Contacto no encontrado');
+      throw new NotFoundException({
+        code: 'CONTACT_NOT_FOUND',
+        message: 'Contacto no encontrado',
+      });
     }
     if (!contact.taxId?.trim()) {
-      throw new BadRequestException(
-        `El cliente "${contact.legalName}" no tiene NIF/CIF registrado: es obligatorio para Facturae`,
-      );
+      throw new BadRequestException({
+        code: 'CONTACT_TAX_ID_MISSING',
+        message: `El cliente "${contact.legalName}" no tiene NIF/CIF registrado: es obligatorio para Facturae`,
+      });
     }
 
     const seller: FacturaeParty = {
@@ -219,14 +233,18 @@ export class FacturaeService {
   ): Promise<FacturaeCorrectiveInput> {
     const reasonCode = invoice.facturaeReasonCode;
     if (!reasonCode || !Object.hasOwn(FACTURAE_REASON_CODES, reasonCode)) {
-      throw new ConflictException(
-        'La rectificativa no tiene código de motivo Facturae (rectificativa anterior a esta regla o generada desde una certificación): no se puede generar su Facturae',
-      );
+      throw new ConflictException({
+        code: 'CORRECTIVE_REASON_CODE_MISSING',
+        message:
+          'La rectificativa no tiene código de motivo Facturae (rectificativa anterior a esta regla o generada desde una certificación): no se puede generar su Facturae',
+      });
     }
     if (!invoice.rectificationType) {
-      throw new ConflictException(
-        'La rectificativa no tiene tipo de rectificación (S/I): no se puede generar su Facturae',
-      );
+      throw new ConflictException({
+        code: 'CORRECTIVE_TYPE_MISSING',
+        message:
+          'La rectificativa no tiene tipo de rectificación (S/I): no se puede generar su Facturae',
+      });
     }
     const [original] = await this.dbs.db
       .select({
@@ -242,14 +260,18 @@ export class FacturaeService {
       )
       .limit(1);
     if (!original) {
-      throw new ConflictException(
-        'No se encuentra la factura original que rectifica: no se puede generar su Facturae',
-      );
+      throw new ConflictException({
+        code: 'CORRECTIVE_ORIGINAL_NOT_FOUND',
+        message:
+          'No se encuentra la factura original que rectifica: no se puede generar su Facturae',
+      });
     }
     if (original.invoiceNumber.length > 20) {
-      throw new ConflictException(
-        'El número de la factura original supera los 20 caracteres que admite Facturae en el bloque Corrective',
-      );
+      throw new ConflictException({
+        code: 'CORRECTIVE_ORIGINAL_NUMBER_TOO_LONG',
+        message:
+          'El número de la factura original supera los 20 caracteres que admite Facturae en el bloque Corrective',
+      });
     }
     return {
       originalNumber: original.invoiceNumber,
@@ -347,9 +369,10 @@ export class FacturaeService {
         if (row.verifactuStatus === 'enviado') {
           // La huella de un registro ya notificado a la AEAT es inmutable:
           // recalcularla rompería la cadena que la AEAT ya tiene.
-          throw new ConflictException(
-            `Integridad VeriFactu: la factura ${row.invoiceNumber} ya fue enviada a la AEAT y su huella no coincide con la cadena actual (se añadió o cambió una factura anterior). No se recalcula; revisa la cadena antes de continuar`,
-          );
+          throw new ConflictException({
+            code: 'VERIFACTU_CHAIN_BROKEN',
+            message: `Integridad VeriFactu: la factura ${row.invoiceNumber} ya fue enviada a la AEAT y su huella no coincide con la cadena actual (se añadió o cambió una factura anterior). No se recalcula; revisa la cadena antes de continuar`,
+          });
         }
         generatedAt = row.createdAt.toISOString();
         const canonical = verifactuCanonicalString(
@@ -387,9 +410,10 @@ export class FacturaeService {
       previousHash = hash;
     }
     if (!target) {
-      throw new NotFoundException(
-        'Factura no encontrada al reconstruir la cadena VeriFactu',
-      );
+      throw new NotFoundException({
+        code: 'INVOICE_NOT_FOUND',
+        message: 'Factura no encontrada al reconstruir la cadena VeriFactu',
+      });
     }
     return target;
   }

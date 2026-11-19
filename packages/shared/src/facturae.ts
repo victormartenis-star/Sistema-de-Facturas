@@ -1,4 +1,4 @@
-import { round2 } from './calculo';
+import { round2, sumarImportes } from './calculo';
 import { ISP_LEGEND, type RectificationType } from './invoices';
 import {
   FACTURAE_REASON_CODES,
@@ -248,7 +248,7 @@ function taxXml(vatPct: number, base: number, amount: number): string {
  */
 function taxesOutputsXml(lines: FacturaeLineInput[], isp: boolean): string {
   if (isp) {
-    const base = round2(lines.reduce((s, l) => s + l.baseAmount, 0));
+    const base = sumarImportes(lines.map((l) => l.baseAmount));
     return `<TaxesOutputs>${taxXml(0, base, 0)}
       </TaxesOutputs>`;
   }

@@ -65,7 +65,7 @@ import {
   payableAmount,
   planMilestones,
   planRectificationMilestones,
-  round2,
+  sumarImportes,
   sumCents,
   todayIso,
   toCents,
@@ -625,9 +625,7 @@ export class InvoicesService {
             'No se puede aprobar: la factura de compra no tiene albaranes asociados. Vincula los albaranes validados del proveedor.',
         });
       }
-      const notesTotal = round2(
-        notes.reduce((s, n) => s + Number(n.amount), 0),
-      );
+      const notesTotal = sumarImportes(notes.map((n) => Number(n.amount)));
       const base = Number(invoice.baseAmount);
       if (!amountsMatch(notesTotal, base)) {
         throw new ConflictException({

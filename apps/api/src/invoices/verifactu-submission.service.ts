@@ -76,24 +76,31 @@ export class VerifactuSubmissionService {
   async send(invoiceId: string): Promise<VerifactuSubmissionResultDto> {
     const invoice = await this.invoicesService.get(invoiceId);
     if (invoice.kind !== 'venta') {
-      throw new BadRequestException(
-        'VeriFactu solo se genera para facturas de venta',
-      );
+      throw new BadRequestException({
+        code: 'VERIFACTU_NOT_SALES_INVOICE',
+        message: 'VeriFactu solo se genera para facturas de venta',
+      });
     }
     if (invoice.rectifiesInvoiceId) {
-      throw new ConflictException(
-        'VeriFactu de facturas rectificativas no soportado todavía: no se emite como F1',
-      );
+      throw new ConflictException({
+        code: 'VERIFACTU_RECTIFICATIVE_UNSUPPORTED',
+        message:
+          'VeriFactu de facturas rectificativas no soportado todavía: no se emite como F1',
+      });
     }
     if (invoice.verifactuStatus === 'enviado') {
-      throw new ConflictException(
-        'El registro VeriFactu de esta factura ya fue enviado a la AEAT: no se reenvía',
-      );
+      throw new ConflictException({
+        code: 'VERIFACTU_ALREADY_SENT',
+        message:
+          'El registro VeriFactu de esta factura ya fue enviado a la AEAT: no se reenvía',
+      });
     }
     if (invoice.status === 'borrador' || invoice.status === 'anulada') {
-      throw new BadRequestException(
-        'La factura debe estar aprobada para generar su registro VeriFactu',
-      );
+      throw new BadRequestException({
+        code: 'VERIFACTU_INVOICE_NOT_APPROVED',
+        message:
+          'La factura debe estar aprobada para generar su registro VeriFactu',
+      });
     }
 
     const companyId = this.dbs.getCompanyId();
@@ -102,11 +109,17 @@ export class VerifactuSubmissionService {
       .from(companies)
       .where(eq(companies.id, companyId))
       .limit(1);
-    if (!company) throw new NotFoundException('Empresa no encontrada');
+    if (!company)
+      throw new NotFoundException({
+        code: 'COMPANY_NOT_FOUND',
+        message: 'Empresa no encontrada',
+      });
     if (!company.taxId?.trim()) {
-      throw new BadRequestException(
-        'La empresa no tiene NIF/CIF configurado: es obligatorio para VeriFactu',
-      );
+      throw new BadRequestException({
+        code: 'COMPANY_TAX_ID_MISSING',
+        message:
+          'La empresa no tiene NIF/CIF configurado: es obligatorio para VeriFactu',
+      });
     }
 
     const chain = await this.facturaeService.computeVerifactuChain(
