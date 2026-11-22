@@ -440,10 +440,15 @@ export const invoices = pgTable(
       .where(sql`kind = 'venta' AND deleted_at IS NULL`),
     // Una sola factura de compra viva por certificación de subcontrata: una
     // anulada o rectificada deja de contar y permite volver a generarla.
+    // El predicado enumera los estados vivos en vez de excluir 'rectificada':
+    // ese valor se añade al enum en la 0030 y Postgres no deja usarlo en la
+    // misma transacción, y drizzle aplica todas las migraciones pendientes en
+    // una sola (rompía `db:migrate` sobre una base vacía). Al añadir un estado
+    // nuevo a `invoice_status`, revisa esta lista.
     uniqueIndex('invoices_cert_subcontrata_activa_unique')
       .on(t.certSubcontrataId)
       .where(
-        sql`cert_subcontrata_id IS NOT NULL AND deleted_at IS NULL AND status NOT IN ('anulada', 'rectificada')`,
+        sql`cert_subcontrata_id IS NOT NULL AND deleted_at IS NULL AND status IN ('borrador', 'aprobada', 'pagada')`,
       ),
     index('invoices_company_cert_subcontrata_idx')
       .on(t.companyId, t.certSubcontrataId)

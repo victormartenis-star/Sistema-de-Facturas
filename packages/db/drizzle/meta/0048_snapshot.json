@@ -6778,7 +6778,7 @@
             }
           ],
           "isUnique": true,
-          "where": "cert_subcontrata_id IS NOT NULL AND deleted_at IS NULL AND status NOT IN ('anulada', 'rectificada')",
+          "where": "cert_subcontrata_id IS NOT NULL AND deleted_at IS NULL AND status IN ('borrador', 'aprobada', 'pagada')",
           "concurrently": false,
           "method": "btree",
           "with": {}
