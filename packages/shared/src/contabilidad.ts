@@ -46,6 +46,8 @@ export const ORIGENES_ASIENTO = [
   'cobro',
   'pago',
   'anulacion',
+  'amortizacion',
+  'baja_inmovilizado',
 ] as const;
 export type OrigenAsiento = (typeof ORIGENES_ASIENTO)[number];
 
@@ -56,6 +58,8 @@ export const ORIGEN_ASIENTO_LABELS: Record<OrigenAsiento, string> = {
   cobro: 'Cobro',
   pago: 'Pago',
   anulacion: 'Contra-asiento',
+  amortizacion: 'Amortización',
+  baja_inmovilizado: 'Baja de inmovilizado',
 };
 
 export const ESTADOS_ASIENTO = ['contabilizado', 'anulado'] as const;
@@ -112,12 +116,25 @@ export function planContableBase(): CuentaPlan[] {
     c('1290', 'Resultado del ejercicio', 'patrimonio'),
     c('170', 'Deudas a largo plazo con entidades de crédito', 'pasivo'),
     c('1700', 'Préstamos a largo plazo', 'pasivo'),
+    c('212', 'Instalaciones técnicas', 'activo'),
+    c('2120', 'Instalaciones técnicas', 'activo'),
     c('213', 'Maquinaria', 'activo'),
     c('2130', 'Maquinaria', 'activo'),
+    c('214', 'Utillaje', 'activo'),
+    c('2140', 'Utillaje', 'activo'),
+    c('217', 'Equipos para procesos de información', 'activo'),
+    c('2170', 'Equipos para procesos de información', 'activo'),
     c('218', 'Elementos de transporte', 'activo'),
     c('2180', 'Elementos de transporte', 'activo'),
     c('281', 'Amortización acumulada del inmovilizado material', 'activo'),
+    c('2812', 'Amortización acumulada de instalaciones técnicas', 'activo'),
     c('2813', 'Amortización acumulada de maquinaria', 'activo'),
+    c('2814', 'Amortización acumulada de utillaje', 'activo'),
+    c('2817', 'Amortización acumulada de equipos informáticos', 'activo'),
+    c('2818', 'Amortización acumulada de elementos de transporte', 'activo'),
+    c('2819', 'Amortización acumulada de otro inmovilizado', 'activo'),
+    c('219', 'Otro inmovilizado material', 'activo'),
+    c('2190', 'Otro inmovilizado material', 'activo'),
     c('300', 'Existencias de materiales', 'activo'),
     c('3000', 'Materiales en almacén', 'activo'),
     c('400', 'Proveedores', 'pasivo'),
@@ -152,12 +169,16 @@ export function planContableBase(): CuentaPlan[] {
     c('6400', 'Sueldos y salarios', 'gasto'),
     c('642', 'Seguridad Social a cargo de la empresa', 'gasto'),
     c('6420', 'Seguridad Social a cargo de la empresa', 'gasto'),
+    c('671', 'Pérdidas procedentes del inmovilizado material', 'gasto'),
+    c('6710', 'Pérdidas procedentes del inmovilizado material', 'gasto'),
     c('681', 'Amortización del inmovilizado material', 'gasto'),
     c('6810', 'Amortización del inmovilizado material', 'gasto'),
     c('700', 'Ventas', 'ingreso'),
     c('7000', 'Ventas de mercaderías', 'ingreso'),
     c('705', 'Prestaciones de servicios', 'ingreso'),
     c('7050', 'Ejecución de obra', 'ingreso'),
+    c('771', 'Beneficios procedentes del inmovilizado material', 'ingreso'),
+    c('7710', 'Beneficios procedentes del inmovilizado material', 'ingreso'),
   ];
 }
 

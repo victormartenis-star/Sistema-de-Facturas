@@ -358,6 +358,13 @@
       "when": 1795343474072,
       "tag": "0050_liquidaciones_parciales",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1795349310216,
+      "tag": "0051_activos_fijos",
+      "breakpoints": true
     }
   ]
 }

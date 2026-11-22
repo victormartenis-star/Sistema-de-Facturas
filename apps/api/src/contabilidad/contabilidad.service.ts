@@ -76,7 +76,7 @@ const LOTE_INTERFAZ = 500;
 /** Máximo de movimientos que devuelve el libro mayor en una consulta. */
 const LIMITE_MAYOR = 2000;
 
-interface NuevoAsiento {
+export interface NuevoAsiento {
   companyId: string;
   fecha: string;
   concepto: string;
@@ -374,6 +374,16 @@ export class ContabilidadService {
       newData: { ...asiento, lineas: a.lineas },
     });
     return asiento;
+  }
+
+  /**
+   * Asiento generado por otro módulo (amortización, baja de inmovilizado)
+   * dentro de SU transacción: mismas reglas de cuadre, cuentas, período
+   * cerrado y numeración que cualquier asiento. Asegura antes el plan base.
+   */
+  async contabilizarEnTx(tx: Tx, a: NuevoAsiento): Promise<JournalEntry> {
+    await this.asegurarPlan(tx, a.companyId);
+    return this.contabilizar(tx, a);
   }
 
   async crearAsientoManual(input: AsientoCreateInput): Promise<AsientoDto> {

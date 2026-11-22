@@ -3619,6 +3619,8 @@ export const journalEntrySourceEnum = pgEnum('journal_entry_source', [
   'cobro',
   'pago',
   'anulacion',
+  'amortizacion',
+  'baja_inmovilizado',
 ]);
 
 export const journalEntryStatusEnum = pgEnum('journal_entry_status', [
@@ -3800,3 +3802,124 @@ export const paymentSettlements = pgTable(
 );
 
 export type PaymentSettlement = typeof paymentSettlements.$inferSelect;
+
+/* ───────────────── Activos fijos (inmovilizado material) ─────────────────
+ * Ficha del activo (opcionalmente ligada a una máquina de `equipos`) y sus
+ * cuotas de amortización contabilizadas. Reglas puras en `calculo.ts`
+ * (`cuadroAmortizacion`, `resultadoBaja`); contrato en `@erp/shared/activos`.
+ */
+
+export const fixedAssetCategoryEnum = pgEnum('fixed_asset_category', [
+  'maquinaria',
+  'transporte',
+  'utillaje',
+  'instalaciones',
+  'informatica',
+  'otros',
+]);
+
+export const fixedAssetStatusEnum = pgEnum('fixed_asset_status', [
+  'activo',
+  'baja',
+]);
+
+export const fixedAssets = pgTable(
+  'fixed_assets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    code: varchar('code', { length: 30 }).notNull(),
+    name: varchar('name', { length: 160 }).notNull(),
+    category: fixedAssetCategoryEnum('category').notNull(),
+    equipoId: uuid('equipo_id').references(() => equipos.id),
+    /** Obra a la que se imputa la amortización (centro de coste). */
+    projectId: uuid('project_id').references(() => projects.id),
+    acquisitionDate: date('acquisition_date').notNull(),
+    /** Puesta en servicio: la amortización empieza ese mes. */
+    startDate: date('start_date').notNull(),
+    cost: numeric('cost', { precision: 14, scale: 2 }).notNull(),
+    residualValue: numeric('residual_value', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    usefulLifeMonths: integer('useful_life_months').notNull(),
+    status: fixedAssetStatusEnum('status').notNull().default('activo'),
+    disposalDate: date('disposal_date'),
+    disposalAmount: numeric('disposal_amount', { precision: 14, scale: 2 }),
+    disposalReason: varchar('disposal_reason', { length: 240 }),
+    disposalEntryId: uuid('disposal_entry_id').references(
+      () => journalEntries.id,
+    ),
+    notes: text('notes'),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('fixed_assets_company_code_unique').on(t.companyId, t.code),
+    // Una máquina solo puede ser un activo.
+    uniqueIndex('fixed_assets_equipo_unique')
+      .on(t.equipoId)
+      .where(sql`equipo_id IS NOT NULL`),
+    index('fixed_assets_company_status_idx').on(t.companyId, t.status),
+    check(
+      'fixed_assets_importes',
+      sql`${t.cost} > 0 AND ${t.residualValue} >= 0 AND ${t.residualValue} <= ${t.cost} AND ${t.usefulLifeMonths} > 0`,
+    ),
+    check('fixed_assets_fechas', sql`${t.startDate} >= ${t.acquisitionDate}`),
+    check(
+      'fixed_assets_baja_coherencia',
+      sql`(${t.status} = 'baja') = (${t.disposalDate} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export type FixedAsset = typeof fixedAssets.$inferSelect;
+
+/** Cuota de amortización contabilizada: una por activo y mes (idempotente). */
+export const fixedAssetDepreciations = pgTable(
+  'fixed_asset_depreciations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    assetId: uuid('asset_id')
+      .notNull()
+      .references(() => fixedAssets.id, { onDelete: 'restrict' }),
+    year: smallint('year').notNull(),
+    month: smallint('month').notNull(),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    journalEntryId: uuid('journal_entry_id').references(
+      () => journalEntries.id,
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('fixed_asset_depreciations_asset_period_unique').on(
+      t.assetId,
+      t.year,
+      t.month,
+    ),
+    index('fixed_asset_depreciations_company_period_idx').on(
+      t.companyId,
+      t.year,
+      t.month,
+    ),
+    check(
+      'fixed_asset_depreciations_mes',
+      sql`${t.month} BETWEEN 1 AND 12 AND ${t.amount} > 0`,
+    ),
+  ],
+);
+
+export type FixedAssetDepreciation =
+  typeof fixedAssetDepreciations.$inferSelect;

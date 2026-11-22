@@ -22,6 +22,9 @@ import {
   importeLiquidacionConSigno,
   motivoLiquidacionInvalida,
   resumenLiquidacion,
+  clavePeriodo,
+  cuadroAmortizacion,
+  resultadoBaja,
 } from './calculo';
 
 describe('round2', () => {
@@ -686,5 +689,54 @@ describe('liquidaciones parciales', () => {
     ).toBeNull();
     expect(importeLiquidacionConSigno('-100.00', 40)).toBe(-4000n);
     expect(importeLiquidacionConSigno('100.00', 40)).toBe(4000n);
+  });
+});
+
+describe('amortización lineal', () => {
+  it('reparte la base exacta en céntimos y cierra en el residual', () => {
+    const c = cuadroAmortizacion({
+      coste: '10000.00',
+      residual: '1000.00',
+      vidaMeses: 7,
+      inicio: '2026-11-15',
+    });
+    expect(c).toHaveLength(7);
+    expect(c[0]).toMatchObject({ ejercicio: 2026, mes: 11, cuota: 1285.72 });
+    expect(c[2]).toMatchObject({ ejercicio: 2027, mes: 1 });
+    expect(c.at(-1)).toMatchObject({ acumulada: 9000, valorNeto: 1000 });
+    expect(sumarImportes(c.map((x) => x.cuota))).toBe(9000);
+  });
+
+  it('rechaza vida útil no válida y residual mayor que el coste', () => {
+    expect(() =>
+      cuadroAmortizacion({
+        coste: 1,
+        residual: 0,
+        vidaMeses: 0,
+        inicio: '2026-01-01',
+      }),
+    ).toThrow(RangeError);
+    expect(() =>
+      cuadroAmortizacion({
+        coste: 1,
+        residual: 2,
+        vidaMeses: 1,
+        inicio: '2026-01-01',
+      }),
+    ).toThrow(RangeError);
+  });
+
+  it('resultado de la baja: beneficio o pérdida frente al valor neto', () => {
+    expect(
+      resultadoBaja({ coste: 10000, acumulada: 6000, importeVenta: 5000 }),
+    ).toEqual({
+      valorNeto: 4000,
+      resultado: 1000,
+    });
+    expect(
+      resultadoBaja({ coste: 10000, acumulada: 6000, importeVenta: 0 })
+        .resultado,
+    ).toBe(-4000);
+    expect(clavePeriodo(2026, 3)).toBe('2026-03');
   });
 });

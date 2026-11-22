@@ -36,6 +36,7 @@ import { TrabajadoresModule } from './modules/trabajadores/trabajadores.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { TreasuryModule } from './treasury/treasury.module';
 import { ContabilidadModule } from './contabilidad/contabilidad.module';
+import { ActivosModule } from './activos/activos.module';
 import { EsgModule } from './modules/esg/esg.module';
 import { FleetIotModule } from './modules/fleet-iot/fleet-iot.module';
 import { ChangeOrdersModule } from './modules/change-orders/change-orders.module';
@@ -80,6 +81,7 @@ import { InformesModule } from './modules/informes/informes.module';
     DeliveryNotesModule,
     TreasuryModule,
     ContabilidadModule,
+    ActivosModule,
     OcrModule,
     ComplianceModule,
     BudgetsModule,

@@ -48,6 +48,8 @@ export const AUDIT_ENTITY_TYPES = [
   'journal_entry',
   'ledger_account',
   'fiscal_period',
+  'fixed_asset',
+  'fixed_asset_depreciation',
   'iot_lectura_telemetria',
   'mantenimiento_equipo',
   'parte_maquinaria',

@@ -15,6 +15,11 @@ import type {
   PeriodoContableDto,
   ResultadoInterfazDto,
   SumasSaldosDto,
+  ActivoBajaInput,
+  ActivoCreateInput,
+  ActivoDetalleDto,
+  ActivoDto,
+  ResultadoAmortizacionDto,
 } from '@erp/shared';
 import type {
   CertSubcontrataCreateInput,
@@ -2071,4 +2076,29 @@ export const contabilidadApi = {
       `/contabilidad/periodos/${ejercicio}/${mes}/${accion}`,
       { method: 'POST' },
     ),
+};
+
+/* ───────────────────────── Activos fijos ───────────────────────── */
+
+export const activosApi = {
+  listar: (f: { estado?: string; categoria?: string; q?: string } = {}) =>
+    request<ActivoDto[]>(`/activos${qs(f)}`),
+  detalle: (id: string) => request<ActivoDetalleDto>(`/activos/${id}`),
+  crear: (input: ActivoCreateInput, clave: string) =>
+    request<ActivoDetalleDto>('/activos', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: idempotencyKey(clave),
+    }),
+  amortizar: (hasta: string) =>
+    request<ResultadoAmortizacionDto>('/activos/amortizar', {
+      method: 'POST',
+      body: JSON.stringify({ hasta }),
+    }),
+  baja: (id: string, input: ActivoBajaInput, version: number, clave: string) =>
+    request<ActivoDetalleDto>(`/activos/${id}/baja`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: { ...ifMatch(version), ...idempotencyKey(clave) },
+    }),
 };

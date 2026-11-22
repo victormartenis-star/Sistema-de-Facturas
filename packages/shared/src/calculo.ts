@@ -713,3 +713,77 @@ export function importeLiquidacionConSigno(
   const c = toCents(cantidad);
   return toCents(importeVencimiento) < 0n ? -c : c;
 }
+
+/* ───────────────────── amortización de activos fijos ───────────────────── */
+
+export interface CuotaAmortizacion {
+  ejercicio: number;
+  mes: number;
+  cuota: number;
+  acumulada: number;
+  valorNeto: number;
+}
+
+/**
+ * Cuadro de amortización lineal mensual (método lineal, PGC): la base
+ * amortizable (`coste − residual`) se reparte en `vidaMeses` cuotas desde el
+ * mes de puesta en servicio, mes completo. Exacto en céntimos: los céntimos
+ * sobrantes van a las primeras cuotas (regla de resto mayor de
+ * `repartirCents`), así que la suma de cuotas es exactamente la base.
+ */
+export function cuadroAmortizacion(p: {
+  coste: string | number;
+  residual: string | number;
+  vidaMeses: number;
+  inicio: string;
+}): CuotaAmortizacion[] {
+  if (!Number.isInteger(p.vidaMeses) || p.vidaMeses <= 0) {
+    throw new RangeError('La vida útil debe ser un número entero de meses > 0');
+  }
+  const coste = toCents(p.coste);
+  const base = coste - toCents(p.residual);
+  if (base < 0n) throw new RangeError('El valor residual supera el coste');
+  const cuotas = repartirCents(
+    base,
+    Array.from({ length: p.vidaMeses }, () => 1n),
+  );
+  let [y, m] = p.inicio.split('-').map(Number);
+  let acumulada = 0n;
+  return cuotas.map((c) => {
+    acumulada += c;
+    const fila = {
+      ejercicio: y,
+      mes: m,
+      cuota: fromCents(c),
+      acumulada: fromCents(acumulada),
+      valorNeto: fromCents(coste - acumulada),
+    };
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+    return fila;
+  });
+}
+
+/** Clave ordenable `AAAA-MM` de un período. */
+export function clavePeriodo(ejercicio: number, mes: number): string {
+  return `${ejercicio}-${String(mes).padStart(2, '0')}`;
+}
+
+/**
+ * Resultado de la baja de un activo: valor neto contable y beneficio
+ * (positivo) o pérdida (negativo) frente al importe obtenido.
+ */
+export function resultadoBaja(p: {
+  coste: string | number;
+  acumulada: string | number;
+  importeVenta: string | number;
+}): { valorNeto: number; resultado: number } {
+  const neto = toCents(p.coste) - toCents(p.acumulada);
+  return {
+    valorNeto: fromCents(neto),
+    resultado: fromCents(toCents(p.importeVenta) - neto),
+  };
+}

@@ -66,6 +66,7 @@ const GESTION: NavItem[] = [
   { href: '/albaranes', label: 'Albaranes', icon: IconInbox },
   { href: '/tesoreria', label: 'Tesorería', icon: IconWallet },
   { href: '/contabilidad', label: 'Contabilidad', icon: IconCalculator },
+  { href: '/activos', label: 'Activos fijos', icon: IconCalculator },
   {
     href: '/tesoreria/conciliacion',
     label: 'Conciliación bancaria',

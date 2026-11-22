@@ -19,6 +19,8 @@ import type { InvoiceStatus } from './invoices';
 import { INVOICE_TRANSITIONS } from './invoices';
 import type { PurchaseOrderStatus } from './purchase-orders';
 import { PURCHASE_ORDER_TRANSITIONS } from './purchase-orders';
+import type { EstadoActivo } from './activos';
+import { ACTIVO_TRANSITIONS } from './activos';
 import type { EstadoAsiento } from './contabilidad';
 import { ASIENTO_TRANSITIONS } from './contabilidad';
 import type { MilestoneStatus, SettlementStatus } from './treasury';
@@ -63,6 +65,7 @@ export interface EstadoPorEntidad {
   cert_subcontrata: CertSubcontrataStatus;
   journal_entry: EstadoAsiento;
   settlement: SettlementStatus;
+  fixed_asset: EstadoActivo;
 }
 
 export type EntidadConEstado = keyof EstadoPorEntidad;
@@ -109,6 +112,8 @@ function tablaDe(entidad: EntidadConEstado): Record<string, readonly string[]> {
       return ASIENTO_TRANSITIONS;
     case 'settlement':
       return SETTLEMENT_TRANSITIONS;
+    case 'fixed_asset':
+      return ACTIVO_TRANSITIONS;
   }
 }
 
