@@ -69,7 +69,10 @@ export class ProveedoresService {
       )
       .limit(1);
     if (!row) {
-      throw new NotFoundException('Proveedor no encontrado');
+      throw new NotFoundException({
+        code: 'SUPPLIER_NOT_FOUND',
+        message: 'Proveedor no encontrado',
+      });
     }
     return row;
   }
@@ -91,9 +94,10 @@ export class ProveedoresService {
       .limit(1);
 
     if (existing) {
-      throw new ConflictException(
-        `Ya existe un proveedor con el CIF/NIF ${body.cifNif} en esta empresa`,
-      );
+      throw new ConflictException({
+        code: 'SUPPLIER_TAX_ID_DUPLICATED',
+        message: `Ya existe un proveedor con el CIF/NIF ${body.cifNif} en esta empresa`,
+      });
     }
 
     const [row] = await this.db
@@ -192,9 +196,11 @@ export class ProveedoresService {
       .limit(1);
 
     if (contrato) {
-      throw new ConflictException(
-        'No se puede eliminar el proveedor: tiene contratos activos. Cierra o anula los contratos primero.',
-      );
+      throw new ConflictException({
+        code: 'SUPPLIER_HAS_ACTIVE_CONTRACTS',
+        message:
+          'No se puede eliminar el proveedor: tiene contratos activos. Cierra o anula los contratos primero.',
+      });
     }
 
     await this.db
@@ -240,9 +246,10 @@ export class ProveedoresService {
       )
       .limit(1);
     if (existing) {
-      throw new ConflictException(
-        `Ya existe un contrato con el número ${body.numeroContrato} en esta empresa`,
-      );
+      throw new ConflictException({
+        code: 'CONTRACT_NUMBER_DUPLICATED',
+        message: `Ya existe un contrato con el número ${body.numeroContrato} en esta empresa`,
+      });
     }
 
     const [row] = await this.db
@@ -308,7 +315,10 @@ export class ProveedoresService {
       )
       .returning();
     if (!row) {
-      throw new NotFoundException('Contrato no encontrado');
+      throw new NotFoundException({
+        code: 'CONTRACT_NOT_FOUND',
+        message: 'Contrato no encontrado',
+      });
     }
     return row;
   }
@@ -399,9 +409,11 @@ export class ProveedoresService {
     if (!proveedor) return;
     const { apto, razones } = await this.validarAptoParaPago(proveedor.id);
     if (apto) return;
-    throw new ConflictException(
-      `No se puede ${action}: ${proveedor.razonSocial} no está apto por PRL. ` +
+    throw new ConflictException({
+      code: 'SUPPLIER_PRL_NOT_APT',
+      message:
+        `No se puede ${action}: ${proveedor.razonSocial} no está apto por PRL. ` +
         `${razones.join('; ')}.`,
-    );
+    });
   }
 }

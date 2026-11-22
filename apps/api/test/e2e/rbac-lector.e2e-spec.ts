@@ -6,6 +6,7 @@ import {
   authed,
   createProject,
   createTestApp,
+  ifMatch,
   loginUser,
   registerUser,
 } from './helpers';
@@ -127,9 +128,10 @@ describe('RBAC rol lector (integración) — solo lectura', () => {
           role: 'administracion',
         })
         .expect(201)
-    ).body as { id: string };
+    ).body as { id: string; version: number };
     const res = await authed(app, adminToken)
       .patch(`/users/${otro.id}`)
+      .set('If-Match', ifMatch(otro.version))
       .send({ role: 'lector' })
       .expect(200);
     expect((res.body as { role: string }).role).toBe('lector');

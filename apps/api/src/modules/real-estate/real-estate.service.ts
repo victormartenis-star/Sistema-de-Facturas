@@ -246,9 +246,11 @@ export class RealEstateService {
   async removeUnit(id: string): Promise<void> {
     const { unit } = await this.findUnit(id);
     if (unit.status !== 'disponible') {
-      throw new BadRequestException(
-        'Solo se pueden eliminar unidades disponibles (sin reserva/venta)',
-      );
+      throw new BadRequestException({
+        code: 'UNIT_NOT_DELETABLE',
+        message:
+          'Solo se pueden eliminar unidades disponibles (sin reserva/venta)',
+      });
     }
     await this.dbs.db
       .update(realEstateUnits)
@@ -310,9 +312,10 @@ export class RealEstateService {
     const data = realEstateReservationCreateSchema.parse(input);
     const { unit } = await this.findUnit(data.unitId);
     if (unit.status !== 'disponible') {
-      throw new BadRequestException(
-        `La unidad "${unit.code}" no está disponible (estado actual: ${unit.status})`,
-      );
+      throw new BadRequestException({
+        code: 'UNIT_NOT_AVAILABLE',
+        message: `La unidad "${unit.code}" no está disponible (estado actual: ${unit.status})`,
+      });
     }
     const buyer = await this.findContact(data.buyerContactId);
 
@@ -354,9 +357,11 @@ export class RealEstateService {
       reservation.status === 'escriturada' ||
       reservation.status === 'cancelada'
     ) {
-      throw new BadRequestException(
-        'No se puede cancelar una reserva ya escriturada o ya cancelada',
-      );
+      throw new BadRequestException({
+        code: 'RESERVATION_NOT_CANCELLABLE',
+        message:
+          'No se puede cancelar una reserva ya escriturada o ya cancelada',
+      });
     }
     const data = realEstateReservationCancelSchema.parse(input);
 
@@ -387,9 +392,11 @@ export class RealEstateService {
   ): Promise<RealEstateReservationDto> {
     const { reservation, unit, buyerName } = await this.findReservation(id);
     if (reservation.status !== 'reservada') {
-      throw new BadRequestException(
-        'Solo se puede firmar el contrato de una reserva en estado "reservada"',
-      );
+      throw new BadRequestException({
+        code: 'RESERVATION_NOT_SIGNABLE',
+        message:
+          'Solo se puede firmar el contrato de una reserva en estado "reservada"',
+      });
     }
     const data = realEstateReservationContractSchema.parse(input);
     const [row] = await this.dbs.db
@@ -410,9 +417,11 @@ export class RealEstateService {
   ): Promise<RealEstateReservationDto> {
     const { reservation, unit, buyerName } = await this.findReservation(id);
     if (reservation.status !== 'contrato_firmado') {
-      throw new BadRequestException(
-        'Solo se puede escriturar una reserva con el contrato privado ya firmado',
-      );
+      throw new BadRequestException({
+        code: 'RESERVATION_NOT_DEEDABLE',
+        message:
+          'Solo se puede escriturar una reserva con el contrato privado ya firmado',
+      });
     }
     const data = realEstateReservationDeedSchema.parse(input);
 
@@ -475,7 +484,11 @@ export class RealEstateService {
       .set({ status: 'cobrado', paidAt: todayIso(), updatedAt: new Date() })
       .where(eq(realEstatePaymentMilestones.id, id))
       .returning({ id: realEstatePaymentMilestones.id });
-    if (!row) throw new NotFoundException('Vencimiento no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'DUE_NOT_FOUND',
+        message: 'Vencimiento no encontrado',
+      });
   }
 
   /* ────────────────────── entrega de llaves ────────────────────── */
@@ -486,9 +499,10 @@ export class RealEstateService {
   ): Promise<RealEstateKeyHandoverDto> {
     const { reservation } = await this.findReservation(reservationId);
     if (reservation.status !== 'escriturada') {
-      throw new BadRequestException(
-        'Solo se puede entregar llaves de una reserva ya escriturada',
-      );
+      throw new BadRequestException({
+        code: 'RESERVATION_KEYS_NOT_DELIVERABLE',
+        message: 'Solo se puede entregar llaves de una reserva ya escriturada',
+      });
     }
     const companyId = await this.dbs.getCompanyId();
     const data = realEstateKeyHandoverCreateSchema.parse(input);
@@ -642,7 +656,11 @@ export class RealEstateService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Unidad no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'UNIT_NOT_FOUND',
+        message: 'Unidad no encontrada',
+      });
     await this.assertProjectAccessible(row.unit.projectId);
     return row;
   }
@@ -675,7 +693,11 @@ export class RealEstateService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Reserva no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'RESERVATION_NOT_FOUND',
+        message: 'Reserva no encontrada',
+      });
     await this.assertProjectAccessible(row.unit.projectId);
     return row;
   }
@@ -709,7 +731,11 @@ export class RealEstateService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Incidencia no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'INCIDENT_NOT_FOUND',
+        message: 'Incidencia no encontrada',
+      });
     return { ...row, reportedByName: row.reportedByName ?? null };
   }
 
@@ -726,7 +752,11 @@ export class RealEstateService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Contacto no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'CONTACT_NOT_FOUND',
+        message: 'Contacto no encontrado',
+      });
     return row;
   }
 
@@ -736,14 +766,21 @@ export class RealEstateService {
       .from(projects)
       .where(eq(projects.id, projectId))
       .limit(1);
-    if (!row) throw new BadRequestException('La obra indicada no existe');
+    if (!row)
+      throw new BadRequestException({
+        code: 'PROJECT_REFERENCE_INVALID',
+        message: 'La obra indicada no existe',
+      });
     return row.code;
   }
 
   private async assertProjectAccessible(projectId: string): Promise<void> {
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
   }
 }

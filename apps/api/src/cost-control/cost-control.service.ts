@@ -739,7 +739,10 @@ export class CostControlService {
     const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && projectIds.some((id) => !allowed.includes(id))) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
     const rows = await this.dbs.db
       .select()
@@ -753,7 +756,10 @@ export class CostControlService {
       );
     const porId = new Map(rows.map((r) => [r.id, r]));
     if (projectIds.some((id) => !porId.has(id))) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
     return porId;
   }
@@ -762,7 +768,10 @@ export class CostControlService {
     const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
     const [row] = await this.dbs.db
       .select()
@@ -775,7 +784,11 @@ export class CostControlService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Obra no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     return row;
   }
 }

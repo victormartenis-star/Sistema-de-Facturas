@@ -82,7 +82,11 @@ export class IncidenciasPRLService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Incidencia no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'INCIDENT_NOT_FOUND',
+        message: 'Incidencia no encontrada',
+      });
     return row;
   }
 

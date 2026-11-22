@@ -48,9 +48,11 @@ export function parsearIfMatch(
     .replace(/^W\//, '');
   const m = /^"?([1-9]\d{0,8})"?$/.exec(crudo);
   if (!m) {
-    throw new BadRequestException(
-      'Cabecera If-Match no válida: se espera la versión como entero positivo, p. ej. "3"',
-    );
+    throw new BadRequestException({
+      code: 'IF_MATCH_INVALID',
+      message:
+        'Cabecera If-Match no válida: se espera la versión como entero positivo, p. ej. "3"',
+    });
   }
   return Number(m[1]);
 }

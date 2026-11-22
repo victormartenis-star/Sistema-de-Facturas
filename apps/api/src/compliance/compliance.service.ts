@@ -114,10 +114,12 @@ export class ComplianceService {
   async assertCanTransact(contactId: string, action: string): Promise<void> {
     const summary = await this.summaryFor(await this.findContact(contactId));
     if (!summary.blocked) return;
-    throw new ConflictException(
-      `No se puede ${action}: ${summary.legalName} está bloqueado. ` +
+    throw new ConflictException({
+      code: 'CONTACT_BLOCKED_FOR_TRANSACTION',
+      message:
+        `No se puede ${action}: ${summary.legalName} está bloqueado. ` +
         `${summary.reasons.join('; ')}. Aporta la documentación o concede una exención justificada.`,
-    );
+    });
   }
 
   async addDoc(
@@ -232,9 +234,10 @@ export class ComplianceService {
     await this.assertVisible(contactId);
     const data = complianceWaiverSchema.parse(input);
     if (daysUntil(data.validUntil) < 0) {
-      throw new ConflictException(
-        'La exención debe tener una fecha de caducidad futura',
-      );
+      throw new ConflictException({
+        code: 'COMPLIANCE_EXEMPTION_EXPIRY_INVALID',
+        message: 'La exención debe tener una fecha de caducidad futura',
+      });
     }
     // Solo una exención activa por contacto: la nueva revoca la anterior
     await this.dbs.db
@@ -415,7 +418,10 @@ export class ComplianceService {
       )
       .limit(1);
     if (!row) {
-      throw new NotFoundException('Contacto no encontrado');
+      throw new NotFoundException({
+        code: 'CONTACT_NOT_FOUND',
+        message: 'Contacto no encontrado',
+      });
     }
     return row;
   }
@@ -506,7 +512,10 @@ export class ComplianceService {
       )
       .limit(1);
     if (!row) {
-      throw new NotFoundException('Documento de homologación no encontrado');
+      throw new NotFoundException({
+        code: 'COMPLIANCE_DOCUMENT_NOT_FOUND',
+        message: 'Documento de homologación no encontrado',
+      });
     }
     await this.assertVisible(row.contactId);
     return row;
@@ -526,7 +535,10 @@ export class ComplianceService {
       allowed.length === 0 ||
       !(await this.touchesProjects(contactId, allowed))
     ) {
-      throw new NotFoundException('Contacto no encontrado');
+      throw new NotFoundException({
+        code: 'CONTACT_NOT_FOUND',
+        message: 'Contacto no encontrado',
+      });
     }
   }
 

@@ -35,11 +35,16 @@ export class BankReconciliationController {
     @Body('bankAccountId', ParseUUIDPipe) bankAccountId: string,
     @Body('format') format: string,
   ) {
-    if (!file) throw new BadRequestException('Falta el fichero del extracto');
+    if (!file)
+      throw new BadRequestException({
+        code: 'BANK_STATEMENT_FILE_REQUIRED',
+        message: 'Falta el fichero del extracto',
+      });
     if (!BANK_STATEMENT_FORMATS.includes(format as BankStatementFormat)) {
-      throw new BadRequestException(
-        `Formato no reconocido: usa ${BANK_STATEMENT_FORMATS.join(' o ')}`,
-      );
+      throw new BadRequestException({
+        code: 'BANK_STATEMENT_FORMAT_UNSUPPORTED',
+        message: `Formato no reconocido: usa ${BANK_STATEMENT_FORMATS.join(' o ')}`,
+      });
     }
     return this.service.importStatement(
       bankAccountId,

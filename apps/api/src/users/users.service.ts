@@ -15,8 +15,21 @@ import {
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
 import { hashPassword } from '../auth/password';
+import {
+  condicionVersion,
+  falloActualizacion,
+  incrementarVersion,
+  verificarVersion,
+} from '../common/version';
 
 const UNIQUE_VIOLATION = '23505';
+
+function usuarioNoEncontrado() {
+  return new NotFoundException({
+    code: 'USER_NOT_FOUND',
+    message: 'Usuario no encontrado',
+  });
+}
 
 function toDto(row: User): UserDto {
   return {
@@ -28,6 +41,7 @@ function toDto(row: User): UserDto {
     contactId: row.contactId,
     isActive: row.isActive,
     createdAt: row.createdAt.toISOString(),
+    version: row.version,
   };
 }
 
@@ -72,46 +86,91 @@ export class UsersService {
     }
   }
 
-  async update(id: string, input: UserUpdateInput): Promise<UserDto> {
+  async update(
+    id: string,
+    input: UserUpdateInput,
+    versionEsperada?: number,
+  ): Promise<UserDto> {
     const companyId = this.dbs.getCompanyId();
     const data = userUpdateSchema.parse(input);
-    const [row] = await this.dbs.db
-      .update(users)
-      .set({ ...data, updatedAt: new Date() })
-      .where(
-        and(
-          eq(users.id, id),
-          eq(users.companyId, companyId),
-          isNull(users.deletedAt),
-        ),
-      )
-      .returning();
-    if (!row)
-      throw new NotFoundException({
-        code: 'USER_NOT_FOUND',
-        message: 'Usuario no encontrado',
-      });
-    return toDto(row);
+    return this.dbs.db.transaction(async (tx) => {
+      // Fila bloqueada y versión validada antes de escribir (control optimista).
+      const [actual] = await tx
+        .select()
+        .from(users)
+        .where(
+          and(
+            eq(users.id, id),
+            eq(users.companyId, companyId),
+            isNull(users.deletedAt),
+          ),
+        )
+        .for('update')
+        .limit(1);
+      if (!actual) throw usuarioNoEncontrado();
+      verificarVersion(actual.version, versionEsperada);
+      const [row] = await tx
+        .update(users)
+        .set({
+          ...data,
+          version: incrementarVersion(users),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(users.id, id), condicionVersion(users, versionEsperada)))
+        .returning();
+      if (!row) {
+        await falloActualizacion(
+          tx,
+          users,
+          id,
+          versionEsperada,
+          () => usuarioNoEncontrado(),
+          'Usuario no encontrado',
+        );
+        throw usuarioNoEncontrado();
+      }
+      return toDto(row);
+    });
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, versionEsperada?: number): Promise<void> {
     const companyId = this.dbs.getCompanyId();
-    const [row] = await this.dbs.db
-      .update(users)
-      .set({ deletedAt: new Date(), updatedAt: new Date() })
-      .where(
-        and(
-          eq(users.id, id),
-          eq(users.companyId, companyId),
-          isNull(users.deletedAt),
-        ),
-      )
-      .returning({ id: users.id });
-    if (!row)
-      throw new NotFoundException({
-        code: 'USER_NOT_FOUND',
-        message: 'Usuario no encontrado',
-      });
+    await this.dbs.db.transaction(async (tx) => {
+      const [actual] = await tx
+        .select()
+        .from(users)
+        .where(
+          and(
+            eq(users.id, id),
+            eq(users.companyId, companyId),
+            isNull(users.deletedAt),
+          ),
+        )
+        .for('update')
+        .limit(1);
+      if (!actual) throw usuarioNoEncontrado();
+      verificarVersion(actual.version, versionEsperada);
+      const [borrado] = await tx
+        .update(users)
+        .set({
+          deletedAt: new Date(),
+          updatedAt: new Date(),
+          version: incrementarVersion(users),
+        })
+        .where(and(eq(users.id, id), condicionVersion(users, versionEsperada)))
+        .returning({ id: users.id });
+      if (!borrado) {
+        await falloActualizacion(
+          tx,
+          users,
+          id,
+          versionEsperada,
+          () => usuarioNoEncontrado(),
+          'Usuario no encontrado',
+        );
+        throw usuarioNoEncontrado();
+      }
+    });
     // Revocar acceso a obras del usuario eliminado
     await this.dbs.db
       .delete(userProjectAccess)

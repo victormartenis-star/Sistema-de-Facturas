@@ -182,7 +182,11 @@ export class TreasuryService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Cuenta no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'ACCOUNT_NOT_FOUND',
+        message: 'Cuenta no encontrada',
+      });
     return row;
   }
 
@@ -286,7 +290,11 @@ export class TreasuryService {
         ),
       )
       .returning({ id: paymentMilestones.id });
-    if (!row) throw new NotFoundException('Vencimiento no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'DUE_NOT_FOUND',
+        message: 'Vencimiento no encontrado',
+      });
   }
 
   /**
@@ -351,7 +359,10 @@ export class TreasuryService {
       )
       .limit(1);
     if (!row) {
-      throw new NotFoundException('Vencimiento no encontrado');
+      throw new NotFoundException({
+        code: 'DUE_NOT_FOUND',
+        message: 'Vencimiento no encontrado',
+      });
     }
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null) {
@@ -365,11 +376,17 @@ export class TreasuryService {
           lines.map((l) => l.projectId),
         )
       ) {
-        throw new NotFoundException('Vencimiento no encontrado');
+        throw new NotFoundException({
+          code: 'DUE_NOT_FOUND',
+          message: 'Vencimiento no encontrado',
+        });
       }
     }
     if (row.status === status) {
-      throw new ConflictException('El vencimiento ya está en ese estado');
+      throw new ConflictException({
+        code: 'DUE_ALREADY_IN_STATE',
+        message: 'El vencimiento ya está en ese estado',
+      });
     }
     // Homologación PRL: no se paga a una subcontrata bloqueada. Reabrir un
     // vencimiento sí se permite siempre (es deshacer, no comprometer dinero).

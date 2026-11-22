@@ -247,7 +247,10 @@ export class DeliveryNotesService {
         const note = await this.lockNote(tx, id);
         verificarVersion(note.version, versionEsperada);
         if (note.orderId !== previa.orderId) {
-          throw new ConflictException('El albarán ha cambiado: recarga');
+          throw new ConflictException({
+            code: 'VERSION_CONFLICT',
+            message: 'El albarán ha cambiado: recarga',
+          });
         }
         const bloqueo = deliveryNoteEditBlockReason(
           {
@@ -297,7 +300,11 @@ export class DeliveryNotesService {
             deliveryNotes,
             id,
             versionEsperada,
-            () => new ConflictException('El albarán ha cambiado: recarga'),
+            () =>
+              new ConflictException({
+                code: 'VERSION_CONFLICT',
+                message: 'El albarán ha cambiado: recarga',
+              }),
             'Albarán no encontrado',
           );
         }
@@ -331,7 +338,10 @@ export class DeliveryNotesService {
     const note = await this.find(id);
     verificarVersion(note.version, versionEsperada);
     if (note.status !== 'pendiente') {
-      throw new ConflictException('Solo se validan albaranes pendientes');
+      throw new ConflictException({
+        code: 'DELIVERY_NOTE_NOT_PENDING',
+        message: 'Solo se validan albaranes pendientes',
+      });
     }
 
     // Transacción con bloqueo (pedido -> albarán): dos validaciones
@@ -347,10 +357,17 @@ export class DeliveryNotesService {
         .from(deliveryNotes)
         .where(and(eq(deliveryNotes.id, id), isNull(deliveryNotes.deletedAt)))
         .for('update');
-      if (!locked) throw new NotFoundException('Albarán no encontrado');
+      if (!locked)
+        throw new NotFoundException({
+          code: 'DELIVERY_NOTE_NOT_FOUND',
+          message: 'Albarán no encontrado',
+        });
       verificarVersion(locked.version, versionEsperada);
       if (locked.status !== 'pendiente') {
-        throw new ConflictException('Solo se validan albaranes pendientes');
+        throw new ConflictException({
+          code: 'DELIVERY_NOTE_NOT_PENDING',
+          message: 'Solo se validan albaranes pendientes',
+        });
       }
 
       const dto = await this.get(id, tx);
@@ -435,7 +452,10 @@ export class DeliveryNotesService {
       const note = await this.lockNote(tx, id);
       verificarVersion(note.version, versionEsperada);
       if (note.orderId !== previa.orderId) {
-        throw new ConflictException('El albarán ha cambiado: recarga');
+        throw new ConflictException({
+          code: 'VERSION_CONFLICT',
+          message: 'El albarán ha cambiado: recarga',
+        });
       }
       const estado = {
         status: note.status as DeliveryNoteStatus,
@@ -467,7 +487,11 @@ export class DeliveryNotesService {
       .from(deliveryNotes)
       .where(and(eq(deliveryNotes.id, id), isNull(deliveryNotes.deletedAt)))
       .for('update');
-    if (!row) throw new NotFoundException('Albarán no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'DELIVERY_NOTE_NOT_FOUND',
+        message: 'Albarán no encontrado',
+      });
     return row;
   }
 
@@ -491,7 +515,10 @@ export class DeliveryNotesService {
       .where(and(eq(deliveryNotes.id, id), isNull(deliveryNotes.deletedAt)))
       .limit(1);
     if (!row) {
-      throw new NotFoundException('Albarán no encontrado');
+      throw new NotFoundException({
+        code: 'DELIVERY_NOTE_NOT_FOUND',
+        message: 'Albarán no encontrado',
+      });
     }
 
     // 3-way match banda 1↔2: importe ya recibido en albaranes validados del pedido
@@ -528,7 +555,10 @@ export class DeliveryNotesService {
       )
       .limit(1);
     if (!row) {
-      throw new NotFoundException('Albarán no encontrado');
+      throw new NotFoundException({
+        code: 'DELIVERY_NOTE_NOT_FOUND',
+        message: 'Albarán no encontrado',
+      });
     }
     // Un usuario restringido por obra solo toca albaranes de sus obras; el
     // 404 (y no 403) no delata que el albarán exista.
@@ -537,7 +567,10 @@ export class DeliveryNotesService {
       allowed !== null &&
       (!row.projectId || !allowed.includes(row.projectId))
     ) {
-      throw new NotFoundException('Albarán no encontrado');
+      throw new NotFoundException({
+        code: 'DELIVERY_NOTE_NOT_FOUND',
+        message: 'Albarán no encontrado',
+      });
     }
     return row;
   }
@@ -548,9 +581,10 @@ export class DeliveryNotesService {
       'code' in err &&
       (err as { code?: string }).code === UNIQUE_VIOLATION
     ) {
-      throw new ConflictException(
-        `Ya existe un albarán con el número "${num}" para ese proveedor`,
-      );
+      throw new ConflictException({
+        code: 'DELIVERY_NOTE_NUMBER_DUPLICATED',
+        message: `Ya existe un albarán con el número "${num}" para ese proveedor`,
+      });
     }
     throw err;
   }

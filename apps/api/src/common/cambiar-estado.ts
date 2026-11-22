@@ -99,7 +99,11 @@ async function fallarCambioEstado(
       .from(tabla as PgTable)
       .where(eq(tabla.id, id))
       .limit(1)) as { version: number }[];
-    if (!fila) throw new NotFoundException('Recurso no encontrado');
+    if (!fila)
+      throw new NotFoundException({
+        code: 'RESOURCE_NOT_FOUND',
+        message: 'Recurso no encontrado',
+      });
     if (Number(fila.version) !== versionEsperada) {
       throw conflictoVersion(Number(fila.version));
     }

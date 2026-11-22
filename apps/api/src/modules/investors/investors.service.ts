@@ -421,9 +421,10 @@ export class InvestorsService {
     const data = distributeDividendSchema.parse(input);
     const participations = await this.participationsForAccount(accountId);
     if (participations.length === 0) {
-      throw new BadRequestException(
-        'La cuenta no tiene inversores dados de alta todavía',
-      );
+      throw new BadRequestException({
+        code: 'INVESTORS_NOT_REGISTERED',
+        message: 'La cuenta no tiene inversores dados de alta todavía',
+      });
     }
 
     const shares = distributeDividend(
@@ -645,7 +646,11 @@ export class InvestorsService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Inversor no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'INVESTOR_NOT_FOUND',
+        message: 'Inversor no encontrado',
+      });
     return row;
   }
 
@@ -663,7 +668,11 @@ export class InvestorsService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Participación no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'INVESTMENT_NOT_FOUND',
+        message: 'Participación no encontrada',
+      });
     return row;
   }
 
@@ -683,7 +692,11 @@ export class InvestorsService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Cuenta no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'ACCOUNT_NOT_FOUND',
+        message: 'Cuenta no encontrada',
+      });
     if (row.account.projectId) {
       await this.assertProjectAccessible(row.account.projectId);
     } else {
@@ -704,7 +717,10 @@ export class InvestorsService {
   private async assertProjectAccessible(projectId: string): Promise<void> {
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
   }
 
@@ -712,7 +728,10 @@ export class InvestorsService {
   private async assertCompanyWideAllowed(): Promise<void> {
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null) {
-      throw new NotFoundException('Cuenta no encontrada');
+      throw new NotFoundException({
+        code: 'ACCOUNT_NOT_FOUND',
+        message: 'Cuenta no encontrada',
+      });
     }
   }
 }

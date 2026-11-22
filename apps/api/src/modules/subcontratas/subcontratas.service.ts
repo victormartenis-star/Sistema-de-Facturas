@@ -401,7 +401,11 @@ export class SubcontratasService {
           certificacionesSubcontrata,
           id,
           versionEsperada,
-          () => new ConflictException('La certificación ha cambiado: recarga'),
+          () =>
+            new ConflictException({
+              code: 'VERSION_CONFLICT',
+              message: 'La certificación ha cambiado: recarga',
+            }),
           'Certificación no encontrada',
         );
       }
@@ -745,7 +749,11 @@ export class SubcontratasService {
           certificacionesSubcontrata,
           id,
           versionEsperada,
-          () => new ConflictException('La certificación ha cambiado: recarga'),
+          () =>
+            new ConflictException({
+              code: 'VERSION_CONFLICT',
+              message: 'La certificación ha cambiado: recarga',
+            }),
           'Certificación no encontrada',
         );
       }

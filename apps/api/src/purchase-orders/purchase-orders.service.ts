@@ -201,9 +201,10 @@ export class PurchaseOrdersService {
     const order = await this.find(id);
     verificarVersion(order.version, versionEsperada);
     if (order.status === 'cerrado' || order.status === 'anulado') {
-      throw new ConflictException(
-        `No se puede editar un pedido ${order.status}`,
-      );
+      throw new ConflictException({
+        code: 'PURCHASE_ORDER_NOT_EDITABLE',
+        message: `No se puede editar un pedido ${order.status}`,
+      });
     }
     const data = purchaseOrderUpdateSchema.parse(input);
     if (data.contactId) await this.assertContactExists(data.contactId);
@@ -247,7 +248,11 @@ export class PurchaseOrdersService {
           purchaseOrders,
           id,
           versionEsperada,
-          () => new ConflictException('El pedido ha cambiado: recarga'),
+          () =>
+            new ConflictException({
+              code: 'VERSION_CONFLICT',
+              message: 'El pedido ha cambiado: recarga',
+            }),
           'Pedido no encontrado',
         );
       }
@@ -273,19 +278,27 @@ export class PurchaseOrdersService {
         .where(
           and(eq(purchaseOrders.id, id), isNull(purchaseOrders.deletedAt)),
         );
-      if (!order) throw new NotFoundException('Pedido no encontrado');
+      if (!order)
+        throw new NotFoundException({
+          code: 'PURCHASE_ORDER_NOT_FOUND',
+          message: 'Pedido no encontrado',
+        });
       verificarVersion(order.version, versionEsperada);
       if (order.status === 'anulado') {
-        throw new ConflictException('El pedido está anulado');
+        throw new ConflictException({
+          code: 'PURCHASE_ORDER_CANCELLED',
+          message: 'El pedido está anulado',
+        });
       }
       const delivered = (await this.deliveredByOrder([id], tx)).get(id);
       const pending = round2(
         (delivered?.deliveredAmount ?? 0) - (delivered?.invoicedAmount ?? 0),
       );
       if (pending > 0) {
-        throw new ConflictException(
-          `No se puede cerrar: quedan ${pending.toFixed(2)} € recibidos sin facturar. Regulariza la factura o anota la incidencia antes de cerrar.`,
-        );
+        throw new ConflictException({
+          code: 'PURCHASE_ORDER_NOT_CLOSABLE',
+          message: `No se puede cerrar: quedan ${pending.toFixed(2)} € recibidos sin facturar. Regulariza la factura o anota la incidencia antes de cerrar.`,
+        });
       }
       // Cerrar un pedido ya cerrado es una transición ilegal (409).
       await cambiarEstado(
@@ -321,13 +334,18 @@ export class PurchaseOrdersService {
         .where(
           and(eq(purchaseOrders.id, id), isNull(purchaseOrders.deletedAt)),
         );
-      if (!order) throw new NotFoundException('Pedido no encontrado');
+      if (!order)
+        throw new NotFoundException({
+          code: 'PURCHASE_ORDER_NOT_FOUND',
+          message: 'Pedido no encontrado',
+        });
       verificarVersion(order.version, versionEsperada);
       const delivered = (await this.deliveredByOrder([id], tx)).get(id);
       if ((delivered?.count ?? 0) > 0) {
-        throw new ConflictException(
-          'No se puede anular un pedido con albaranes imputados',
-        );
+        throw new ConflictException({
+          code: 'PURCHASE_ORDER_HAS_DELIVERY_NOTES',
+          message: 'No se puede anular un pedido con albaranes imputados',
+        });
       }
       if (order.status === 'anulado') return;
       await cambiarEstado(
@@ -353,9 +371,10 @@ export class PurchaseOrdersService {
       await this.bloquearPedidos(tx, [id]);
       const delivered = (await this.deliveredByOrder([id], tx)).get(id);
       if ((delivered?.count ?? 0) > 0) {
-        throw new ConflictException(
-          'No se puede eliminar un pedido con albaranes imputados',
-        );
+        throw new ConflictException({
+          code: 'PURCHASE_ORDER_HAS_DELIVERY_NOTES',
+          message: 'No se puede eliminar un pedido con albaranes imputados',
+        });
       }
       await tx
         .update(purchaseOrders)
@@ -583,7 +602,11 @@ export class PurchaseOrdersService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Pedido no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'PURCHASE_ORDER_NOT_FOUND',
+        message: 'Pedido no encontrado',
+      });
     return row;
   }
 
@@ -600,7 +623,11 @@ export class PurchaseOrdersService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Pedido no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'PURCHASE_ORDER_NOT_FOUND',
+        message: 'Pedido no encontrado',
+      });
     return row;
   }
 
@@ -608,7 +635,10 @@ export class PurchaseOrdersService {
     const companyId = this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
     const [row] = await this.dbs.db
       .select()
@@ -621,7 +651,11 @@ export class PurchaseOrdersService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Obra no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     return row;
   }
 
@@ -638,6 +672,10 @@ export class PurchaseOrdersService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Proveedor no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'SUPPLIER_NOT_FOUND',
+        message: 'Proveedor no encontrado',
+      });
   }
 }

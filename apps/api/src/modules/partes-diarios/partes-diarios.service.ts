@@ -441,7 +441,10 @@ export class PartesDiariosService {
       )
       .limit(1);
     if (!row || (allowed !== null && !allowed.includes(row.projectId))) {
-      throw new NotFoundException('Parte de personal no encontrado');
+      throw new NotFoundException({
+        code: 'PERSONNEL_REPORT_NOT_FOUND',
+        message: 'Parte de personal no encontrado',
+      });
     }
     return row;
   }
@@ -461,7 +464,10 @@ export class PartesDiariosService {
       )
       .limit(1);
     if (!row || (allowed !== null && !allowed.includes(row.projectId))) {
-      throw new NotFoundException('Parte de maquinaria no encontrado');
+      throw new NotFoundException({
+        code: 'MACHINERY_REPORT_NOT_FOUND',
+        message: 'Parte de maquinaria no encontrado',
+      });
     }
     return row;
   }
@@ -478,7 +484,11 @@ export class PartesDiariosService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Equipo no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'EQUIPMENT_NOT_FOUND',
+        message: 'Equipo no encontrado',
+      });
     return row;
   }
 
@@ -494,7 +504,11 @@ export class PartesDiariosService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Trabajador no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'WORKER_NOT_FOUND',
+        message: 'Trabajador no encontrado',
+      });
     return row;
   }
 
@@ -510,7 +524,11 @@ export class PartesDiariosService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Partida no encontrada en esta obra');
+    if (!row)
+      throw new NotFoundException({
+        code: 'BUDGET_ITEM_NOT_FOUND',
+        message: 'Partida no encontrada en esta obra',
+      });
     return row;
   }
 
@@ -518,7 +536,10 @@ export class PartesDiariosService {
     const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
     const [row] = await this.dbs.db
       .select()
@@ -531,7 +552,11 @@ export class PartesDiariosService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Obra no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     return row;
   }
 }

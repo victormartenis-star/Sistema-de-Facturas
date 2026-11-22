@@ -98,7 +98,11 @@ export class ContratosObraService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Contrato no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'CONTRACT_NOT_FOUND',
+        message: 'Contrato no encontrado',
+      });
     return row;
   }
 

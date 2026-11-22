@@ -461,7 +461,11 @@ export class EsgService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Vale RCD no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'RCD_TICKET_NOT_FOUND',
+        message: 'Vale RCD no encontrado',
+      });
     return row;
   }
 
@@ -478,7 +482,11 @@ export class EsgService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Gestor no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'WASTE_MANAGER_NOT_FOUND',
+        message: 'Gestor no encontrado',
+      });
     return row;
   }
 
@@ -489,9 +497,10 @@ export class EsgService {
       'code' in err &&
       (err as { code?: string }).code === '23505'
     ) {
-      throw new ConflictException(
-        `Ya existe un vale con el número "${ticketNumber}" para ese gestor`,
-      );
+      throw new ConflictException({
+        code: 'RCD_TICKET_DUPLICATED',
+        message: `Ya existe un vale con el número "${ticketNumber}" para ese gestor`,
+      });
     }
     throw err;
   }
@@ -511,7 +520,10 @@ export class EsgService {
     return rows.map((row) => {
       const factor = byId.get(row.factorId);
       if (!factor)
-        throw new NotFoundException('Factor de emisión no encontrado');
+        throw new NotFoundException({
+          code: 'EMISSION_FACTOR_NOT_FOUND',
+          message: 'Factor de emisión no encontrado',
+        });
       return registroToDto(row, factor);
     });
   }
@@ -528,7 +540,11 @@ export class EsgService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Factor de emisión no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'EMISSION_FACTOR_NOT_FOUND',
+        message: 'Factor de emisión no encontrado',
+      });
     return row;
   }
 
@@ -545,14 +561,21 @@ export class EsgService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Registro de emisión no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'EMISSION_RECORD_NOT_FOUND',
+        message: 'Registro de emisión no encontrado',
+      });
     return row;
   }
 
   private async assertProjectAccessible(projectId: string): Promise<void> {
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
   }
 }

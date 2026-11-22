@@ -4,6 +4,7 @@ import {
   authed,
   createObraUser,
   createTestApp,
+  ifMatch,
   loginUser,
   registerUser,
 } from './helpers';
@@ -39,19 +40,31 @@ describe('Users (integración) — gestión de usuarios y contraseñas', () => {
           role: 'administracion',
         })
         .expect(201)
-    ).body as { id: string };
+    ).body as { id: string; version: number };
 
     const list = (await client.get('/users').expect(200)).body as {
       id: string;
     }[];
     expect(list.map((u) => u.id)).toEqual(expect.arrayContaining([created.id]));
 
-    await client
-      .patch(`/users/${created.id}`)
-      .send({ fullName: 'Usuario Renombrado' })
-      .expect(200);
+    const renombrado = (
+      await client
+        .patch(`/users/${created.id}`)
+        .set('If-Match', ifMatch(created.version))
+        .send({ fullName: 'Usuario Renombrado' })
+        .expect(200)
+    ).body as { version: number };
 
-    await client.delete(`/users/${created.id}`).expect(204);
+    // Sin If-Match: 428. Con la versión anterior ya superada: 409.
+    await client.delete(`/users/${created.id}`).expect(428);
+    await client
+      .delete(`/users/${created.id}`)
+      .set('If-Match', ifMatch(created.version))
+      .expect(409);
+    await client
+      .delete(`/users/${created.id}`)
+      .set('If-Match', ifMatch(renombrado.version))
+      .expect(204);
   });
 
   it('un usuario `obra` no puede crear, actualizar ni borrar otros usuarios (403)', async () => {

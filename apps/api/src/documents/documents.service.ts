@@ -116,12 +116,16 @@ export class DocumentsService {
         file.mimetype,
       )
     ) {
-      throw new BadRequestException(
-        `Tipo de archivo no admitido (${file.mimetype}). Se aceptan PDF e imágenes JPG, PNG o WEBP.`,
-      );
+      throw new BadRequestException({
+        code: 'DOCUMENT_TYPE_NOT_ALLOWED',
+        message: `Tipo de archivo no admitido (${file.mimetype}). Se aceptan PDF e imágenes JPG, PNG o WEBP.`,
+      });
     }
     if (!file.buffer || file.buffer.length === 0) {
-      throw new BadRequestException('El archivo está vacío');
+      throw new BadRequestException({
+        code: 'FILE_EMPTY',
+        message: 'El archivo está vacío',
+      });
     }
     if (meta.projectId) {
       await this.ensureProject(companyId, meta.projectId);
@@ -140,9 +144,10 @@ export class DocumentsService {
       )
       .limit(1);
     if (duplicate) {
-      throw new ConflictException(
-        `Este archivo ya está en el sistema como "${duplicate.fileName}"`,
-      );
+      throw new ConflictException({
+        code: 'DOCUMENT_DUPLICATED',
+        message: `Este archivo ya está en el sistema como "${duplicate.fileName}"`,
+      });
     }
 
     const fileName = decodeOriginalName(file.originalname);
@@ -175,7 +180,10 @@ export class DocumentsService {
         'code' in err &&
         (err as { code?: string }).code === UNIQUE_VIOLATION
       ) {
-        throw new ConflictException('Este archivo ya está en el sistema');
+        throw new ConflictException({
+          code: 'DOCUMENT_DUPLICATED',
+          message: 'Este archivo ya está en el sistema',
+        });
       }
       throw err;
     }
@@ -215,9 +223,10 @@ export class DocumentsService {
   ): Promise<{ document: Document; stream: ReadStream }> {
     const row = await this.find(id);
     if (!(await this.storage.exists(row.storageKey))) {
-      throw new NotFoundException(
-        'El archivo original no está disponible en el almacenamiento',
-      );
+      throw new NotFoundException({
+        code: 'ORIGINAL_FILE_MISSING',
+        message: 'El archivo original no está disponible en el almacenamiento',
+      });
     }
     return { document: row, stream: this.storage.read(row.storageKey) };
   }
@@ -236,11 +245,17 @@ export class DocumentsService {
       )
       .limit(1);
     if (!row) {
-      throw new NotFoundException('Documento no encontrado');
+      throw new NotFoundException({
+        code: 'DOCUMENT_NOT_FOUND',
+        message: 'Documento no encontrado',
+      });
     }
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !isProjectAllowed(allowed, row.projectId)) {
-      throw new NotFoundException('Documento no encontrado');
+      throw new NotFoundException({
+        code: 'DOCUMENT_NOT_FOUND',
+        message: 'Documento no encontrado',
+      });
     }
     return row;
   }
@@ -261,11 +276,17 @@ export class DocumentsService {
       )
       .limit(1);
     if (!project) {
-      throw new BadRequestException('La obra indicada no existe');
+      throw new BadRequestException({
+        code: 'PROJECT_REFERENCE_INVALID',
+        message: 'La obra indicada no existe',
+      });
     }
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
-      throw new BadRequestException('No tienes acceso a esa obra');
+      throw new BadRequestException({
+        code: 'PROJECT_ACCESS_DENIED',
+        message: 'No tienes acceso a esa obra',
+      });
     }
   }
 }

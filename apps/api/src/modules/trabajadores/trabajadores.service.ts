@@ -183,7 +183,11 @@ export class TrabajadoresService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Trabajador no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'WORKER_NOT_FOUND',
+        message: 'Trabajador no encontrado',
+      });
     return row;
   }
 
@@ -195,7 +199,11 @@ export class TrabajadoresService {
         and(eq(proveedores.id, proveedorId), isNull(proveedores.deletedAt)),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Proveedor no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'SUPPLIER_NOT_FOUND',
+        message: 'Proveedor no encontrado',
+      });
     return row.razonSocial;
   }
 }

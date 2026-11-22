@@ -97,6 +97,8 @@ export interface UserDto {
   contactId: string | null;
   isActive: boolean;
   createdAt: string;
+  /** Versión para control optimista: se envía en `If-Match` al editar o borrar. */
+  version: number;
 }
 
 /** Respuesta de login / register / refresh. */

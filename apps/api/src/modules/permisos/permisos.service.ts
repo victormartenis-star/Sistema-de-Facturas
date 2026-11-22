@@ -98,7 +98,11 @@ export class PermisosService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Permiso no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'PERMIT_NOT_FOUND',
+        message: 'Permiso no encontrado',
+      });
     return row;
   }
 

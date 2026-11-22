@@ -150,22 +150,28 @@ export class ExportsService {
     q: ExportQuery,
   ): Promise<ExportResult> {
     if (!(EXPORT_RECURSOS as readonly string[]).includes(recurso)) {
-      throw new NotFoundException('Recurso de exportación no encontrado');
+      throw new NotFoundException({
+        code: 'EXPORT_NOT_FOUND',
+        message: 'Recurso de exportación no encontrado',
+      });
     }
     // Defensa independiente del enrutado: los recursos de empresa no los ve el rol obra.
     if (
       EXPORT_RECURSOS_EMPRESA.includes(recurso) &&
       (await this.dbs.getObrasAccesibles()) !== null
     ) {
-      throw new ForbiddenException(
-        'Este recurso es de visión de empresa y no está disponible para tu rol',
-      );
+      throw new ForbiddenException({
+        code: 'EXPORT_SCOPE_FORBIDDEN',
+        message:
+          'Este recurso es de visión de empresa y no está disponible para tu rol',
+      });
     }
     const ds = await this.cargar(recurso, q);
     if (ds.total > EXPORT_MAX_FILAS) {
-      throw new UnprocessableEntityException(
-        `La exportación supera ${EXPORT_MAX_FILAS} filas: acota el rango de fechas o la obra`,
-      );
+      throw new UnprocessableEntityException({
+        code: 'EXPORT_TOO_LARGE',
+        message: `La exportación supera ${EXPORT_MAX_FILAS} filas: acota el rango de fechas o la obra`,
+      });
     }
 
     // Exportar es una lectura: la transacción existe solo para auditarla, y se
@@ -246,7 +252,10 @@ export class ExportsService {
     const allowed = await this.dbs.getObrasAccesibles();
     if (projectId) {
       if (allowed !== null && !allowed.includes(projectId)) {
-        throw new NotFoundException('Obra no encontrada');
+        throw new NotFoundException({
+          code: 'PROJECT_NOT_FOUND',
+          message: 'Obra no encontrada',
+        });
       }
       const companyId = this.dbs.getCompanyId();
       const [p] = await this.dbs.db
@@ -260,7 +269,11 @@ export class ExportsService {
           ),
         )
         .limit(1);
-      if (!p) throw new NotFoundException('Obra no encontrada');
+      if (!p)
+        throw new NotFoundException({
+          code: 'PROJECT_NOT_FOUND',
+          message: 'Obra no encontrada',
+        });
       return [projectId];
     }
     return allowed;
@@ -272,16 +285,20 @@ export class ExportsService {
   ): T | undefined {
     if (valor === undefined) return undefined;
     if (!(validos as readonly string[]).includes(valor)) {
-      throw new BadRequestException(
-        `Estado no válido: ${valor}. Valores: ${validos.join(', ')}`,
-      );
+      throw new BadRequestException({
+        code: 'QUERY_PARAM_INVALID',
+        message: `Estado no válido: ${valor}. Valores: ${validos.join(', ')}`,
+      });
     }
     return valor as T;
   }
 
   private requerir(valor: string | undefined, nombre: string): string {
     if (!valor) {
-      throw new BadRequestException(`El parámetro "${nombre}" es obligatorio`);
+      throw new BadRequestException({
+        code: 'QUERY_PARAM_REQUIRED',
+        message: `El parámetro "${nombre}" es obligatorio`,
+      });
     }
     return valor;
   }
@@ -351,7 +368,10 @@ export class ExportsService {
       )
       .limit(1);
     if (q.budgetId && !budget) {
-      throw new NotFoundException('Presupuesto no encontrado');
+      throw new NotFoundException({
+        code: 'BUDGET_NOT_FOUND',
+        message: 'Presupuesto no encontrado',
+      });
     }
     const items = budget
       ? await this.dbs.db
@@ -897,9 +917,10 @@ export class ExportsService {
         (from !== undefined && from !== rango.from) ||
         (to !== undefined && to !== rango.to)
       ) {
-        throw new BadRequestException(
-          `"periodo" ${q.periodo} (${rango.from}..${rango.to}) no coincide con from/to indicados`,
-        );
+        throw new BadRequestException({
+          code: 'PERIOD_RANGE_MISMATCH',
+          message: `"periodo" ${q.periodo} (${rango.from}..${rango.to}) no coincide con from/to indicados`,
+        });
       }
       from = rango.from;
       to = rango.to;

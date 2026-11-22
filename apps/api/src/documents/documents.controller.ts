@@ -94,9 +94,10 @@ export class DocumentsController {
     meta: DocumentUploadMeta,
   ) {
     if (!file) {
-      throw new BadRequestException(
-        'No se ha recibido ningún archivo (campo "file")',
-      );
+      throw new BadRequestException({
+        code: 'FILE_REQUIRED',
+        message: 'No se ha recibido ningún archivo (campo "file")',
+      });
     }
     return this.service.upload(file, meta);
   }

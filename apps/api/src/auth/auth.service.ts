@@ -38,6 +38,7 @@ export function toUserDto(row: User): UserDto {
     contactId: row.contactId,
     isActive: row.isActive,
     createdAt: row.createdAt.toISOString(),
+    version: row.version,
   };
 }
 

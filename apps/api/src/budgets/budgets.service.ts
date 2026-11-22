@@ -307,7 +307,11 @@ export class BudgetsService {
           budgets,
           id,
           versionEsperada,
-          () => new ConflictException('El presupuesto ha cambiado: recarga'),
+          () =>
+            new ConflictException({
+              code: 'VERSION_CONFLICT',
+              message: 'El presupuesto ha cambiado: recarga',
+            }),
           'Presupuesto no encontrado',
         );
       }
@@ -610,7 +614,11 @@ export class BudgetsService {
           budgetItems,
           itemId,
           versionEsperada,
-          () => new ConflictException('La partida ha cambiado: recarga'),
+          () =>
+            new ConflictException({
+              code: 'VERSION_CONFLICT',
+              message: 'La partida ha cambiado: recarga',
+            }),
           'Partida no encontrada',
         );
       }
@@ -647,7 +655,11 @@ export class BudgetsService {
           budgetItems,
           itemId,
           versionEsperada,
-          () => new NotFoundException('Partida no encontrada'),
+          () =>
+            new NotFoundException({
+              code: 'BUDGET_ITEM_NOT_FOUND',
+              message: 'Partida no encontrada',
+            }),
           'Partida no encontrada',
         );
       }

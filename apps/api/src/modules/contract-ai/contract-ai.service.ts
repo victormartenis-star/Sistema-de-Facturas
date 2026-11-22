@@ -53,9 +53,11 @@ export class ContractAiService {
     requestedByUserId: string,
   ): Promise<ContractAuditDto> {
     if (!this.enabled) {
-      throw new BadRequestException(
-        'La auditoría de contratos no está disponible: configura `ANTHROPIC_API_KEY` en el .env de la API.',
-      );
+      throw new BadRequestException({
+        code: 'AI_NOT_CONFIGURED',
+        message:
+          'La auditoría de contratos no está disponible: configura `ANTHROPIC_API_KEY` en el .env de la API.',
+      });
     }
     const data = contractAuditRequestSchema.parse(input);
     const companyId = await this.dbs.getCompanyId();
@@ -135,7 +137,11 @@ export class ContractAiService {
         and(eq(contractAudits.id, id), eq(contractAudits.companyId, companyId)),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Auditoría no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'CONTRACT_AUDIT_NOT_FOUND',
+        message: 'Auditoría no encontrada',
+      });
     if (row.audit.projectId)
       await this.assertProjectAccessible(row.audit.projectId);
     return this.toDto(row.audit, row.contactName ?? null);
@@ -165,18 +171,21 @@ export class ContractAiService {
     });
 
     if (response.stop_reason === 'refusal') {
-      throw new BadRequestException(
-        'El modelo rechazó auditar este contenido por motivos de seguridad',
-      );
+      throw new BadRequestException({
+        code: 'AI_CONTENT_REFUSED',
+        message:
+          'El modelo rechazó auditar este contenido por motivos de seguridad',
+      });
     }
     const text = response.content
       .filter((block) => block.type === 'text')
       .map((block) => block.text)
       .join('');
     if (!text.trim()) {
-      throw new BadRequestException(
-        `El modelo no devolvió resultado (stop_reason: ${response.stop_reason})`,
-      );
+      throw new BadRequestException({
+        code: 'AI_NO_RESULT',
+        message: `El modelo no devolvió resultado (stop_reason: ${response.stop_reason})`,
+      });
     }
     return contractAuditResultSchema.parse(JSON.parse(text));
   }
@@ -196,7 +205,11 @@ export class ContractAiService {
         ),
       )
       .limit(1);
-    if (!doc) throw new NotFoundException('Documento no encontrado');
+    if (!doc)
+      throw new NotFoundException({
+        code: 'DOCUMENT_NOT_FOUND',
+        message: 'Documento no encontrado',
+      });
 
     const buffer = await this.storage.readBuffer(doc.storageKey);
     const data = buffer.toString('base64');
@@ -227,9 +240,10 @@ export class ContractAiService {
         prompt,
       ];
     }
-    throw new BadRequestException(
-      `Tipo de archivo no soportado para auditoría: ${doc.mimeType}`,
-    );
+    throw new BadRequestException({
+      code: 'CONTRACT_AUDIT_FILE_UNSUPPORTED',
+      message: `Tipo de archivo no soportado para auditoría: ${doc.mimeType}`,
+    });
   }
 
   private toDto(
@@ -262,16 +276,21 @@ export class ContractAiService {
   private async assertProjectAccessible(projectId: string): Promise<void> {
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
   }
 
   private anthropic(): Anthropic {
     if (!this.client) {
       if (!process.env.ANTHROPIC_API_KEY) {
-        throw new BadRequestException(
-          'Falta ANTHROPIC_API_KEY en el .env: la auditoría de contratos está desactivada',
-        );
+        throw new BadRequestException({
+          code: 'AI_NOT_CONFIGURED',
+          message:
+            'Falta ANTHROPIC_API_KEY en el .env: la auditoría de contratos está desactivada',
+        });
       }
       this.client = new Anthropic();
     }

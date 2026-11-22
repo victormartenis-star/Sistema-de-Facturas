@@ -19,6 +19,7 @@ import {
   userUpdateSchema,
 } from '@erp/shared';
 import { Roles } from '../auth/roles';
+import { VersionEsperada } from '../common/version';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { UsersService } from './users.service';
 import { z } from 'zod';
@@ -62,16 +63,20 @@ export class UsersController {
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(userUpdateSchema)) body: UserUpdateInput,
+    @VersionEsperada({ exigible: true }) version?: number,
   ) {
-    return this.service.update(id, body);
+    return this.service.update(id, body, version);
   }
 
   /** Borrado lógico del usuario. */
   @Delete(':id')
   @HttpCode(204)
   @Roles('admin')
-  async remove(@Param('id', ParseUUIDPipe) id: string) {
-    await this.service.remove(id);
+  async remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @VersionEsperada({ exigible: true }) version?: number,
+  ) {
+    await this.service.remove(id, version);
   }
 
   /** Resetea la contraseña de otro usuario (sin pedir la actual) y cierra sus sesiones abiertas. */

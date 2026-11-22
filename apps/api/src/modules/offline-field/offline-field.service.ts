@@ -234,14 +234,21 @@ export class OfflineFieldService {
       .from(projects)
       .where(eq(projects.id, projectId))
       .limit(1);
-    if (!row) throw new NotFoundException('Obra no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     return row.code;
   }
 
   private async assertProjectAccessible(projectId: string): Promise<void> {
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
   }
 }

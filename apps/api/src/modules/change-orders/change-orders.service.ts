@@ -108,9 +108,10 @@ export class ChangeOrdersService {
       )
       .limit(1);
     if (blocking) {
-      throw new ConflictException(
-        `No se puede certificar: la partida tiene el contradictorio/modificado ${blocking.numero} pendiente de resolución de la Dirección Facultativa`,
-      );
+      throw new ConflictException({
+        code: 'CHANGE_ORDER_BLOCKING',
+        message: `No se puede certificar: la partida tiene el contradictorio/modificado ${blocking.numero} pendiente de resolución de la Dirección Facultativa`,
+      });
     }
   }
 
@@ -239,9 +240,11 @@ export class ChangeOrdersService {
   ): Promise<ChangeOrderDto> {
     const existing = await this.find(id);
     if (!canEditChangeOrder(existing.estado)) {
-      throw new ConflictException(
-        'Solo se puede editar un contradictorio/modificado en borrador',
-      );
+      throw new ConflictException({
+        code: 'CHANGE_ORDER_NOT_DRAFT',
+        message:
+          'Solo se puede editar un contradictorio/modificado en borrador',
+      });
     }
     const data = changeOrderUpdateSchema.parse(input);
     if (data.phaseId) await this.findPhase(data.phaseId, existing.projectId);
@@ -319,9 +322,11 @@ export class ChangeOrdersService {
   async remove(id: string): Promise<void> {
     const existing = await this.find(id);
     if (!canEditChangeOrder(existing.estado)) {
-      throw new ConflictException(
-        'Solo se puede eliminar un contradictorio/modificado en borrador',
-      );
+      throw new ConflictException({
+        code: 'CHANGE_ORDER_NOT_DRAFT',
+        message:
+          'Solo se puede eliminar un contradictorio/modificado en borrador',
+      });
     }
     await this.dbs.db
       .update(changeOrders)
@@ -336,9 +341,10 @@ export class ChangeOrdersService {
   ): Promise<ChangeOrderDto> {
     const existing = await this.find(id);
     if (!canEditChangeOrder(existing.estado)) {
-      throw new ConflictException(
-        'Este contradictorio/modificado ya se ha enviado o resuelto',
-      );
+      throw new ConflictException({
+        code: 'CHANGE_ORDER_ALREADY_SENT',
+        message: 'Este contradictorio/modificado ya se ha enviado o resuelto',
+      });
     }
     const data = changeOrderEnviarSchema.parse(input);
     await this.findContact(data.direccionFacultativaContactId);
@@ -372,9 +378,11 @@ export class ChangeOrdersService {
   ): Promise<ChangeOrderDto> {
     const existing = await this.find(id);
     if (!canResolveChangeOrder(existing.estado)) {
-      throw new ConflictException(
-        'Solo se puede resolver un contradictorio/modificado enviado a la Dirección Facultativa',
-      );
+      throw new ConflictException({
+        code: 'CHANGE_ORDER_NOT_SENT',
+        message:
+          'Solo se puede resolver un contradictorio/modificado enviado a la Dirección Facultativa',
+      });
     }
     const data = changeOrderResolverSchema.parse(input);
 
@@ -495,7 +503,10 @@ export class ChangeOrdersService {
         const nombre = contactos.get(row.direccionFacultativaContactId);
         // Mismo comportamiento que `hydrate`: un contacto borrado da 404.
         if (nombre === undefined)
-          throw new NotFoundException('Contacto no encontrado');
+          throw new NotFoundException({
+            code: 'CONTACT_NOT_FOUND',
+            message: 'Contacto no encontrado',
+          });
         dfNombre = nombre;
       }
       return toDto(row, lineasPorOrden.get(row.id) ?? [], phase, dfNombre);
@@ -532,7 +543,11 @@ export class ChangeOrdersService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Fase no encontrada en esta obra');
+    if (!row)
+      throw new NotFoundException({
+        code: 'PHASE_NOT_FOUND',
+        message: 'Fase no encontrada en esta obra',
+      });
     return row;
   }
 
@@ -549,7 +564,11 @@ export class ChangeOrdersService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Contacto no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'CONTACT_NOT_FOUND',
+        message: 'Contacto no encontrado',
+      });
     return row;
   }
 
@@ -557,7 +576,10 @@ export class ChangeOrdersService {
     const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
     const [row] = await this.dbs.db
       .select()
@@ -570,7 +592,11 @@ export class ChangeOrdersService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Obra no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     return row;
   }
 
@@ -588,10 +614,16 @@ export class ChangeOrdersService {
       )
       .limit(1);
     if (!row)
-      throw new NotFoundException('Contradictorio/modificado no encontrado');
+      throw new NotFoundException({
+        code: 'CHANGE_ORDER_NOT_FOUND',
+        message: 'Contradictorio/modificado no encontrado',
+      });
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(row.projectId)) {
-      throw new NotFoundException('Contradictorio/modificado no encontrado');
+      throw new NotFoundException({
+        code: 'CHANGE_ORDER_NOT_FOUND',
+        message: 'Contradictorio/modificado no encontrado',
+      });
     }
     return row;
   }

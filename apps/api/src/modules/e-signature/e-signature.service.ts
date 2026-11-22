@@ -156,14 +156,18 @@ export class ESignatureService {
   ): Promise<SignatureRequestDto> {
     const row = await this.find(requestId);
     if (row.estado !== 'pendiente') {
-      throw new ConflictException(
-        'Esta solicitud de firma ya no admite más firmas',
-      );
+      throw new ConflictException({
+        code: 'SIGNATURE_REQUEST_CLOSED',
+        message: 'Esta solicitud de firma ya no admite más firmas',
+      });
     }
     const data = signerFirmarSchema.parse(input);
     const signer = await this.findSigner(requestId, signerId);
     if (signer.estado !== 'pendiente') {
-      throw new ConflictException('Este firmante ya ha firmado o rechazado');
+      throw new ConflictException({
+        code: 'SIGNER_ALREADY_SIGNED',
+        message: 'Este firmante ya ha firmado o rechazado',
+      });
     }
     const hashFirma = createHash('sha256').update(data.firmaData).digest('hex');
 
@@ -224,14 +228,18 @@ export class ESignatureService {
   ): Promise<SignatureRequestDto> {
     const row = await this.find(requestId);
     if (row.estado !== 'pendiente') {
-      throw new ConflictException(
-        'Esta solicitud de firma ya no admite cambios',
-      );
+      throw new ConflictException({
+        code: 'SIGNATURE_REQUEST_CLOSED',
+        message: 'Esta solicitud de firma ya no admite cambios',
+      });
     }
     const data = signerRechazarSchema.parse(input);
     const signer = await this.findSigner(requestId, signerId);
     if (signer.estado !== 'pendiente') {
-      throw new ConflictException('Este firmante ya ha firmado o rechazado');
+      throw new ConflictException({
+        code: 'SIGNER_ALREADY_SIGNED',
+        message: 'Este firmante ya ha firmado o rechazado',
+      });
     }
 
     const [updatedRow, firmantes] = await this.dbs.db.transaction(
@@ -267,7 +275,10 @@ export class ESignatureService {
   async cancelar(id: string): Promise<SignatureRequestDto> {
     const row = await this.find(id);
     if (row.estado !== 'pendiente') {
-      throw new ConflictException('Esta solicitud ya está cerrada');
+      throw new ConflictException({
+        code: 'SIGNATURE_REQUEST_CLOSED',
+        message: 'Esta solicitud ya está cerrada',
+      });
     }
     const [updated] = await this.dbs.db
       .update(signatureRequests)
@@ -301,7 +312,11 @@ export class ESignatureService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Solicitud de firma no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'SIGNATURE_REQUEST_NOT_FOUND',
+        message: 'Solicitud de firma no encontrada',
+      });
     return row;
   }
 
@@ -319,7 +334,11 @@ export class ESignatureService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Firmante no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'SIGNER_NOT_FOUND',
+        message: 'Firmante no encontrado',
+      });
     return row;
   }
 }

@@ -250,7 +250,10 @@ export class PhasesService {
       )
       .limit(1);
     if (!row) {
-      throw new NotFoundException('Partida no encontrada');
+      throw new NotFoundException({
+        code: 'BUDGET_ITEM_NOT_FOUND',
+        message: 'Partida no encontrada',
+      });
     }
     return row;
   }
@@ -259,7 +262,10 @@ export class PhasesService {
     const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
     const [row] = await this.dbs.db
       .select()
@@ -273,7 +279,10 @@ export class PhasesService {
       )
       .limit(1);
     if (!row) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
     return row;
   }
@@ -284,9 +293,10 @@ export class PhasesService {
       'code' in err &&
       (err as { code?: string }).code === UNIQUE_VIOLATION
     ) {
-      throw new ConflictException(
-        `Ya existe una partida con el código "${code}" en esta obra`,
-      );
+      throw new ConflictException({
+        code: 'BUDGET_ITEM_CODE_DUPLICATED',
+        message: `Ya existe una partida con el código "${code}" en esta obra`,
+      });
     }
     throw err;
   }

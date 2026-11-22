@@ -290,9 +290,11 @@ export class ComparativosService {
   ): Promise<ComparativoOfertaDto> {
     const { comparativo } = await this.find(comparativoId);
     if (comparativo.status !== 'abierto') {
-      throw new ConflictException(
-        'El comparativo ya está adjudicado o cancelado: no admite más ofertas',
-      );
+      throw new ConflictException({
+        code: 'COMPARATIVE_CLOSED',
+        message:
+          'El comparativo ya está adjudicado o cancelado: no admite más ofertas',
+      });
     }
     const data = comparativoOfertaCreateSchema.parse(input);
     await this.findContact(data.contactId);
@@ -351,9 +353,11 @@ export class ComparativosService {
   ): Promise<ComparativoOfertaDto> {
     const { comparativo } = await this.find(comparativoId);
     if (comparativo.status !== 'abierto') {
-      throw new ConflictException(
-        'El comparativo ya está adjudicado o cancelado: no se puede editar',
-      );
+      throw new ConflictException({
+        code: 'COMPARATIVE_CLOSED',
+        message:
+          'El comparativo ya está adjudicado o cancelado: no se puede editar',
+      });
     }
     await this.findOferta(comparativo.id, ofertaId);
     const data = comparativoOfertaUpdateSchema.parse(input);
@@ -409,9 +413,11 @@ export class ComparativosService {
   async removeOferta(comparativoId: string, ofertaId: string): Promise<void> {
     const { comparativo } = await this.find(comparativoId);
     if (comparativo.status !== 'abierto') {
-      throw new ConflictException(
-        'El comparativo ya está adjudicado o cancelado: no se puede quitar una oferta',
-      );
+      throw new ConflictException({
+        code: 'COMPARATIVE_CLOSED',
+        message:
+          'El comparativo ya está adjudicado o cancelado: no se puede quitar una oferta',
+      });
     }
     await this.findOferta(comparativo.id, ofertaId);
     await this.dbs.db
@@ -432,9 +438,10 @@ export class ComparativosService {
     const companyId = await this.dbs.getCompanyId();
     const { comparativo, phase } = await this.find(id);
     if (comparativo.status !== 'abierto') {
-      throw new ConflictException(
-        'Este comparativo ya está adjudicado o cancelado',
-      );
+      throw new ConflictException({
+        code: 'COMPARATIVE_CLOSED',
+        message: 'Este comparativo ya está adjudicado o cancelado',
+      });
     }
     const data = comparativoAdjudicarSchema.parse(input);
     const oferta = await this.findOferta(comparativo.id, data.ofertaId);
@@ -444,9 +451,10 @@ export class ComparativosService {
       .from(comparativoOfertaLineas)
       .where(eq(comparativoOfertaLineas.ofertaId, oferta.id));
     if (lineas.length === 0) {
-      throw new ConflictException(
-        'La oferta seleccionada no tiene ninguna partida con precio',
-      );
+      throw new ConflictException({
+        code: 'OFFER_WITHOUT_PRICES',
+        message: 'La oferta seleccionada no tiene ninguna partida con precio',
+      });
     }
     const offerTotal = computeOfertaTotal(
       lineas.map((l) => Number(l.totalAmount)),
@@ -596,9 +604,11 @@ export class ComparativosService {
     opportunities: SavingsOpportunityDto[],
   ): Promise<{ resumen: string }> {
     if (!this.aiEnabled) {
-      throw new BadRequestException(
-        'El resumen de ahorro no está disponible: configura `ANTHROPIC_API_KEY` en el .env de la API.',
-      );
+      throw new BadRequestException({
+        code: 'AI_NOT_CONFIGURED',
+        message:
+          'El resumen de ahorro no está disponible: configura `ANTHROPIC_API_KEY` en el .env de la API.',
+      });
     }
     if (opportunities.length === 0) {
       return { resumen: 'No hay oportunidades de ahorro detectadas.' };
@@ -621,9 +631,10 @@ export class ComparativosService {
       .map((b) => b.text)
       .join('');
     if (!text.trim()) {
-      throw new BadRequestException(
-        `El modelo no devolvió resultado (stop_reason: ${response.stop_reason})`,
-      );
+      throw new BadRequestException({
+        code: 'AI_NO_RESULT',
+        message: `El modelo no devolvió resultado (stop_reason: ${response.stop_reason})`,
+      });
     }
     return { resumen: text.trim() };
   }
@@ -662,7 +673,11 @@ export class ComparativosService {
       .innerJoin(contacts, eq(comparativoOfertas.contactId, contacts.id))
       .where(eq(comparativoOfertas.id, ofertaId))
       .limit(1);
-    if (!row) throw new NotFoundException('Oferta no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'OFFER_NOT_FOUND',
+        message: 'Oferta no encontrada',
+      });
     const lineas = await this.dbs.db
       .select()
       .from(comparativoOfertaLineas)
@@ -696,7 +711,11 @@ export class ComparativosService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Oferta no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'OFFER_NOT_FOUND',
+        message: 'Oferta no encontrada',
+      });
     return row;
   }
 
@@ -712,9 +731,11 @@ export class ComparativosService {
     const byId = new Map(rows.map((r) => [r.id, r]));
     for (const id of uniqueIds) {
       if (!byId.has(id)) {
-        throw new NotFoundException(
-          'Alguna partida de la oferta no pertenece a la fase del comparativo',
-        );
+        throw new NotFoundException({
+          code: 'OFFER_ITEM_MISMATCH',
+          message:
+            'Alguna partida de la oferta no pertenece a la fase del comparativo',
+        });
       }
     }
     return byId;
@@ -733,7 +754,11 @@ export class ComparativosService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Contacto no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'CONTACT_NOT_FOUND',
+        message: 'Contacto no encontrado',
+      });
     return row;
   }
 
@@ -755,10 +780,17 @@ export class ComparativosService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Comparativo no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'COMPARATIVE_NOT_FOUND',
+        message: 'Comparativo no encontrado',
+      });
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(row.comparativo.projectId)) {
-      throw new NotFoundException('Comparativo no encontrado');
+      throw new NotFoundException({
+        code: 'COMPARATIVE_NOT_FOUND',
+        message: 'Comparativo no encontrado',
+      });
     }
     return {
       comparativo: row.comparativo,
@@ -779,7 +811,10 @@ export class ComparativosService {
       )
       .limit(1);
     if (!row)
-      throw new NotFoundException('Partida/fase no encontrada en esta obra');
+      throw new NotFoundException({
+        code: 'PHASE_OR_ITEM_NOT_FOUND',
+        message: 'Partida/fase no encontrada en esta obra',
+      });
     return row;
   }
 
@@ -787,7 +822,10 @@ export class ComparativosService {
     const companyId = await this.dbs.getCompanyId();
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
-      throw new NotFoundException('Obra no encontrada');
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     }
     const [row] = await this.dbs.db
       .select()
@@ -800,7 +838,11 @@ export class ComparativosService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Obra no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'PROJECT_NOT_FOUND',
+        message: 'Obra no encontrada',
+      });
     return row;
   }
 
@@ -810,9 +852,10 @@ export class ComparativosService {
       'code' in err &&
       (err as { code?: string }).code === '23505'
     ) {
-      throw new ConflictException(
-        'Este proveedor ya tiene una oferta en este comparativo',
-      );
+      throw new ConflictException({
+        code: 'OFFER_DUPLICATED',
+        message: 'Este proveedor ya tiene una oferta en este comparativo',
+      });
     }
     throw err;
   }

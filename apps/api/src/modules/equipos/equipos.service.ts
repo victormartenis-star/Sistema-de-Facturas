@@ -350,7 +350,11 @@ export class EquiposService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Equipo no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'EQUIPMENT_NOT_FOUND',
+        message: 'Equipo no encontrado',
+      });
     return row;
   }
 
@@ -368,7 +372,11 @@ export class EquiposService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Mantenimiento no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'MAINTENANCE_NOT_FOUND',
+        message: 'Mantenimiento no encontrado',
+      });
     return row.mantenimiento;
   }
 
@@ -380,7 +388,11 @@ export class EquiposService {
         and(eq(proveedores.id, proveedorId), isNull(proveedores.deletedAt)),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Proveedor no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'SUPPLIER_NOT_FOUND',
+        message: 'Proveedor no encontrado',
+      });
     return row.razonSocial;
   }
 }

@@ -1636,12 +1636,18 @@ export const usersApi = {
   update: (
     id: string,
     input: Partial<{ fullName: string; role: string; isActive: boolean }>,
+    version: number,
   ) =>
     request<UserDto>(`/users/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(input),
+      headers: ifMatch(version),
     }),
-  remove: (id: string) => request<void>(`/users/${id}`, { method: 'DELETE' }),
+  remove: (id: string, version: number) =>
+    request<void>(`/users/${id}`, {
+      method: 'DELETE',
+      headers: ifMatch(version),
+    }),
   listAccess: (id: string) => request<string[]>(`/users/${id}/acceso-obras`),
   setAccess: (id: string, projectIds: string[]) =>
     request<void>(`/users/${id}/acceso-obras`, {

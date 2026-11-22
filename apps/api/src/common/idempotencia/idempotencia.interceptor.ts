@@ -75,9 +75,10 @@ export class IdempotenciaInterceptor implements NestInterceptor {
     const clave = (Array.isArray(cabecera) ? cabecera[0] : cabecera)?.trim();
     if (!clave) return next.handle();
     if (clave.length > MAX_LONGITUD_CLAVE) {
-      throw new BadRequestException(
-        `Idempotency-Key supera ${MAX_LONGITUD_CLAVE} caracteres`,
-      );
+      throw new BadRequestException({
+        code: 'IDEMPOTENCY_KEY_TOO_LONG',
+        message: `Idempotency-Key supera ${MAX_LONGITUD_CLAVE} caracteres`,
+      });
     }
     // Sin identidad (ruta pública) no hay ámbito de empresa: sin cambios.
     const companyId = req.user?.companyId;

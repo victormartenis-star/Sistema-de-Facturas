@@ -42,9 +42,11 @@ export class InformesService {
     projectId?: string,
   ): Promise<InformeMensualDto> {
     if (!this.enabled) {
-      throw new BadRequestException(
-        'El informe mensual no está disponible: configura `ANTHROPIC_API_KEY` en el .env de la API.',
-      );
+      throw new BadRequestException({
+        code: 'AI_NOT_CONFIGURED',
+        message:
+          'El informe mensual no está disponible: configura `ANTHROPIC_API_KEY` en el .env de la API.',
+      });
     }
 
     const companyId = this.dbs.getCompanyId();
@@ -61,7 +63,11 @@ export class InformesService {
     let costControl = null;
     if (projectId) {
       const obraRow = obras.find((o) => o.projectId === projectId);
-      if (!obraRow) throw new NotFoundException('Obra no encontrada');
+      if (!obraRow)
+        throw new NotFoundException({
+          code: 'PROJECT_NOT_FOUND',
+          message: 'Obra no encontrada',
+        });
       obraNombre = obraRow.name;
       costControl = await this.costControl.get(projectId);
     }
@@ -101,9 +107,10 @@ export class InformesService {
       .map((b) => b.text)
       .join('');
     if (!text.trim()) {
-      throw new BadRequestException(
-        `El modelo no devolvió resultado (stop_reason: ${response.stop_reason})`,
-      );
+      throw new BadRequestException({
+        code: 'AI_NO_RESULT',
+        message: `El modelo no devolvió resultado (stop_reason: ${response.stop_reason})`,
+      });
     }
     return text;
   }

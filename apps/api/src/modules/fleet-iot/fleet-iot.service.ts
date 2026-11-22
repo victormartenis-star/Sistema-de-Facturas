@@ -274,7 +274,11 @@ export class FleetIotService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Equipo no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'EQUIPMENT_NOT_FOUND',
+        message: 'Equipo no encontrado',
+      });
     return row;
   }
 
@@ -288,7 +292,11 @@ export class FleetIotService {
       .innerJoin(equipos, eq(iotAlertas.equipoId, equipos.id))
       .where(and(eq(iotAlertas.id, id), eq(iotAlertas.companyId, companyId)))
       .limit(1);
-    if (!row) throw new NotFoundException('Alerta no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'ALERT_NOT_FOUND',
+        message: 'Alerta no encontrada',
+      });
     return { alerta: row.alerta, equipoNombre: row.equipoNombre };
   }
 }

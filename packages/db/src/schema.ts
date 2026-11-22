@@ -920,6 +920,8 @@ export const users = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
+    /** Control optimista de concurrencia: se incrementa en cada PATCH/DELETE. */
+    version: integer('version').notNull().default(1),
   },
   // El email identifica al usuario en todo el sistema (login sin indicar empresa)
   (t) => [

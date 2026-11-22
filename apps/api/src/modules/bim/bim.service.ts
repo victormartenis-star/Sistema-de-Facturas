@@ -128,12 +128,16 @@ export class BimService {
   ): Promise<BimModelDto> {
     const companyId = await this.dbs.getCompanyId();
     if (!file.buffer || file.buffer.length === 0) {
-      throw new BadRequestException('El archivo está vacío');
+      throw new BadRequestException({
+        code: 'FILE_EMPTY',
+        message: 'El archivo está vacío',
+      });
     }
     if (file.buffer.length > MAX_SIZE_MB * 1024 * 1024) {
-      throw new BadRequestException(
-        `El archivo supera el tamaño máximo permitido (${MAX_SIZE_MB} MB)`,
-      );
+      throw new BadRequestException({
+        code: 'FILE_TOO_LARGE',
+        message: `El archivo supera el tamaño máximo permitido (${MAX_SIZE_MB} MB)`,
+      });
     }
     const project = await this.ensureProject(companyId, meta.projectId);
 
@@ -177,9 +181,10 @@ export class BimService {
   ): Promise<{ model: BimModel; stream: ReadStream }> {
     const row = await this.findModel(id);
     if (!(await this.storage.exists(row.storageKey))) {
-      throw new NotFoundException(
-        'El archivo original no está disponible en el almacenamiento',
-      );
+      throw new NotFoundException({
+        code: 'ORIGINAL_FILE_MISSING',
+        message: 'El archivo original no está disponible en el almacenamiento',
+      });
     }
     return { model: row, stream: this.storage.read(row.storageKey) };
   }
@@ -365,9 +370,10 @@ export class BimService {
       )
       .limit(1);
     if (!row) {
-      throw new BadRequestException(
-        'La partida indicada no pertenece al presupuesto de esta obra',
-      );
+      throw new BadRequestException({
+        code: 'BUDGET_ITEM_MISMATCH',
+        message: 'La partida indicada no pertenece al presupuesto de esta obra',
+      });
     }
   }
 
@@ -387,11 +393,17 @@ export class BimService {
       )
       .limit(1);
     if (!project) {
-      throw new BadRequestException('La obra indicada no existe');
+      throw new BadRequestException({
+        code: 'PROJECT_REFERENCE_INVALID',
+        message: 'La obra indicada no existe',
+      });
     }
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(projectId)) {
-      throw new BadRequestException('No tienes acceso a esa obra');
+      throw new BadRequestException({
+        code: 'PROJECT_ACCESS_DENIED',
+        message: 'No tienes acceso a esa obra',
+      });
     }
     return project;
   }
@@ -409,10 +421,17 @@ export class BimService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Modelo BIM no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'BIM_MODEL_NOT_FOUND',
+        message: 'Modelo BIM no encontrado',
+      });
     const allowed = await this.dbs.getObrasAccesibles();
     if (allowed !== null && !allowed.includes(row.projectId)) {
-      throw new NotFoundException('Modelo BIM no encontrado');
+      throw new NotFoundException({
+        code: 'BIM_MODEL_NOT_FOUND',
+        message: 'Modelo BIM no encontrado',
+      });
     }
     return row;
   }

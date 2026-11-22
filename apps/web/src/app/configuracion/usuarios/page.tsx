@@ -174,7 +174,8 @@ function EditarUsuarioModal({
   const [role, setRole] = useState<UserRole>(user.role);
 
   const mutation = useMutation({
-    mutationFn: () => usersApi.update(user.id, { fullName, role }),
+    mutationFn: () =>
+      usersApi.update(user.id, { fullName, role }, user.version),
     onSuccess: () => {
       toast('Usuario actualizado');
       onSuccess();
@@ -360,7 +361,7 @@ export default function UsuariosPage() {
 
   const toggleActiveMutation = useMutation({
     mutationFn: (u: UserDto) =>
-      usersApi.update(u.id, { isActive: !u.isActive }),
+      usersApi.update(u.id, { isActive: !u.isActive }, u.version),
     onSuccess: () => {
       toast('Estado actualizado');
       qc.invalidateQueries({ queryKey: ['users'] });
@@ -369,7 +370,7 @@ export default function UsuariosPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => usersApi.remove(id),
+    mutationFn: (u: UserDto) => usersApi.remove(u.id, u.version),
     onSuccess: () => {
       toast('Usuario eliminado');
       setDeleteTarget(null);
@@ -557,7 +558,7 @@ export default function UsuariosPage() {
         description={`Se eliminará ${deleteTarget?.fullName ?? ''} (${deleteTarget?.email ?? ''}). Esta acción no se puede deshacer.`}
         confirmLabel="Eliminar"
         loading={deleteMutation.isPending}
-        onConfirm={() => deleteMutation.mutate(deleteTarget!.id)}
+        onConfirm={() => deleteMutation.mutate(deleteTarget!)}
         onCancel={() => setDeleteTarget(null)}
       />
     </div>

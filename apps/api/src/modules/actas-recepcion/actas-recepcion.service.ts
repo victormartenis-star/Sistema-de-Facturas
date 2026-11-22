@@ -91,7 +91,11 @@ export class ActasRecepcionService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Acta de recepción no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'RECEPTION_ACT_NOT_FOUND',
+        message: 'Acta de recepción no encontrada',
+      });
     return row;
   }
 
@@ -194,7 +198,11 @@ export class ActasRecepcionService {
       })
       .where(eq(actaRecepcionRepasos.id, repasoId))
       .returning();
-    if (!row) throw new NotFoundException('Repaso no encontrado');
+    if (!row)
+      throw new NotFoundException({
+        code: 'REVIEW_NOT_FOUND',
+        message: 'Repaso no encontrado',
+      });
     return toRepasoDto(row);
   }
 

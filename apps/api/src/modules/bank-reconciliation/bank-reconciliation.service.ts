@@ -185,9 +185,16 @@ export class BankReconciliationService {
         ),
       )
       .limit(1);
-    if (!tx) throw new NotFoundException('Movimiento no encontrado');
+    if (!tx)
+      throw new NotFoundException({
+        code: 'BANK_MOVEMENT_NOT_FOUND',
+        message: 'Movimiento no encontrado',
+      });
     if (tx.reconciledMilestoneId) {
-      throw new ConflictException('El movimiento ya está conciliado');
+      throw new ConflictException({
+        code: 'BANK_MOVEMENT_ALREADY_RECONCILED',
+        message: 'El movimiento ya está conciliado',
+      });
     }
 
     const [milestone] = await this.dbs.db
@@ -200,7 +207,11 @@ export class BankReconciliationService {
         ),
       )
       .limit(1);
-    if (!milestone) throw new NotFoundException('Vencimiento no encontrado');
+    if (!milestone)
+      throw new NotFoundException({
+        code: 'DUE_NOT_FOUND',
+        message: 'Vencimiento no encontrado',
+      });
 
     await this.dbs.db.transaction(async (trx) => {
       await trx
@@ -238,7 +249,11 @@ export class BankReconciliationService {
         ),
       )
       .limit(1);
-    if (!tx) throw new NotFoundException('Movimiento no encontrado');
+    if (!tx)
+      throw new NotFoundException({
+        code: 'BANK_MOVEMENT_NOT_FOUND',
+        message: 'Movimiento no encontrado',
+      });
     await this.dbs.db
       .update(bankTransactions)
       .set({ reconciledMilestoneId: null, reconciledAt: null })
@@ -258,7 +273,11 @@ export class BankReconciliationService {
         ),
       )
       .limit(1);
-    if (!row) throw new NotFoundException('Cuenta bancaria no encontrada');
+    if (!row)
+      throw new NotFoundException({
+        code: 'BANK_ACCOUNT_NOT_FOUND',
+        message: 'Cuenta bancaria no encontrada',
+      });
     return row;
   }
 }

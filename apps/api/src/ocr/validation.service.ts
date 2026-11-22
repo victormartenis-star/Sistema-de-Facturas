@@ -120,9 +120,11 @@ export class ValidationService {
   async reprocess(documentId: string): Promise<void> {
     const doc = await this.findDocument(documentId);
     if (!this.extraction.enabled) {
-      throw new BadRequestException(
-        'El pipeline OCR/IA está desactivado: falta ANTHROPIC_API_KEY en el .env',
-      );
+      throw new BadRequestException({
+        code: 'AI_NOT_CONFIGURED',
+        message:
+          'El pipeline OCR/IA está desactivado: falta ANTHROPIC_API_KEY en el .env',
+      });
     }
     await this.extraction.extract(doc);
   }
@@ -144,9 +146,10 @@ export class ValidationService {
       .orderBy(desc(extractions.createdAt))
       .limit(1);
     if (!latest) {
-      throw new BadRequestException(
-        'Este documento todavía no tiene ninguna lectura de la IA',
-      );
+      throw new BadRequestException({
+        code: 'OCR_READING_MISSING',
+        message: 'Este documento todavía no tiene ninguna lectura de la IA',
+      });
     }
     const payload = latest.payload as ExtractionPayload;
 
@@ -197,18 +200,22 @@ export class ValidationService {
   ): Promise<string> {
     const contactId = data.contactId ?? null;
     if (!contactId) {
-      throw new BadRequestException(
-        'Para crear la factura hay que indicar el proveedor. Si no existe, créalo antes en Contactos.',
-      );
+      throw new BadRequestException({
+        code: 'INVOICE_SUPPLIER_REQUIRED',
+        message:
+          'Para crear la factura hay que indicar el proveedor. Si no existe, créalo antes en Contactos.',
+      });
     }
     const invoiceNumber = data.invoiceNumber ?? payload.invoiceNumber;
     const issueDate = data.issueDate ?? payload.issueDate;
     const baseAmount = data.baseAmount ?? payload.baseAmount;
     const vatAmount = data.vatAmount ?? payload.vatAmount;
     if (!invoiceNumber || !issueDate || baseAmount === null) {
-      throw new BadRequestException(
-        'Faltan datos para crear la factura: número, fecha de emisión y base imponible son obligatorios',
-      );
+      throw new BadRequestException({
+        code: 'INVOICE_DATA_MISSING',
+        message:
+          'Faltan datos para crear la factura: número, fecha de emisión y base imponible son obligatorios',
+      });
     }
 
     // La base manda: el % de IVA se deduce de la cuota leída para no perder
@@ -248,16 +255,20 @@ export class ValidationService {
   ): Promise<string> {
     const contactId = data.contactId ?? null;
     if (!contactId) {
-      throw new BadRequestException(
-        'Para crear el albarán hay que indicar el proveedor. Si no existe, créalo antes en Contactos.',
-      );
+      throw new BadRequestException({
+        code: 'DELIVERY_NOTE_SUPPLIER_REQUIRED',
+        message:
+          'Para crear el albarán hay que indicar el proveedor. Si no existe, créalo antes en Contactos.',
+      });
     }
     const noteNumber = data.noteNumber ?? payload.invoiceNumber;
     const amount = data.baseAmount ?? payload.totalAmount ?? payload.baseAmount;
     if (!noteNumber || amount === null) {
-      throw new BadRequestException(
-        'Faltan datos para crear el albarán: número e importe son obligatorios',
-      );
+      throw new BadRequestException({
+        code: 'DELIVERY_NOTE_DATA_MISSING',
+        message:
+          'Faltan datos para crear el albarán: número e importe son obligatorios',
+      });
     }
     const note = await this.deliveryNotesSvc.create({
       contactId,
@@ -356,7 +367,10 @@ export class ValidationService {
       )
       .limit(1);
     if (!row) {
-      throw new NotFoundException('Documento no encontrado');
+      throw new NotFoundException({
+        code: 'DOCUMENT_NOT_FOUND',
+        message: 'Documento no encontrado',
+      });
     }
     return row;
   }
