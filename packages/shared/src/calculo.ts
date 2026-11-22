@@ -610,3 +610,106 @@ export function computeIrr(flows: CashflowPoint[], guess = 0.1): number | null {
   }
   return Math.round(((lo + hi) / 2) * 10000) / 10000;
 }
+
+/* ──────────────── liquidaciones parciales de vencimientos ──────────────── */
+
+/**
+ * Estado de liquidación derivado de un vencimiento (partida abierta):
+ * `pendiente` sin nada liquidado, `parcial` con parte liquidada y
+ * `liquidado` cuando el saldo vivo es cero. El `status` persistido sigue
+ * siendo `previsto` (partida abierta) hasta que se liquida del todo.
+ */
+export const ESTADOS_LIQUIDACION = [
+  'pendiente',
+  'parcial',
+  'liquidado',
+] as const;
+export type EstadoLiquidacion = (typeof ESTADOS_LIQUIDACION)[number];
+
+export interface ResumenLiquidacion {
+  importe: number;
+  liquidado: number;
+  pendiente: number;
+  estado: EstadoLiquidacion;
+}
+
+/**
+ * Importe, liquidado y pendiente exactos en céntimos. Los vencimientos de
+ * rectificativas tienen importe negativo: el liquidado lleva el mismo signo.
+ */
+export function resumenLiquidacion(
+  importe: string | number,
+  liquidado: string | number,
+): ResumenLiquidacion {
+  const total = toCents(importe);
+  const hecho = toCents(liquidado);
+  const pendiente = total - hecho;
+  return {
+    importe: fromCents(total),
+    liquidado: fromCents(hecho),
+    pendiente: fromCents(pendiente),
+    estado:
+      pendiente === 0n ? 'liquidado' : hecho === 0n ? 'pendiente' : 'parcial',
+  };
+}
+
+export interface RechazoLiquidacion {
+  code:
+    | 'SETTLEMENT_AMOUNT_INVALID'
+    | 'SETTLEMENT_EXCEEDS_OUTSTANDING'
+    | 'SETTLEMENT_DATE_IN_FUTURE'
+    | 'DUE_ALREADY_SETTLED';
+  message: string;
+}
+
+/**
+ * Valida una liquidación (cobro o pago, total o parcial) contra el saldo
+ * vivo del vencimiento. `cantidad` es la magnitud positiva que se cobra o
+ * paga; el signo lo pone el vencimiento (`importeLiquidacionConSigno`).
+ * No se admite sobrepago: el exceso es otra operación (anticipo, compensación).
+ */
+export function motivoLiquidacionInvalida(p: {
+  importe: string | number;
+  liquidado: string | number;
+  cantidad: string | number;
+  fecha: string;
+  hoy: string;
+}): RechazoLiquidacion | null {
+  const cantidad = toCents(p.cantidad);
+  const pendiente = toCents(p.importe) - toCents(p.liquidado);
+  const vivo = pendiente < 0n ? -pendiente : pendiente;
+  if (vivo === 0n) {
+    return {
+      code: 'DUE_ALREADY_SETTLED',
+      message: 'El vencimiento ya está liquidado del todo',
+    };
+  }
+  if (cantidad <= 0n) {
+    return {
+      code: 'SETTLEMENT_AMOUNT_INVALID',
+      message: 'El importe de la liquidación debe ser mayor que cero',
+    };
+  }
+  if (cantidad > vivo) {
+    return {
+      code: 'SETTLEMENT_EXCEEDS_OUTSTANDING',
+      message: `El importe (${fromCents(cantidad).toFixed(2)}) supera el saldo pendiente del vencimiento (${fromCents(vivo).toFixed(2)})`,
+    };
+  }
+  if (p.fecha > p.hoy) {
+    return {
+      code: 'SETTLEMENT_DATE_IN_FUTURE',
+      message: 'La fecha de la liquidación no puede ser posterior a hoy',
+    };
+  }
+  return null;
+}
+
+/** Importe con el signo del vencimiento (negativo en rectificativas), en céntimos. */
+export function importeLiquidacionConSigno(
+  importeVencimiento: string | number,
+  cantidad: string | number,
+): bigint {
+  const c = toCents(cantidad);
+  return toCents(importeVencimiento) < 0n ? -c : c;
+}

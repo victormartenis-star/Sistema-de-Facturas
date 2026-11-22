@@ -26,6 +26,7 @@ import {
   journalEntryLines,
   ledgerAccounts,
   paymentMilestones,
+  paymentSettlements,
   projects,
   type JournalEntry,
   type LedgerAccount,
@@ -882,8 +883,8 @@ export class ContabilidadService {
    * Sincroniza el libro con facturación y tesorería (idempotente):
    *  1. Contabiliza facturas aprobadas/pagadas/rectificadas sin asiento vivo.
    *  2. Anula los asientos de facturas que se anularon o borraron después.
-   *  3. Contabiliza los vencimientos liquidados (cobros/pagos) sin asiento.
-   *  4. Anula los asientos de vencimientos que se reabrieron.
+   *  3. Contabiliza cada liquidación vigente (cobro o pago, total o parcial).
+   *  4. Anula los asientos de liquidaciones anuladas.
    * Cada documento va en su propia transacción: un período cerrado omite
    * ese documento (se informa) sin bloquear el resto.
    */
@@ -960,48 +961,54 @@ export class ContabilidadService {
       );
     }
 
-    // 3. Vencimientos liquidados sin asiento.
-    const liquidados = await this.dbs.db
+    // 3. Liquidaciones vigentes (cobros y pagos, totales o parciales) sin asiento.
+    const liquidaciones = await this.dbs.db
       .select({
-        id: paymentMilestones.id,
+        id: paymentSettlements.id,
         direction: paymentMilestones.direction,
       })
-      .from(paymentMilestones)
+      .from(paymentSettlements)
+      .innerJoin(
+        paymentMilestones,
+        eq(paymentMilestones.id, paymentSettlements.milestoneId),
+      )
       .innerJoin(invoices, eq(invoices.id, paymentMilestones.invoiceId))
       .where(
         and(
-          eq(paymentMilestones.companyId, companyId),
-          eq(paymentMilestones.status, 'pagado'),
+          eq(paymentSettlements.companyId, companyId),
+          eq(paymentSettlements.status, 'vigente'),
           isNull(invoices.deletedAt),
-          sql`${invoices.status} <> 'anulada'`,
-          sql`not ${vivo(['cobro', 'pago'], sql`${paymentMilestones.id}`)}`,
+          sql`not ${vivo(['cobro', 'pago'], sql`${paymentSettlements.id}`)}`,
         ),
       )
-      .orderBy(asc(paymentMilestones.paidAt))
+      .orderBy(
+        asc(paymentSettlements.settledOn),
+        asc(paymentSettlements.createdAt),
+      )
       .limit(LOTE_INTERFAZ);
-    for (const m of liquidados) {
+    for (const l of liquidaciones) {
       await this.procesar(
         res,
-        m.direction as OrigenAsiento,
-        m.id,
+        l.direction as OrigenAsiento,
+        l.id,
         async (tx) => {
-          await this.contabilizarVencimiento(tx, companyId, m.id);
+          await this.contabilizarLiquidacion(tx, companyId, l.id);
           res.contabilizados++;
         },
       );
     }
 
-    // 4. Asientos vivos de vencimientos reabiertos.
-    const reabiertos = await this.dbs.db
+    // 4. Asientos vivos de liquidaciones anuladas (o de vencimientos borrados).
+    const anuladas = await this.dbs.db
       .select({
         id: journalEntries.id,
         origenId: journalEntries.sourceId,
         origen: journalEntries.source,
       })
       .from(journalEntries)
-      .innerJoin(
-        paymentMilestones,
-        eq(paymentMilestones.id, journalEntries.sourceId),
+      .leftJoin(
+        paymentSettlements,
+        eq(paymentSettlements.id, journalEntries.sourceId),
       )
       .where(
         and(
@@ -1009,11 +1016,11 @@ export class ContabilidadService {
           inArray(journalEntries.source, ['cobro', 'pago']),
           eq(journalEntries.status, 'contabilizado'),
           isNull(journalEntries.reversesId),
-          eq(paymentMilestones.status, 'previsto'),
+          sql`(${paymentSettlements.id} is null or ${paymentSettlements.status} = 'anulada')`,
         ),
       )
       .limit(LOTE_INTERFAZ);
-    for (const e of reabiertos) {
+    for (const e of anuladas) {
       await this.procesar(
         res,
         e.origen as OrigenAsiento,
@@ -1023,7 +1030,7 @@ export class ContabilidadService {
             tx,
             companyId,
             e.id,
-            'vencimiento reabierto',
+            'cobro o pago anulado',
             todayIso(),
           );
           res.anulados++;
@@ -1101,43 +1108,47 @@ export class ContabilidadService {
     });
   }
 
-  private async contabilizarVencimiento(tx: Tx, companyId: string, id: string) {
-    const [m] = await tx
+  /** Asiento de una liquidación (cobro o pago, total o parcial) en su fecha. */
+  private async contabilizarLiquidacion(tx: Tx, companyId: string, id: string) {
+    const [l] = await tx
       .select({
-        id: paymentMilestones.id,
+        id: paymentSettlements.id,
+        amount: paymentSettlements.amount,
+        settledOn: paymentSettlements.settledOn,
         direction: paymentMilestones.direction,
         kind: paymentMilestones.kind,
-        amount: paymentMilestones.amount,
-        paidAt: paymentMilestones.paidAt,
-        dueDate: paymentMilestones.dueDate,
         invoiceNumber: invoices.invoiceNumber,
         contactName: contacts.legalName,
       })
-      .from(paymentMilestones)
+      .from(paymentSettlements)
+      .innerJoin(
+        paymentMilestones,
+        eq(paymentMilestones.id, paymentSettlements.milestoneId),
+      )
       .innerJoin(invoices, eq(invoices.id, paymentMilestones.invoiceId))
       .innerJoin(contacts, eq(contacts.id, invoices.contactId))
       .where(
         and(
-          eq(paymentMilestones.id, id),
-          eq(paymentMilestones.companyId, companyId),
+          eq(paymentSettlements.id, id),
+          eq(paymentSettlements.companyId, companyId),
         ),
       )
       .limit(1);
-    if (!m) return;
+    if (!l) return;
     const lineas = asientoDesdeVencimiento({
-      direction: m.direction,
-      kind: m.kind,
-      amount: m.amount,
-      invoiceNumber: m.invoiceNumber,
-      contactName: m.contactName,
+      direction: l.direction,
+      kind: l.kind,
+      amount: l.amount,
+      invoiceNumber: l.invoiceNumber,
+      contactName: l.contactName,
     });
-    if (lineas.length < 2) return; // vencimiento de importe 0: nada que contabilizar
+    if (lineas.length < 2) return;
     await this.contabilizar(tx, {
       companyId,
-      fecha: m.paidAt ?? m.dueDate,
+      fecha: l.settledOn,
       concepto: lineas[0].concepto,
-      origen: m.direction,
-      origenId: m.id,
+      origen: l.direction,
+      origenId: l.id,
       lineas,
     });
   }

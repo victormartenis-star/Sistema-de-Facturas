@@ -26,6 +26,7 @@ export const AUDIT_ENTITY_TYPES = [
   'contact',
   'document',
   'payment_milestone',
+  'payment_settlement',
   'user',
   'alert_rule',
   'bank_account',

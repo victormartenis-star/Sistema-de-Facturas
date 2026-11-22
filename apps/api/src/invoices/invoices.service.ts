@@ -78,7 +78,9 @@ import {
   cambiarEstadoMasivo,
   MENSAJE_ESTADO_CAMBIADO,
 } from '../common/cambiar-estado';
+import { getRequestContext } from '../common/request-context';
 import { DbService } from '../db/db.service';
+import { liquidarPendiente } from '../treasury/liquidaciones';
 import {
   condicionVersion,
   falloActualizacion,
@@ -703,22 +705,26 @@ export class InvoicesService {
 
     let originalPaid = { ordinario: 0, retencion: 0 };
     if (kind === 'total') {
-      const paid = await tx
+      // Lo realmente cobrado/pagado es el liquidado acumulado (también el de
+      // vencimientos liquidados solo en parte), no los vencimientos cerrados.
+      const vencimientos = await tx
         .select({
+          id: paymentMilestones.id,
           kind: paymentMilestones.kind,
           amount: paymentMilestones.amount,
+          settledAmount: paymentMilestones.settledAmount,
+          status: paymentMilestones.status,
+          version: paymentMilestones.version,
         })
         .from(paymentMilestones)
-        .where(
-          and(
-            eq(paymentMilestones.invoiceId, orig.id),
-            eq(paymentMilestones.status, 'pagado'),
-          ),
-        );
+        .where(eq(paymentMilestones.invoiceId, orig.id))
+        .for('update');
       const suma = (k: string) =>
         fromCents(
           sumCents(
-            paid.filter((m) => m.kind === k).map((m) => toCents(m.amount)),
+            vencimientos
+              .filter((m) => m.kind === k)
+              .map((m) => toCents(m.settledAmount)),
           ),
         );
       originalPaid = {
@@ -726,14 +732,28 @@ export class InvoicesService {
         retencion: suma('retencion'),
       };
 
-      await tx
-        .delete(paymentMilestones)
-        .where(
-          and(
-            eq(paymentMilestones.invoiceId, orig.id),
-            eq(paymentMilestones.status, 'previsto'),
-          ),
-        );
+      // Vivos sin liquidar: se borran (la rectificativa cubre su importe).
+      // Vivos liquidados en parte: se cierran por lo ya liquidado, para no
+      // perder sus liquidaciones; el resto lo cubre la rectificativa.
+      for (const m of vencimientos) {
+        if (m.status !== 'previsto') continue;
+        if (toCents(m.settledAmount) === 0n) {
+          await tx
+            .delete(paymentMilestones)
+            .where(eq(paymentMilestones.id, m.id));
+        } else {
+          await cambiarEstado(
+            tx,
+            paymentMilestones,
+            'milestone',
+            m.id,
+            'previsto',
+            'pagado',
+            { amount: m.settledAmount, paidAt: todayIso() },
+            m.version,
+          );
+        }
+      }
       await cambiarEstado(
         tx,
         invoices,
@@ -1042,27 +1062,49 @@ export class InvoicesService {
         message: 'Solo se pueden liquidar facturas aprobadas',
       });
     }
+    // Igual que pagar un vencimiento desde tesorería: no se paga a un
+    // proveedor o subcontrata bloqueado por PRL.
+    if (invoice.kind === 'compra') {
+      await this.compliance.assertCanTransact(
+        invoice.contactId,
+        'liquidar el pago',
+      );
+    }
     await this.dbs.db.transaction(async (tx) => {
-      // WHERE status = 'aprobada': si una anulación concurrente ganó, 409.
-      await cambiarEstado(
+      // Bloqueo y revalidación: si una anulación concurrente ganó, 409.
+      const [actual] = await tx
+        .select({ status: invoices.status, version: invoices.version })
+        .from(invoices)
+        .where(eq(invoices.id, id))
+        .for('update');
+      verificarVersion(actual.version, versionEsperada);
+      if (actual.status !== 'aprobada') {
+        throw new ConflictException(MENSAJE_ESTADO_CAMBIADO);
+      }
+      const vivos = await tx
+        .select({ id: paymentMilestones.id })
+        .from(paymentMilestones)
+        .where(
+          and(
+            eq(paymentMilestones.invoiceId, id),
+            eq(paymentMilestones.status, 'previsto'),
+          ),
+        );
+      if (vivos.length === 0) {
+        await cambiarEstado(tx, invoices, 'invoice', id, 'aprobada', 'pagada');
+        return;
+      }
+      // Cada vencimiento vivo se liquida por su saldo pendiente (con su
+      // historial y auditoría); la última liquidación deja la factura pagada.
+      const ctx = {
         tx,
-        invoices,
-        'invoice',
-        id,
-        'aprobada',
-        'pagada',
-        {},
-        versionEsperada,
-      );
-      await cambiarEstadoMasivo(
-        tx,
-        paymentMilestones,
-        'milestone',
-        eq(paymentMilestones.invoiceId, id),
-        'previsto',
-        'pagado',
-        { paidAt: todayIso() },
-      );
+        audit: this.audit,
+        companyId: this.dbs.getCompanyId(),
+        userId: getRequestContext()?.userId ?? null,
+      };
+      for (const v of vivos) {
+        await liquidarPendiente(ctx, v.id, { fecha: todayIso() });
+      }
     });
     return this.get(id);
   }
@@ -1096,7 +1138,8 @@ export class InvoicesService {
       .where(
         and(
           eq(paymentMilestones.invoiceId, id),
-          eq(paymentMilestones.status, 'pagado'),
+          // Cualquier cobro o pago, también parcial, impide anular.
+          sql`${paymentMilestones.settledAmount} <> 0`,
         ),
       )
       .limit(1);

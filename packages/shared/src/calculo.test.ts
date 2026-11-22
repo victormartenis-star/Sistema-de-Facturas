@@ -19,6 +19,9 @@ import {
   sumarImportes,
   startOfMonth,
   startOfWeek,
+  importeLiquidacionConSigno,
+  motivoLiquidacionInvalida,
+  resumenLiquidacion,
 } from './calculo';
 
 describe('round2', () => {
@@ -621,5 +624,67 @@ describe('sumarImportes', () => {
 
   it('admite importes negativos (rectificativas) sin deriva', () => {
     expect(sumarImportes([10.1, -0.1, 0.2])).toBe(10.2);
+  });
+});
+
+describe('liquidaciones parciales', () => {
+  it('resumen exacto en céntimos y estado derivado', () => {
+    expect(resumenLiquidacion('1210.00', '0')).toEqual({
+      importe: 1210,
+      liquidado: 0,
+      pendiente: 1210,
+      estado: 'pendiente',
+    });
+    expect(resumenLiquidacion('0.30', 0.1).pendiente).toBe(0.2);
+    expect(resumenLiquidacion('1210.00', '400.10').estado).toBe('parcial');
+    expect(resumenLiquidacion('1210.00', '1210.00').estado).toBe('liquidado');
+    expect(resumenLiquidacion('-121.00', '-21.00')).toMatchObject({
+      pendiente: -100,
+      estado: 'parcial',
+    });
+  });
+
+  const base = {
+    importe: '100.00',
+    liquidado: '60.00',
+    fecha: '2026-11-20',
+    hoy: '2026-11-22',
+  };
+
+  it('acepta liquidar exactamente el saldo pendiente', () => {
+    expect(motivoLiquidacionInvalida({ ...base, cantidad: 40 })).toBeNull();
+  });
+
+  it('rechaza superar el pendiente por un céntimo', () => {
+    expect(motivoLiquidacionInvalida({ ...base, cantidad: 40.01 })?.code).toBe(
+      'SETTLEMENT_EXCEEDS_OUTSTANDING',
+    );
+  });
+
+  it('rechaza importes no positivos, fechas futuras y vencimientos ya liquidados', () => {
+    expect(motivoLiquidacionInvalida({ ...base, cantidad: 0 })?.code).toBe(
+      'SETTLEMENT_AMOUNT_INVALID',
+    );
+    expect(
+      motivoLiquidacionInvalida({ ...base, cantidad: 1, fecha: '2026-11-23' })
+        ?.code,
+    ).toBe('SETTLEMENT_DATE_IN_FUTURE');
+    expect(
+      motivoLiquidacionInvalida({ ...base, liquidado: '100.00', cantidad: 1 })
+        ?.code,
+    ).toBe('DUE_ALREADY_SETTLED');
+  });
+
+  it('en rectificativas el pendiente se mide en magnitud y el signo lo pone el vencimiento', () => {
+    expect(
+      motivoLiquidacionInvalida({
+        ...base,
+        importe: '-100.00',
+        liquidado: '-60.00',
+        cantidad: 40,
+      }),
+    ).toBeNull();
+    expect(importeLiquidacionConSigno('-100.00', 40)).toBe(-4000n);
+    expect(importeLiquidacionConSigno('100.00', 40)).toBe(4000n);
   });
 });

@@ -763,7 +763,18 @@ export const paymentMilestones = pgTable(
     dueDate: date('due_date').notNull(),
     amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
     status: milestoneStatusEnum('status').notNull().default('previsto'),
+    /** Fecha de la liquidación que lo dejó a cero (null mientras siga vivo). */
     paidAt: date('paid_at'),
+    /**
+     * Liquidado acumulado: suma de las liquidaciones vigentes
+     * (`payment_settlements`), con el signo del importe. El saldo vivo es
+     * `amount - settled_amount`; `status` pasa a 'pagado' cuando llega a cero.
+     */
+    settledAmount: numeric('settled_amount', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    /** Control optimista: +1 en cada liquidación, anulación o cambio de estado. */
+    version: integer('version').notNull().default(1),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -777,6 +788,17 @@ export const paymentMilestones = pgTable(
       t.companyId,
       t.status,
       t.dueDate,
+    ),
+    // El liquidado lleva el signo del importe y nunca lo supera (sin sobrepago).
+    check(
+      'payment_milestones_settled_range',
+      sql`(${t.amount} >= 0 AND ${t.settledAmount} BETWEEN 0 AND ${t.amount}) OR (${t.amount} < 0 AND ${t.settledAmount} BETWEEN ${t.amount} AND 0)`,
+    ),
+    // Coherencia del estado: 'pagado' exige saldo vivo cero; 'previsto' exige
+    // saldo vivo (salvo un vencimiento de importe 0, que no tiene nada que liquidar).
+    check(
+      'payment_milestones_status_settled',
+      sql`(${t.status} = 'pagado' AND ${t.settledAmount} = ${t.amount}) OR (${t.status} = 'previsto' AND (${t.settledAmount} <> ${t.amount} OR ${t.amount} = 0))`,
     ),
   ],
 );
@@ -3704,3 +3726,77 @@ export const journalEntryLines = pgTable(
 );
 
 export type JournalEntryLine = typeof journalEntryLines.$inferSelect;
+
+/* ───────────── Liquidaciones de vencimientos (cobros y pagos parciales) ─────────────
+ * Cada cobro o pago, total o parcial, contra un vencimiento. Inmutables: una
+ * liquidación errónea se anula (status 'anulada', con motivo) y deja de contar
+ * en `payment_milestones.settled_amount`. Reglas puras en
+ * `packages/shared/src/calculo.ts` (`motivoLiquidacionInvalida`).
+ */
+
+export const settlementStatusEnum = pgEnum('settlement_status', [
+  'vigente',
+  'anulada',
+]);
+
+export const paymentSettlements = pgTable(
+  'payment_settlements',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    // Cascada: un vencimiento solo se borra sin liquidado (anular o
+    // rectificar la factura); su historial queda en audit_log.
+    milestoneId: uuid('milestone_id')
+      .notNull()
+      .references(() => paymentMilestones.id, { onDelete: 'cascade' }),
+    /** Con el signo del vencimiento (negativo en rectificativas); nunca 0. */
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    settledOn: date('settled_on').notNull(),
+    status: settlementStatusEnum('status').notNull().default('vigente'),
+    bankAccountId: uuid('bank_account_id').references(() => bankAccounts.id),
+    /** Movimiento bancario conciliado que originó la liquidación. */
+    bankTransactionId: uuid('bank_transaction_id').references(
+      () => bankTransactions.id,
+    ),
+    paymentInstrument: paymentInstrumentEnum('payment_instrument')
+      .notNull()
+      .default('transferencia'),
+    reference: varchar('reference', { length: 80 }),
+    notes: text('notes'),
+    reversalReason: varchar('reversal_reason', { length: 240 }),
+    reversedAt: timestamp('reversed_at', { withTimezone: true }),
+    reversedBy: uuid('reversed_by').references(() => users.id),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('payment_settlements_company_milestone_idx').on(
+      t.companyId,
+      t.milestoneId,
+      t.settledOn,
+    ),
+    index('payment_settlements_company_date_idx').on(
+      t.companyId,
+      t.settledOn,
+      t.status,
+    ),
+    index('payment_settlements_bank_transaction_idx')
+      .on(t.bankTransactionId)
+      .where(sql`bank_transaction_id IS NOT NULL`),
+    check('payment_settlements_amount_not_zero', sql`${t.amount} <> 0`),
+    check(
+      'payment_settlements_reversal_coherence',
+      sql`(${t.status} = 'anulada') = (${t.reversedAt} IS NOT NULL AND ${t.reversalReason} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export type PaymentSettlement = typeof paymentSettlements.$inferSelect;

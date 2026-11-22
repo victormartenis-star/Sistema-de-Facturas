@@ -5,6 +5,7 @@
  */
 
 import { z } from 'zod';
+import { type EstadoLiquidacion } from './calculo';
 import { type Transiciones } from './maquina-estados';
 
 export const MILESTONE_DIRECTIONS = ['cobro', 'pago'] as const;
@@ -80,6 +81,86 @@ export interface MilestoneDto {
   amount: number;
   status: MilestoneStatus;
   paidAt: string | null;
+  /** Liquidado acumulado (cobros/pagos vigentes), con el signo del importe. */
+  settledAmount: number;
+  /** Saldo vivo: importe − liquidado. Es lo que cuenta en previsiones y cruces. */
+  pendingAmount: number;
+  settlementState: EstadoLiquidacion;
+  /** Versión para If-Match al liquidar. */
+  version: number;
+}
+
+/* ─────────────── liquidaciones (cobros y pagos totales o parciales) ─────────────── */
+
+export const SETTLEMENT_STATUSES = ['vigente', 'anulada'] as const;
+export type SettlementStatus = (typeof SETTLEMENT_STATUSES)[number];
+
+export const SETTLEMENT_STATUS_LABELS: Record<SettlementStatus, string> = {
+  vigente: 'Vigente',
+  anulada: 'Anulada',
+};
+
+/** Una liquidación no se edita ni se borra: se anula (terminal). */
+export const SETTLEMENT_TRANSITIONS: Transiciones<SettlementStatus> = {
+  vigente: ['anulada'],
+  anulada: [],
+};
+
+export const SETTLEMENT_STATE_LABELS: Record<EstadoLiquidacion, string> = {
+  pendiente: 'Pendiente',
+  parcial: 'Parcial',
+  liquidado: 'Liquidado',
+};
+
+const fechaLiquidacion = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato esperado: AAAA-MM-DD');
+
+export const settlementCreateSchema = z.object({
+  /** Magnitud positiva que se cobra o paga (el signo lo pone el vencimiento). */
+  importe: z
+    .number()
+    .finite()
+    .positive('El importe debe ser mayor que cero')
+    .max(9_999_999_999.99)
+    .refine(
+      (n) => Math.abs(Math.round(n * 100) - n * 100) < 1e-6,
+      'Como máximo dos decimales',
+    ),
+  fecha: fechaLiquidacion,
+  bankAccountId: z.string().uuid().nullish(),
+  paymentInstrument: z.enum(PAYMENT_INSTRUMENTS).optional(),
+  referencia: z.string().trim().max(80).nullish(),
+  notas: z.string().trim().max(500).nullish(),
+});
+export type SettlementCreateInput = z.input<typeof settlementCreateSchema>;
+
+export const settlementCancelSchema = z.object({
+  motivo: z.string().trim().min(3).max(240),
+});
+export type SettlementCancelInput = z.input<typeof settlementCancelSchema>;
+
+export interface SettlementDto {
+  id: string;
+  milestoneId: string;
+  /** Con el signo del vencimiento (negativo en rectificativas). */
+  amount: number;
+  settledOn: string;
+  status: SettlementStatus;
+  bankAccountId: string | null;
+  bankAccountName: string | null;
+  bankTransactionId: string | null;
+  paymentInstrument: PaymentInstrument;
+  reference: string | null;
+  notes: string | null;
+  reversalReason: string | null;
+  reversedAt: string | null;
+  createdAt: string;
+  version: number;
+}
+
+export interface MilestoneDetailDto extends MilestoneDto {
+  settlements: SettlementDto[];
 }
 
 /**

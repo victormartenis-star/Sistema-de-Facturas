@@ -14,6 +14,12 @@ import {
   BankAccountUpdateInput,
   CASHFLOW_GROUPINGS,
   CashflowGrouping,
+  ESTADOS_LIQUIDACION,
+  EstadoLiquidacion,
+  SettlementCancelInput,
+  SettlementCreateInput,
+  settlementCancelSchema,
+  settlementCreateSchema,
   MILESTONE_DIRECTIONS,
   MILESTONE_STATUSES,
   MilestoneDirection,
@@ -24,6 +30,8 @@ import {
   setPaymentInstrumentSchema,
 } from '@erp/shared';
 import { Roles } from '../auth/roles';
+import { Idempotente } from '../common/idempotencia/idempotente.decorator';
+import { VersionEsperada } from '../common/version';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { TreasuryService } from './treasury.service';
 
@@ -40,8 +48,14 @@ export class TreasuryController {
     @Query('status') status?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('liquidacion') liquidacion?: string,
   ) {
     return this.service.milestones({
+      settlementState: ESTADOS_LIQUIDACION.includes(
+        liquidacion as EstadoLiquidacion,
+      )
+        ? (liquidacion as EstadoLiquidacion)
+        : undefined,
       direction: MILESTONE_DIRECTIONS.includes(direction as MilestoneDirection)
         ? (direction as MilestoneDirection)
         : undefined,
@@ -53,12 +67,45 @@ export class TreasuryController {
     });
   }
 
+  /** Detalle del vencimiento: importe, liquidado, pendiente e historial de liquidaciones. */
+  @Get('milestones/:id')
+  milestone(@Param('id', ParseUUIDPipe) id: string) {
+    return this.service.milestoneDetail(id);
+  }
+
+  /** Cobro o pago, total o parcial (Idempotency-Key; If-Match opcional con la versión del vencimiento). */
+  @Post('milestones/:id/liquidaciones')
+  @Idempotente()
+  settle(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(settlementCreateSchema))
+    body: SettlementCreateInput,
+    @VersionEsperada() version: number | undefined,
+  ) {
+    return this.service.settle(id, body, version);
+  }
+
+  /** Anula una liquidación (con motivo); el vencimiento recupera ese saldo vivo. */
+  @Post('liquidaciones/:id/anular')
+  @Idempotente()
+  @HttpCode(200)
+  cancelSettlement(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(settlementCancelSchema))
+    body: SettlementCancelInput,
+    @VersionEsperada() version: number | undefined,
+  ) {
+    return this.service.cancelSettlement(id, body, version);
+  }
+
+  /** Liquida todo el saldo vivo con fecha de hoy. */
   @Post('milestones/:id/pagar')
   @HttpCode(204)
   async pay(@Param('id', ParseUUIDPipe) id: string) {
     await this.service.setStatus(id, 'pagado');
   }
 
+  /** Anula todas las liquidaciones vigentes del vencimiento. */
   @Post('milestones/:id/reabrir')
   @HttpCode(204)
   async reopen(@Param('id', ParseUUIDPipe) id: string) {

@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { and, desc, eq, isNotNull, isNull, ne } from 'drizzle-orm';
 import {
@@ -20,6 +21,7 @@ import {
   MilestoneForMatching,
   matchCandidates,
   parseBankStatement,
+  resumenLiquidacion,
 } from '@erp/shared';
 import { AuditService } from '../../audit/audit.service';
 import { DbService } from '../../db/db.service';
@@ -156,9 +158,11 @@ export class BankReconciliationService {
           ne(paymentMilestones.status, 'pagado'),
         ),
       );
+    // Se casa contra el saldo vivo: un vencimiento cobrado en parte sugiere
+    // el movimiento que salda lo que falta.
     const milestones: MilestoneForMatching[] = milestoneRows.map((m) => ({
       id: m.id,
-      amount: Number(m.amount),
+      amount: Math.abs(resumenLiquidacion(m.amount, m.settledAmount).pendiente),
       dueDate: m.dueDate,
       direction: m.direction,
     }));
@@ -198,7 +202,10 @@ export class BankReconciliationService {
     }
 
     const [milestone] = await this.dbs.db
-      .select({ id: paymentMilestones.id })
+      .select({
+        id: paymentMilestones.id,
+        direction: paymentMilestones.direction,
+      })
       .from(paymentMilestones)
       .where(
         and(
@@ -213,6 +220,16 @@ export class BankReconciliationService {
         message: 'Vencimiento no encontrado',
       });
 
+    // Un único commit: enlace del movimiento, liquidación por el importe del
+    // movimiento (puede ser parcial) y auditoría. Si el importe supera el
+    // saldo vivo, o el sentido no casa, no se enlaza nada.
+    const direccion = Number(tx.amount) >= 0 ? 'cobro' : 'pago';
+    if (milestone.direction !== direccion) {
+      throw new UnprocessableEntityException({
+        code: 'BANK_MOVEMENT_DIRECTION_MISMATCH',
+        message: `Un ${direccion === 'cobro' ? 'ingreso' : 'cargo'} no puede conciliar un vencimiento de ${milestone.direction}`,
+      });
+    }
     await this.dbs.db.transaction(async (trx) => {
       await trx
         .update(bankTransactions)
@@ -224,10 +241,14 @@ export class BankReconciliationService {
         action: 'update',
         newData: { reconciledMilestoneId: milestoneId },
       });
+      await this.treasury.settleInTx(trx, milestoneId, {
+        cantidad: Math.abs(Number(tx.amount)),
+        fecha: tx.transactionDate,
+        bankAccountId: tx.bankAccountId,
+        bankTransactionId: tx.id,
+        referencia: tx.concept.slice(0, 80) || null,
+      });
     });
-    // `TreasuryService.setStatus` abre su propia conexión y no es consciente
-    // de transacciones: va después del commit atómico movimiento + auditoría.
-    await this.treasury.setStatus(milestoneId, 'pagado');
   }
 
   /**

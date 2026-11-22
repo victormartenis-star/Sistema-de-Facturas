@@ -17,6 +17,7 @@ import {
   MILESTONE_KIND_LABELS,
   PAYMENT_INSTRUMENTS,
   PAYMENT_INSTRUMENT_LABELS,
+  SETTLEMENT_STATE_LABELS,
   type CashflowGrouping,
   type MilestoneDto,
   type PaymentInstrument,
@@ -35,6 +36,7 @@ import { ErrorBanner, PageHeader, selectCls } from '@/components/ui';
 import { BankAccountsPanel } from './bank-accounts-panel';
 import { CrossedMaturitiesPanel } from './crossed-maturities-panel';
 import { IlliquidityPanel } from './illiquidity-panel';
+import { LiquidacionesModal } from './liquidaciones-modal';
 
 // ─── Tooltip personalizado del gráfico ────────────────────────────────────────
 function CashflowTooltip({
@@ -83,9 +85,15 @@ export default function TesoreriaPage() {
     queryFn: () =>
       treasuryApi.milestones({
         direction: direction || undefined,
-        status: milestoneStatus || undefined,
+        // «En parte» no es un status persistido: es el estado de liquidación derivado.
+        status:
+          milestoneStatus && milestoneStatus !== 'parcial'
+            ? milestoneStatus
+            : undefined,
+        liquidacion: milestoneStatus === 'parcial' ? 'parcial' : undefined,
       }),
   });
+  const [detalle, setDetalle] = useState<MilestoneDto | null>(null);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['cashflow'] });
@@ -340,6 +348,7 @@ export default function TesoreriaPage() {
               onChange={(e) => setMilestoneStatus(e.target.value)}
             >
               <option value="previsto">Previstos</option>
+              <option value="parcial">Cobrados o pagados en parte</option>
               <option value="pagado">Liquidados</option>
               <option value="">Todos</option>
             </select>
@@ -365,6 +374,12 @@ export default function TesoreriaPage() {
                   <th className="px-3 py-2 font-medium">Tipo</th>
                   <th className="px-3 py-2 font-medium">Instrumento</th>
                   <th className="px-3 py-2 text-right font-medium">Importe</th>
+                  <th className="px-3 py-2 text-right font-medium">
+                    Liquidado
+                  </th>
+                  <th className="px-3 py-2 text-right font-medium">
+                    Pendiente
+                  </th>
                   <th className="px-3 py-2" />
                 </tr>
               </thead>
@@ -440,20 +455,45 @@ export default function TesoreriaPage() {
                         {m.direction === 'cobro' ? '+' : '−'}
                         {formatEur(m.amount)}
                       </td>
-                      <td className="px-3 py-2.5 text-right">
+                      <td className="px-3 py-2.5 text-right text-gray-600 tabular-nums">
+                        {m.settledAmount ? formatEur(m.settledAmount) : '—'}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">
+                        <span className="font-medium">
+                          {formatEur(m.pendingAmount)}
+                        </span>
+                        {m.settlementState === 'parcial' && (
+                          <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                            {SETTLEMENT_STATE_LABELS.parcial}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                        <button
+                          onClick={() => setDetalle(m)}
+                          className="rounded-md px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50"
+                        >
+                          {m.direction === 'cobro' ? 'Cobros' : 'Pagos'}
+                        </button>
                         <Autorizado accion="cambiarEstado">
                           {m.status === 'previsto' ? (
                             <button
                               onClick={() => payMutation.mutate(m.id)}
-                              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50"
+                              disabled={payMutation.isPending}
+                              title="Liquida todo el saldo pendiente con fecha de hoy"
+                              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50 disabled:opacity-50"
                             >
                               <IconCheck size={13} />
-                              Liquidar
+                              {m.settlementState === 'parcial'
+                                ? 'Liquidar resto'
+                                : 'Liquidar'}
                             </button>
                           ) : (
                             <button
                               onClick={() => reopenMutation.mutate(m.id)}
-                              className="rounded-md px-2 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100"
+                              disabled={reopenMutation.isPending}
+                              title="Anula todas las liquidaciones del vencimiento"
+                              className="rounded-md px-2 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100 disabled:opacity-50"
                             >
                               Reabrir
                             </button>
@@ -468,6 +508,10 @@ export default function TesoreriaPage() {
           </div>
         )}
       </section>
+      <LiquidacionesModal
+        vencimiento={detalle}
+        onClose={() => setDetalle(null)}
+      />
     </div>
   );
 }

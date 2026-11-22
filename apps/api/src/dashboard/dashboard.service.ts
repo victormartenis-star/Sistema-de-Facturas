@@ -8,7 +8,7 @@ import {
   projects,
   purchaseOrders,
 } from '@erp/db';
-import { round2 } from '@erp/shared';
+import { resumenLiquidacion, round2 } from '@erp/shared';
 import { DbService } from '../db/db.service';
 
 export interface DashboardResumenDto {
@@ -97,6 +97,7 @@ export class DashboardService {
         direction: paymentMilestones.direction,
         dueDate: paymentMilestones.dueDate,
         amount: paymentMilestones.amount,
+        settledAmount: paymentMilestones.settledAmount,
         status: paymentMilestones.status,
       })
       .from(paymentMilestones)
@@ -115,7 +116,8 @@ export class DashboardService {
     let vencidoPago = 0;
 
     for (const m of milestonesRows) {
-      const amt = Number(m.amount);
+      // Saldo vivo: lo cobrado o pagado en parte ya no está pendiente.
+      const amt = resumenLiquidacion(m.amount, m.settledAmount).pendiente;
       const vencido = m.dueDate < today;
       if (m.direction === 'cobro') {
         pendienteCobro += amt;

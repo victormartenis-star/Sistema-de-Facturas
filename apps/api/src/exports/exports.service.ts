@@ -55,6 +55,7 @@ import {
   toCents,
   toCsv,
   toExportJson,
+  resumenLiquidacion,
 } from '@erp/shared';
 import { AuditService } from '../audit/audit.service';
 import { CostControlService } from '../cost-control/cost-control.service';
@@ -800,6 +801,14 @@ export class ExportsService {
         texto('kind', 'Clase', (r) => r.milestone.kind),
         fecha('dueDate', 'Vencimiento', (r) => r.milestone.dueDate),
         importe('amount', 'Importe', (r) => r.milestone.amount),
+        importe('settledAmount', 'Liquidado', (r) => r.milestone.settledAmount),
+        importe(
+          'pendingAmount',
+          'Pendiente',
+          (r) =>
+            resumenLiquidacion(r.milestone.amount, r.milestone.settledAmount)
+              .pendiente,
+        ),
         texto('status', 'Estado', (r) => r.milestone.status),
         fecha('paidAt', 'Pagado el', (r) => r.milestone.paidAt),
         texto('contactName', 'Contacto', (r) => r.contactName),

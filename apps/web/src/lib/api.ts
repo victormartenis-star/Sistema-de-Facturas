@@ -199,7 +199,9 @@ import type {
   LoginInput,
   MantenimientoCreateInput,
   MantenimientoEquipoDto,
+  MilestoneDetailDto,
   MilestoneDto,
+  SettlementCreateInput,
   ParteMaquinariaCreateInput,
   ParteMaquinariaDto,
   ParteMaquinariaUpdateInput,
@@ -1150,6 +1152,7 @@ export const treasuryApi = {
   milestones: (options: {
     direction?: string;
     status?: string;
+    liquidacion?: string;
     from?: string;
     to?: string;
   }) => {
@@ -1158,9 +1161,33 @@ export const treasuryApi = {
     if (options.status) params.set('status', options.status);
     if (options.from) params.set('from', options.from);
     if (options.to) params.set('to', options.to);
+    if (options.liquidacion) params.set('liquidacion', options.liquidacion);
     const qs = params.toString();
     return request<MilestoneDto[]>(`/treasury/milestones${qs ? `?${qs}` : ''}`);
   },
+  milestoneDetail: (id: string) =>
+    request<MilestoneDetailDto>(`/treasury/milestones/${id}`),
+  /** Cobro o pago total o parcial; `clave` se reutiliza en los reintentos del mismo intento. */
+  settle: (
+    id: string,
+    input: SettlementCreateInput,
+    version: number,
+    clave: string,
+  ) =>
+    request<MilestoneDetailDto>(`/treasury/milestones/${id}/liquidaciones`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: { ...ifMatch(version), ...idempotencyKey(clave) },
+    }),
+  cancelSettlement: (settlementId: string, motivo: string, version: number) =>
+    request<MilestoneDetailDto>(
+      `/treasury/liquidaciones/${settlementId}/anular`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ motivo }),
+        headers: ifMatch(version),
+      },
+    ),
   pay: (id: string) =>
     request<void>(`/treasury/milestones/${id}/pagar`, { method: 'POST' }),
   reopen: (id: string) =>

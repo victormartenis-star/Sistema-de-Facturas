@@ -351,6 +351,13 @@
       "when": 1795339848025,
       "tag": "0049_contabilidad_general",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1795343474072,
+      "tag": "0050_liquidaciones_parciales",
+      "breakpoints": true
     }
   ]
 }

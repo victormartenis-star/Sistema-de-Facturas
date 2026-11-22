@@ -3,7 +3,18 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, eq, gte, inArray, isNull, lte, ne, SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  lte,
+  ne,
+  sql,
+  SQL,
+} from 'drizzle-orm';
 import {
   BankAccount,
   bankAccounts,
@@ -12,6 +23,9 @@ import {
   invoiceLines,
   invoices,
   paymentMilestones,
+  paymentSettlements,
+  type PaymentSettlement,
+  type Tx,
 } from '@erp/db';
 import {
   BankAccountCreateInput,
@@ -26,16 +40,24 @@ import {
   IlliquidityProjectionDto,
   MaturityGroupDto,
   MilestoneDirection,
+  MilestoneDetailDto,
   MilestoneDto,
+  EstadoLiquidacion,
+  SettlementCancelInput,
+  SettlementCreateInput,
+  SettlementDto,
+  SettlementStatus,
+  resumenLiquidacion,
+  settlementCancelSchema,
+  settlementCreateSchema,
+  toCents,
   MilestoneStatus,
   PaymentInstrument,
   addDays,
   addMonths,
   bankAccountCreateSchema,
   bankAccountUpdateSchema,
-  InvoiceStatus,
   hasAllowedProject,
-  invoiceStatusFromMilestones,
   round2,
   setPaymentInstrumentSchema,
   startOfMonth,
@@ -44,8 +66,16 @@ import {
 } from '@erp/shared';
 import { AuditService } from '../audit/audit.service';
 import { ComplianceService } from '../compliance/compliance.service';
-import { cambiarEstado } from '../common/cambiar-estado';
+import { getRequestContext } from '../common/request-context';
 import { DbService } from '../db/db.service';
+import {
+  anularLiquidacion,
+  anularTodas,
+  liquidarPendiente,
+  registrarLiquidacion,
+  type Contexto,
+  type DatosLiquidacion,
+} from './liquidaciones';
 
 const MONTHS_ES = [
   'enero',
@@ -72,6 +102,29 @@ function bankAccountToDto(row: BankAccount): BankAccountDto {
     isActive: row.isActive,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function settlementToDto(
+  s: PaymentSettlement,
+  bankAccountName: string | null,
+): SettlementDto {
+  return {
+    id: s.id,
+    milestoneId: s.milestoneId,
+    amount: Number(s.amount),
+    settledOn: s.settledOn,
+    status: s.status as SettlementStatus,
+    bankAccountId: s.bankAccountId,
+    bankAccountName,
+    bankTransactionId: s.bankTransactionId,
+    paymentInstrument: s.paymentInstrument as PaymentInstrument,
+    reference: s.reference,
+    notes: s.notes,
+    reversalReason: s.reversalReason,
+    reversedAt: s.reversedAt?.toISOString() ?? null,
+    createdAt: s.createdAt.toISOString(),
+    version: s.version,
   };
 }
 
@@ -193,6 +246,7 @@ export class TreasuryService {
   async milestones(options: {
     direction?: MilestoneDirection;
     status?: MilestoneStatus;
+    settlementState?: EstadoLiquidacion;
     from?: string;
     to?: string;
   }): Promise<MilestoneDto[]> {
@@ -215,6 +269,16 @@ export class TreasuryService {
     }
     if (options.status) {
       filters.push(eq(paymentMilestones.status, options.status));
+    }
+    if (options.settlementState === 'liquidado') {
+      filters.push(eq(paymentMilestones.status, 'pagado'));
+    } else if (options.settlementState) {
+      filters.push(eq(paymentMilestones.status, 'previsto'));
+      filters.push(
+        options.settlementState === 'parcial'
+          ? sql`${paymentMilestones.settledAmount} <> 0`
+          : sql`${paymentMilestones.settledAmount} = 0`,
+      );
     }
     if (options.from)
       filters.push(gte(paymentMilestones.dueDate, options.from));
@@ -257,6 +321,10 @@ export class TreasuryService {
     contactName: string,
     fromCertification: boolean,
   ): MilestoneDto {
+    const resumen = resumenLiquidacion(
+      milestone.amount,
+      milestone.settledAmount,
+    );
     return {
       id: milestone.id,
       invoiceId: milestone.invoiceId,
@@ -267,10 +335,206 @@ export class TreasuryService {
       paymentInstrument: milestone.paymentInstrument as PaymentInstrument,
       fromCertification,
       dueDate: milestone.dueDate,
-      amount: Number(milestone.amount),
+      amount: resumen.importe,
       status: milestone.status as MilestoneStatus,
       paidAt: milestone.paidAt,
+      settledAmount: resumen.liquidado,
+      pendingAmount: resumen.pendiente,
+      settlementState: resumen.estado,
+      version: milestone.version,
     };
+  }
+
+  /* ───────────────────── liquidaciones (cobros y pagos) ───────────────────── */
+
+  private contexto(tx: Tx): Contexto {
+    return {
+      tx,
+      audit: this.audit,
+      companyId: this.dbs.getCompanyId(),
+      userId: getRequestContext()?.userId ?? null,
+    };
+  }
+
+  /**
+   * Comprobaciones previas comunes: el vencimiento existe en la empresa, el
+   * rol obra solo ve los de sus obras y, para pagar a un proveedor, la
+   * homologación PRL lo permite (deshacer siempre se permite).
+   */
+  private async comprobarAcceso(
+    id: string,
+    comprometeDinero: boolean,
+  ): Promise<typeof paymentMilestones.$inferSelect> {
+    const companyId = this.dbs.getCompanyId();
+    const [row] = await this.dbs.db
+      .select()
+      .from(paymentMilestones)
+      .where(
+        and(
+          eq(paymentMilestones.id, id),
+          eq(paymentMilestones.companyId, companyId),
+        ),
+      )
+      .limit(1);
+    if (!row) {
+      throw new NotFoundException({
+        code: 'DUE_NOT_FOUND',
+        message: 'Vencimiento no encontrado',
+      });
+    }
+    const allowed = await this.dbs.getObrasAccesibles();
+    if (allowed !== null) {
+      const lines = await this.dbs.db
+        .select({ projectId: invoiceLines.projectId })
+        .from(invoiceLines)
+        .where(eq(invoiceLines.invoiceId, row.invoiceId));
+      if (
+        !hasAllowedProject(
+          allowed,
+          lines.map((l) => l.projectId),
+        )
+      ) {
+        throw new NotFoundException({
+          code: 'DUE_NOT_FOUND',
+          message: 'Vencimiento no encontrado',
+        });
+      }
+    }
+    if (comprometeDinero && row.direction === 'pago') {
+      const [invoice] = await this.dbs.db
+        .select({ contactId: invoices.contactId })
+        .from(invoices)
+        .where(eq(invoices.id, row.invoiceId))
+        .limit(1);
+      if (invoice) {
+        await this.compliance.assertCanTransact(
+          invoice.contactId,
+          'liquidar el pago',
+        );
+      }
+    }
+    return row;
+  }
+
+  /** Detalle del vencimiento con el historial de liquidaciones (vigentes y anuladas). */
+  async milestoneDetail(id: string): Promise<MilestoneDetailDto> {
+    await this.comprobarAcceso(id, false);
+    const [row] = await this.dbs.db
+      .select({
+        milestone: paymentMilestones,
+        invoiceNumber: invoices.invoiceNumber,
+        contactName: contacts.legalName,
+        certificationId: certifications.id,
+      })
+      .from(paymentMilestones)
+      .innerJoin(invoices, eq(paymentMilestones.invoiceId, invoices.id))
+      .innerJoin(contacts, eq(invoices.contactId, contacts.id))
+      .leftJoin(
+        certifications,
+        and(
+          eq(certifications.invoiceId, invoices.id),
+          isNull(certifications.deletedAt),
+        ),
+      )
+      .where(eq(paymentMilestones.id, id))
+      .limit(1);
+    const liquidaciones = await this.dbs.db
+      .select({ s: paymentSettlements, bankAccountName: bankAccounts.name })
+      .from(paymentSettlements)
+      .leftJoin(
+        bankAccounts,
+        eq(bankAccounts.id, paymentSettlements.bankAccountId),
+      )
+      .where(eq(paymentSettlements.milestoneId, id))
+      .orderBy(
+        asc(paymentSettlements.settledOn),
+        asc(paymentSettlements.createdAt),
+      );
+    return {
+      ...this.milestoneToDto(
+        row.milestone,
+        row.invoiceNumber,
+        row.contactName,
+        row.certificationId !== null,
+      ),
+      settlements: liquidaciones.map(({ s, bankAccountName }) =>
+        settlementToDto(s, bankAccountName),
+      ),
+    };
+  }
+
+  /** Registra un cobro o pago (total o parcial) contra el vencimiento. */
+  async settle(
+    id: string,
+    input: SettlementCreateInput,
+    versionEsperada?: number,
+  ): Promise<MilestoneDetailDto> {
+    const data = settlementCreateSchema.parse(input);
+    await this.comprobarAcceso(id, true);
+    await this.dbs.db.transaction((tx) =>
+      registrarLiquidacion(
+        this.contexto(tx),
+        id,
+        {
+          cantidad: data.importe,
+          fecha: data.fecha,
+          bankAccountId: data.bankAccountId,
+          paymentInstrument: data.paymentInstrument,
+          referencia: data.referencia,
+          notas: data.notas,
+        },
+        versionEsperada,
+      ),
+    );
+    return this.milestoneDetail(id);
+  }
+
+  /** Anula una liquidación; el vencimiento recupera ese saldo vivo. */
+  async cancelSettlement(
+    settlementId: string,
+    input: SettlementCancelInput,
+    versionEsperada?: number,
+  ): Promise<MilestoneDetailDto> {
+    const data = settlementCancelSchema.parse(input);
+    const [ref] = await this.dbs.db
+      .select({ milestoneId: paymentSettlements.milestoneId })
+      .from(paymentSettlements)
+      .where(
+        and(
+          eq(paymentSettlements.id, settlementId),
+          eq(paymentSettlements.companyId, this.dbs.getCompanyId()),
+        ),
+      )
+      .limit(1);
+    if (!ref) {
+      throw new NotFoundException({
+        code: 'SETTLEMENT_NOT_FOUND',
+        message: 'Liquidación no encontrada',
+      });
+    }
+    await this.comprobarAcceso(ref.milestoneId, false);
+    await this.dbs.db.transaction((tx) =>
+      anularLiquidacion(
+        this.contexto(tx),
+        settlementId,
+        data.motivo,
+        versionEsperada,
+      ),
+    );
+    return this.milestoneDetail(ref.milestoneId);
+  }
+
+  /**
+   * Variante para la conciliación bancaria: registra la liquidación dentro
+   * de la transacción del enlace movimiento ↔ vencimiento (atómico).
+   */
+  async settleInTx(
+    tx: Tx,
+    milestoneId: string,
+    datos: DatosLiquidacion,
+  ): Promise<void> {
+    await this.comprobarAcceso(milestoneId, true);
+    await registrarLiquidacion(this.contexto(tx), milestoneId, datos);
   }
 
   /** Marca a mano el instrumento de cobro/pago de un vencimiento (informativo, sin integración bancaria). */
@@ -316,7 +580,7 @@ export class TreasuryService {
     });
 
     const group = (rows: MilestoneDto[]): MaturityGroupDto => ({
-      total: round2(rows.reduce((s, r) => s + r.amount, 0)),
+      total: round2(rows.reduce((s, r) => s + r.pendingAmount, 0)),
       items: rows,
     });
 
@@ -345,110 +609,30 @@ export class TreasuryService {
     };
   }
 
-  /** Liquida o reabre un vencimiento y sincroniza el estado de la factura. */
+  /**
+   * Acciones de siempre, ahora sobre liquidaciones:
+   *  - `pagado`: liquida TODO el saldo vivo con fecha de hoy (una liquidación).
+   *  - `previsto` (reabrir): anula todas las liquidaciones vigentes.
+   * 409 `DUE_ALREADY_IN_STATE` si ya está liquidado del todo o sin nada liquidado.
+   */
   async setStatus(id: string, status: MilestoneStatus): Promise<void> {
-    const companyId = await this.dbs.getCompanyId();
-    const [row] = await this.dbs.db
-      .select()
-      .from(paymentMilestones)
-      .where(
-        and(
-          eq(paymentMilestones.id, id),
-          eq(paymentMilestones.companyId, companyId),
-        ),
-      )
-      .limit(1);
-    if (!row) {
-      throw new NotFoundException({
-        code: 'DUE_NOT_FOUND',
-        message: 'Vencimiento no encontrado',
-      });
-    }
-    const allowed = await this.dbs.getObrasAccesibles();
-    if (allowed !== null) {
-      const lines = await this.dbs.db
-        .select({ projectId: invoiceLines.projectId })
-        .from(invoiceLines)
-        .where(eq(invoiceLines.invoiceId, row.invoiceId));
-      if (
-        !hasAllowedProject(
-          allowed,
-          lines.map((l) => l.projectId),
-        )
-      ) {
-        throw new NotFoundException({
-          code: 'DUE_NOT_FOUND',
-          message: 'Vencimiento no encontrado',
-        });
-      }
-    }
-    if (row.status === status) {
+    const row = await this.comprobarAcceso(id, status === 'pagado');
+    const sinLiquidar = toCents(row.settledAmount) === 0n;
+    if (
+      (status === 'pagado' && row.status === 'pagado') ||
+      (status === 'previsto' && sinLiquidar)
+    ) {
       throw new ConflictException({
         code: 'DUE_ALREADY_IN_STATE',
         message: 'El vencimiento ya está en ese estado',
       });
     }
-    // Homologación PRL: no se paga a una subcontrata bloqueada. Reabrir un
-    // vencimiento sí se permite siempre (es deshacer, no comprometer dinero).
-    if (status === 'pagado' && row.direction === 'pago') {
-      const [invoice] = await this.dbs.db
-        .select({ contactId: invoices.contactId })
-        .from(invoices)
-        .where(eq(invoices.id, row.invoiceId))
-        .limit(1);
-      if (invoice) {
-        await this.compliance.assertCanTransact(
-          invoice.contactId,
-          'liquidar el pago',
-        );
-      }
-    }
     await this.dbs.db.transaction(async (tx) => {
-      // La factura queda pagada cuando no le quedan vencimientos previstos.
-      // Se bloquea la fila y el estado lo decide la regla pura: una factura
-      // en borrador o anulada no se toca. El bloqueo va ANTES de tocar el
-      // vencimiento (mismo orden que anular: factura -> vencimientos), para
-      // que pagar y anular a la vez no se interbloqueen.
-      const [invoice] = await tx
-        .select({ status: invoices.status })
-        .from(invoices)
-        .where(eq(invoices.id, row.invoiceId))
-        .for('update');
-
-      await cambiarEstado(
-        tx,
-        paymentMilestones,
-        'milestone',
-        id,
-        row.status as MilestoneStatus,
-        status,
-        { paidAt: status === 'pagado' ? todayIso() : null },
-      );
-      const [pending] = await tx
-        .select({ id: paymentMilestones.id })
-        .from(paymentMilestones)
-        .where(
-          and(
-            eq(paymentMilestones.invoiceId, row.invoiceId),
-            eq(paymentMilestones.status, 'previsto'),
-          ),
-        )
-        .limit(1);
-      const next = invoice
-        ? invoiceStatusFromMilestones(
-            invoice.status as InvoiceStatus,
-            Boolean(pending),
-          )
-        : null;
-      if (next && next !== invoice.status) {
-        await cambiarEstado(
-          tx,
-          invoices,
-          'invoice',
-          row.invoiceId,
-          invoice.status as InvoiceStatus,
-          next,
-        );
+      const ctx = this.contexto(tx);
+      if (status === 'pagado') {
+        await liquidarPendiente(ctx, id, { fecha: todayIso() });
+      } else {
+        await anularTodas(ctx, id, 'Reapertura del vencimiento');
       }
     });
   }
@@ -485,8 +669,9 @@ export class TreasuryService {
     for (const item of items) {
       const key = keyOf(item.dueDate);
       const bucket = totals.get(key) ?? { cobros: 0, pagos: 0 };
-      if (item.direction === 'cobro') bucket.cobros += item.amount;
-      else bucket.pagos += item.amount;
+      // Solo el saldo vivo: lo ya cobrado o pagado en parte no vuelve a contar.
+      if (item.direction === 'cobro') bucket.cobros += item.pendingAmount;
+      else bucket.pagos += item.pendingAmount;
       totals.set(key, bucket);
     }
 
