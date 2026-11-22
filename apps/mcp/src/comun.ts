@@ -1,9 +1,24 @@
 import { ErrorApi, errorDeDominio, type ErrorDeDominio } from './api';
 
-/** Resultado de herramienta con el objeto serializado como texto. */
+/**
+ * Resultado de herramienta: el objeto serializado como texto (para modelos
+ * que solo leen `content`) y, además, en `structuredContent` para que el
+ * agente lea campos sin parsear JSON. La especificación MCP exige que
+ * `structuredContent` sea un objeto: las listas van en `{ items }` y los
+ * escalares en `{ resultado }`.
+ */
 export function ok(datos: unknown) {
+  const estructurado =
+    datos === undefined || datos === null
+      ? undefined
+      : Array.isArray(datos)
+        ? { items: datos }
+        : typeof datos === 'object'
+          ? (datos as Record<string, unknown>)
+          : { resultado: datos };
   return {
     content: [{ type: 'text' as const, text: JSON.stringify(datos, null, 2) }],
+    ...(estructurado ? { structuredContent: estructurado } : {}),
   };
 }
 

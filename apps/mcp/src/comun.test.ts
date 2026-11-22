@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { ErrorApi, errorDeDominio } from './api';
-import { ejecutar } from './comun';
+import { ejecutar, ok } from './comun';
+
+describe('ok', () => {
+  it('devuelve el objeto también en structuredContent', () => {
+    expect(ok({ a: 1 }).structuredContent).toEqual({ a: 1 });
+  });
+
+  it('envuelve listas en items y escalares en resultado (MCP exige objeto)', () => {
+    expect(ok([1, 2]).structuredContent).toEqual({ items: [1, 2] });
+    expect(ok(3).structuredContent).toEqual({ resultado: 3 });
+    expect(ok(undefined).structuredContent).toBeUndefined();
+  });
+});
 
 describe('errorDeDominio', () => {
   it('extrae errorCode, detail y correlationId de un problem+json', () => {
