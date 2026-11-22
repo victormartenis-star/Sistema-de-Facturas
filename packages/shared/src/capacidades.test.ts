@@ -48,6 +48,13 @@ describe('can', () => {
     }
   });
 
+  it('contabilidad: solo admin, gerente y administración la mutan', () => {
+    expect(can('administracion', 'crear', 'contabilidad')).toBe(true);
+    expect(can('gerente', 'anular', 'contabilidad')).toBe(true);
+    expect(can('obra', 'crear', 'contabilidad')).toBe(false);
+    expect(can('lector', 'exportar', 'contabilidad')).toBe(true);
+  });
+
   it('cubre todos los roles definidos', () => {
     for (const rol of USER_ROLES) {
       expect(typeof can(rol, 'crear')).toBe('boolean');

@@ -3513,3 +3513,194 @@ export const idempotencyKeys = pgTable(
 );
 
 export type IdempotencyKey = typeof idempotencyKeys.$inferSelect;
+
+/* ───────────────── Contabilidad general (libro mayor) ─────────────────
+ * Plan de cuentas PGC por empresa, períodos mensuales y asientos de partida
+ * doble. Reglas puras en `packages/shared/src/contabilidad.ts`. Garantías en
+ * base de datos (migración 0049): trigger diferido de cuadre debe = haber por
+ * asiento e inmutabilidad de las líneas contabilizadas.
+ */
+
+export const ledgerAccountTypeEnum = pgEnum('ledger_account_type', [
+  'activo',
+  'pasivo',
+  'patrimonio',
+  'ingreso',
+  'gasto',
+]);
+
+export const ledgerAccounts = pgTable(
+  'ledger_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    code: varchar('code', { length: 12 }).notNull(),
+    name: varchar('name', { length: 160 }).notNull(),
+    type: ledgerAccountTypeEnum('type').notNull(),
+    /** Solo las cuentas imputables reciben apuntes; las de 3 dígitos agrupan. */
+    postable: boolean('postable').notNull().default(true),
+    isActive: boolean('is_active').notNull().default(true),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('ledger_accounts_company_code_unique').on(t.companyId, t.code),
+    check('ledger_accounts_code_digits', sql`${t.code} ~ '^[0-9]{3,12}$'`),
+  ],
+);
+
+export type LedgerAccount = typeof ledgerAccounts.$inferSelect;
+
+export const fiscalPeriodStatusEnum = pgEnum('fiscal_period_status', [
+  'abierto',
+  'cerrado',
+]);
+
+/** Período contable mensual. Sin fila = abierto. */
+export const fiscalPeriods = pgTable(
+  'fiscal_periods',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    year: smallint('year').notNull(),
+    month: smallint('month').notNull(),
+    status: fiscalPeriodStatusEnum('status').notNull().default('abierto'),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    closedBy: uuid('closed_by').references(() => users.id),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('fiscal_periods_company_year_month_unique').on(
+      t.companyId,
+      t.year,
+      t.month,
+    ),
+    check('fiscal_periods_month_range', sql`${t.month} BETWEEN 1 AND 12`),
+  ],
+);
+
+export const journalEntrySourceEnum = pgEnum('journal_entry_source', [
+  'manual',
+  'factura_venta',
+  'factura_compra',
+  'cobro',
+  'pago',
+  'anulacion',
+]);
+
+export const journalEntryStatusEnum = pgEnum('journal_entry_status', [
+  'contabilizado',
+  'anulado',
+]);
+
+export const journalEntries = pgTable(
+  'journal_entries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    /** Número correlativo por empresa y ejercicio. */
+    number: integer('number').notNull(),
+    fiscalYear: smallint('fiscal_year').notNull(),
+    entryDate: date('entry_date').notNull(),
+    description: varchar('description', { length: 240 }).notNull(),
+    source: journalEntrySourceEnum('source').notNull(),
+    /** Factura o vencimiento de origen (null en manuales). */
+    sourceId: uuid('source_id'),
+    status: journalEntryStatusEnum('status').notNull().default('contabilizado'),
+    /** Contra-asiento que anula este asiento. */
+    reversedById: uuid('reversed_by_id').references(
+      (): AnyPgColumn => journalEntries.id,
+    ),
+    /** Asiento que este contra-asiento anula. */
+    reversesId: uuid('reverses_id').references(
+      (): AnyPgColumn => journalEntries.id,
+    ),
+    reversalReason: varchar('reversal_reason', { length: 240 }),
+    totalAmount: numeric('total_amount', { precision: 14, scale: 2 }).notNull(),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('journal_entries_company_year_number_unique').on(
+      t.companyId,
+      t.fiscalYear,
+      t.number,
+    ),
+    index('journal_entries_company_date_idx').on(
+      t.companyId,
+      t.entryDate,
+      t.number,
+    ),
+    // Interfaz contable idempotente: un único asiento vivo por documento de origen.
+    uniqueIndex('journal_entries_source_vivo_unique')
+      .on(t.companyId, t.source, t.sourceId)
+      .where(
+        sql`source_id IS NOT NULL AND status = 'contabilizado' AND reverses_id IS NULL`,
+      ),
+    check(
+      'journal_entries_source_id_coherence',
+      sql`(${t.source} = 'manual') = (${t.sourceId} IS NULL) OR ${t.source} = 'anulacion'`,
+    ),
+  ],
+);
+
+export type JournalEntry = typeof journalEntries.$inferSelect;
+
+export const journalEntryLines = pgTable(
+  'journal_entry_lines',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    entryId: uuid('entry_id')
+      .notNull()
+      .references(() => journalEntries.id, { onDelete: 'restrict' }),
+    lineNo: smallint('line_no').notNull(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => ledgerAccounts.id, { onDelete: 'restrict' }),
+    debit: numeric('debit', { precision: 14, scale: 2 }).notNull().default('0'),
+    credit: numeric('credit', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    /** Imputación analítica por obra (centro de coste). */
+    projectId: uuid('project_id').references(() => projects.id),
+    description: varchar('description', { length: 240 }),
+  },
+  (t) => [
+    index('journal_entry_lines_entry_idx').on(t.entryId),
+    index('journal_entry_lines_company_account_idx').on(
+      t.companyId,
+      t.accountId,
+    ),
+    index('journal_entry_lines_company_project_idx')
+      .on(t.companyId, t.projectId)
+      .where(sql`project_id IS NOT NULL`),
+    check(
+      'journal_entry_lines_un_lado',
+      sql`${t.debit} >= 0 AND ${t.credit} >= 0 AND (${t.debit} > 0) <> (${t.credit} > 0)`,
+    ),
+  ],
+);
+
+export type JournalEntryLine = typeof journalEntryLines.$inferSelect;

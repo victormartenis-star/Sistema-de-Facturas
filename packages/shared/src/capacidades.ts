@@ -28,6 +28,8 @@ export const RECURSOS_UI = [
   'factura',
   'obra',
   'partida',
+  /** Contabilidad general: solo admin, gerente y administración la mutan. */
+  'contabilidad',
 ] as const;
 export type RecursoUi = (typeof RECURSOS_UI)[number];
 
@@ -50,7 +52,8 @@ export function can(
   const restringida =
     (accion === 'rectificar' &&
       (recurso === 'factura' || recurso === 'certificacion')) ||
-    (accion === 'devolver' && recurso === 'albaran');
+    (accion === 'devolver' && recurso === 'albaran') ||
+    recurso === 'contabilidad';
   if (restringida) return ROLES_RECTIFICAR.includes(rol);
   return true;
 }

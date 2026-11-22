@@ -8,6 +8,15 @@ import {
 } from './api-error';
 import type { ExportRecurso, PaginaDto } from '@erp/shared';
 import type {
+  AsientoCreateInput,
+  AsientoDto,
+  CuentaContableDto,
+  LibroMayorDto,
+  PeriodoContableDto,
+  ResultadoInterfazDto,
+  SumasSaldosDto,
+} from '@erp/shared';
+import type {
   CertSubcontrataCreateInput,
   CertSubcontrataFacturarInput,
   CertSubcontrataDto,
@@ -1967,5 +1976,72 @@ export const subcontratasApi = {
         headers: idempotencyKey(clave ?? nuevoUuid()),
         body: JSON.stringify(input),
       },
+    ),
+};
+
+/* ───────────────────────── Contabilidad general ───────────────────────── */
+
+function qs(params: Record<string, string | number | undefined>): string {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== '') p.set(k, String(v));
+  }
+  const s = p.toString();
+  return s ? `?${s}` : '';
+}
+
+export const contabilidadApi = {
+  cuentas: (q?: string, imputables?: boolean) =>
+    request<CuentaContableDto[]>(
+      `/contabilidad/cuentas${qs({ q, imputables: imputables ? 'true' : undefined })}`,
+    ),
+  inicializarPlan: () =>
+    request<{ creadas: number }>('/contabilidad/cuentas/inicializar', {
+      method: 'POST',
+    }),
+  asientos: (f: {
+    desde?: string;
+    hasta?: string;
+    origen?: string;
+    limit?: number;
+    offset?: number;
+  }) =>
+    request<{ items: AsientoDto[]; total: number }>(
+      `/contabilidad/asientos${qs(f)}`,
+    ),
+  crearAsiento: (input: AsientoCreateInput, clave: string) =>
+    request<AsientoDto>('/contabilidad/asientos', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: idempotencyKey(clave),
+    }),
+  anularAsiento: (id: string, version: number, motivo: string) =>
+    request<AsientoDto>(`/contabilidad/asientos/${id}/anular`, {
+      method: 'POST',
+      body: JSON.stringify({ motivo }),
+      headers: ifMatch(version),
+    }),
+  contabilizarPendientes: () =>
+    request<ResultadoInterfazDto>('/contabilidad/interfaz/contabilizar', {
+      method: 'POST',
+    }),
+  mayor: (cuenta: string, desde?: string, hasta?: string) =>
+    request<LibroMayorDto>(
+      `/contabilidad/mayor/${encodeURIComponent(cuenta)}${qs({ desde, hasta })}`,
+    ),
+  sumasSaldos: (desde?: string, hasta?: string) =>
+    request<SumasSaldosDto>(
+      `/contabilidad/sumas-saldos${qs({ desde, hasta })}`,
+    ),
+  periodos: (ejercicio: number) =>
+    request<PeriodoContableDto[]>(`/contabilidad/periodos/${ejercicio}`),
+  cambiarPeriodo: (
+    ejercicio: number,
+    mes: number,
+    accion: 'cerrar' | 'reabrir',
+  ) =>
+    request<PeriodoContableDto>(
+      `/contabilidad/periodos/${ejercicio}/${mes}/${accion}`,
+      { method: 'POST' },
     ),
 };

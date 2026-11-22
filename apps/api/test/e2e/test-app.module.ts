@@ -35,6 +35,7 @@ import { IncidenciasPRLModule } from '../../src/modules/incidencias-prl/incidenc
 import { ProjectsModule } from '../../src/projects/projects.module';
 import { PurchaseOrdersModule } from '../../src/purchase-orders/purchase-orders.module';
 import { TreasuryModule } from '../../src/treasury/treasury.module';
+import { ContabilidadModule } from '../../src/contabilidad/contabilidad.module';
 import { UsersModule } from '../../src/users/users.module';
 import { SubcontratasModule } from '../../src/modules/subcontratas/subcontratas.module';
 
@@ -100,6 +101,7 @@ import { SubcontratasModule } from '../../src/modules/subcontratas/subcontratas.
     DocumentsModule,
     OcrModule, // importa DocumentsModule (de nuevo, Nest lo deduplica) e InvoicesModule
     TreasuryModule,
+    ContabilidadModule,
     DashboardModule,
     CopilotoModule,
     UsersModule,

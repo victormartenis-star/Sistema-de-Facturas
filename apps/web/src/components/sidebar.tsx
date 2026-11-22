@@ -65,6 +65,7 @@ const GESTION: NavItem[] = [
   { href: '/facturas', label: 'Facturas', icon: IconReceipt },
   { href: '/albaranes', label: 'Albaranes', icon: IconInbox },
   { href: '/tesoreria', label: 'Tesorería', icon: IconWallet },
+  { href: '/contabilidad', label: 'Contabilidad', icon: IconCalculator },
   {
     href: '/tesoreria/conciliacion',
     label: 'Conciliación bancaria',
