@@ -57,3 +57,4 @@ export * from './seed-campo';
 export * from './contabilidad';
 export * from './activos';
 export * from './almacen';
+export * from './control-presupuestario';

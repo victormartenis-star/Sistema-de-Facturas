@@ -26,7 +26,7 @@ async function bootstrap() {
 
   app.enableCors({
     origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000',
-    exposedHeaders: ['X-Request-Id'],
+    exposedHeaders: ['X-Request-Id', 'X-Budget-Warning'],
   });
 
   const port = Number(process.env.API_PORT ?? 3001);

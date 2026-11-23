@@ -4167,3 +4167,53 @@ export const stockMovements = pgTable(
 );
 
 export type StockMovement = typeof stockMovements.$inferSelect;
+
+/* ──────────────────── Control presupuestario por obra ────────────────────
+ * Configuración del control de disponibilidad (SAP PS/CO): sin fila, la obra
+ * está en modo observación. Reglas en `calculo.ts`
+ * (`evaluarControlPresupuestario`); contrato en `@erp/shared`.
+ */
+
+export const budgetControlModeEnum = pgEnum('budget_control_mode', [
+  'observacion',
+  'aviso',
+  'bloqueo',
+]);
+
+export const projectBudgetControls = pgTable(
+  'project_budget_controls',
+  {
+    projectId: uuid('project_id')
+      .primaryKey()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    mode: budgetControlModeEnum('mode').notNull().default('observacion'),
+    /** % sobre el presupuesto antes de considerarlo excedido. */
+    tolerancePct: numeric('tolerance_pct', { precision: 5, scale: 2 })
+      .notNull()
+      .default('0'),
+    /** % del presupuesto a partir del cual se avisa. */
+    warningPct: numeric('warning_pct', { precision: 5, scale: 2 })
+      .notNull()
+      .default('90'),
+    updatedBy: uuid('updated_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('project_budget_controls_company_mode_idx').on(t.companyId, t.mode),
+    check(
+      'project_budget_controls_pct',
+      sql`${t.tolerancePct} BETWEEN 0 AND 100 AND ${t.warningPct} > 0 AND ${t.warningPct} <= 100`,
+    ),
+  ],
+);
+
+export type ProjectBudgetControl = typeof projectBudgetControls.$inferSelect;

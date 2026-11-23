@@ -85,7 +85,16 @@ import { AuditService } from '../audit/audit.service';
 import { getRequestContext } from '../common/request-context';
 import { verificarVersion } from '../common/version';
 import { ContabilidadService } from '../contabilidad/contabilidad.service';
+import { ControlPresupuestarioService } from '../cost-control/control-presupuestario.service';
 import { DbService } from '../db/db.service';
+
+/*
+ * Referencias cualificadas a la fila exterior en subconsultas correlacionadas:
+ * en una SELECT de una sola tabla Drizzle no prefija las columnas, y dentro
+ * de la subconsulta "id" se resolvería contra la tabla interna.
+ */
+const COL_ARTICULO_ID = sql.raw('"stock_articles"."id"');
+const COL_ALMACEN_ID = sql.raw('"warehouses"."id"');
 
 /** Máximo de movimientos de un listado no paginado. */
 const LIMITE_MOVIMIENTOS = 500;
@@ -244,6 +253,7 @@ export class AlmacenService {
     private readonly dbs: DbService,
     private readonly audit: AuditService,
     private readonly contabilidad: ContabilidadService,
+    private readonly control: ControlPresupuestarioService,
   ) {}
 
   /* ─────────────────────────── acceso ─────────────────────────── */
@@ -473,8 +483,8 @@ export class AlmacenService {
       .select({
         w: warehouses,
         projectNombre: projects.name,
-        valor: sql<string>`coalesce((select sum(${stockItems.stockValue}) from ${stockItems} where ${stockItems.warehouseId} = ${warehouses.id}), 0)`,
-        alertas: sql<number>`(select count(*)::int from ${stockItems} where ${stockItems.warehouseId} = ${warehouses.id} and ${stockItems.minStock} > 0 and ${stockItems.quantity} <= ${stockItems.minStock})`,
+        valor: sql<string>`coalesce((select sum(si.stock_value) from stock_items si where si.warehouse_id = ${COL_ALMACEN_ID}), 0)`,
+        alertas: sql<number>`(select count(*)::int from stock_items si where si.warehouse_id = ${COL_ALMACEN_ID} and si.min_stock > 0 and si.quantity <= si.min_stock)`,
       })
       .from(warehouses)
       .leftJoin(projects, eq(projects.id, warehouses.projectId))
@@ -620,8 +630,8 @@ export class AlmacenService {
     const filas = await this.dbs.db
       .select({
         a: stockArticles,
-        cantidad: sql<string>`coalesce((select sum(${stockItems.quantity}) from ${stockItems} where ${stockItems.articleId} = ${stockArticles.id}), 0)`,
-        valor: sql<string>`coalesce((select sum(${stockItems.stockValue}) from ${stockItems} where ${stockItems.articleId} = ${stockArticles.id}), 0)`,
+        cantidad: sql<string>`coalesce((select sum(si.quantity) from stock_items si where si.article_id = ${COL_ARTICULO_ID}), 0)`,
+        valor: sql<string>`coalesce((select sum(si.stock_value) from stock_items si where si.article_id = ${COL_ARTICULO_ID}), 0)`,
       })
       .from(stockArticles)
       .where(and(...filtros))
@@ -1085,7 +1095,8 @@ export class AlmacenService {
       const lineas = [...d.lineas].sort((a, b) =>
         a.articuloId.localeCompare(b.articuloId),
       );
-      const creados: string[] = [];
+      // 1) Bloquea y valora todas las líneas sin escribir nada.
+      const valoradas = [];
       for (const l of lineas) {
         const art = await this.cargarArticulo(tx, companyId, l.articuloId);
         const item = await this.bloquearSaldo(tx, companyId, w.id, art.id);
@@ -1097,6 +1108,21 @@ export class AlmacenService {
             item.reservedQuantity,
           ),
         );
+        valoradas.push({ art, item, cantidad, sal });
+      }
+      // 2) Control presupuestario activo con el coste total imputado (antes
+      //    de cualquier escritura en audit_log de esta transacción).
+      await this.control.verificar(tx, {
+        projectId: obra.id,
+        importe: centsToNumeric(
+          sumCents(valoradas.map((v) => toCents(v.sal.valor))),
+        ),
+        operacion: 'consumo_almacen',
+        referencia: w.code,
+      });
+      // 3) Asientos, kárdex y saldos.
+      const creados: string[] = [];
+      for (const { art, item, cantidad, sal } of valoradas) {
         const id = randomUUID();
         const concepto = `Consumo ${art.code} de ${w.code} a obra ${obra.code}`;
         const asientoId = await this.asiento(tx, {

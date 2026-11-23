@@ -36,6 +36,7 @@ export const TITULO_POR_CODIGO: Readonly<Record<string, string>> = {
   AUDIT_CHAIN_BUSY: 'Cadena de auditoría ocupada',
   INTERNAL_ERROR: 'Error interno',
   INSUFFICIENT_STOCK: 'Stock insuficiente',
+  BUDGET_EXCEEDED: 'Presupuesto de obra excedido',
   WAREHOUSE_INACTIVE: 'Almacén inactivo',
   STOCK_ARTICLE_INACTIVE: 'Artículo inactivo',
   DELIVERY_NOTE_ALREADY_STOCKED: 'Albarán ya recepcionado en stock',

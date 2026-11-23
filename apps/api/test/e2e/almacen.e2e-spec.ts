@@ -110,6 +110,15 @@ describe('Almacén y stock (integración)', () => {
     expect(existencias.body.saldoFinal).toBe(1650);
     const resumen = await api().get('/almacen/resumen').expect(200);
     expect(resumen.body).toMatchObject({ valoracionTotal: 1650, alertas: 0 });
+    // Totales del catálogo (subconsulta correlacionada por artículo).
+    const articulos = await api().get('/almacen/articulos').expect(200);
+    expect(articulos.body).toEqual([
+      expect.objectContaining({
+        codigo: 'CEM-42',
+        cantidadTotal: 150,
+        valorTotal: 1650,
+      }),
+    ]);
   });
 
   it('consumo a obra: valora al PMP, imputa el coste a la obra y rechaza stock insuficiente', async () => {

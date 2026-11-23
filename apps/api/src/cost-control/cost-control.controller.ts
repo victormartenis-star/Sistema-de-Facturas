@@ -1,9 +1,32 @@
-import { Controller, Get, Param, ParseUUIDPipe } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Put,
+  Query,
+} from '@nestjs/common';
+import {
+  controlPresupuestarioUpdateSchema,
+  cuadroMargenesQuerySchema,
+  margenesObraQuerySchema,
+  type ControlPresupuestarioUpdateInput,
+  type CuadroMargenesQuery,
+  type MargenesObraQuery,
+} from '@erp/shared';
+import { Roles } from '../auth/roles';
+import { VersionEsperada } from '../common/version';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { ControlPresupuestarioService } from './control-presupuestario.service';
 import { CostControlService } from './cost-control.service';
 
 @Controller()
 export class CostControlController {
-  constructor(private readonly service: CostControlService) {}
+  constructor(
+    private readonly service: CostControlService,
+    private readonly control: ControlPresupuestarioService,
+  ) {}
 
   /**
    * Analítica de costes en tiempo real: Coste Previsto (BAC) vs. Coste Real
@@ -23,5 +46,45 @@ export class CostControlController {
   @Get('projects/:id/economics')
   economics(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.getEconomics(id);
+  }
+
+  /**
+   * Cuadro de márgenes de la cartera visible: presupuestado, comprometido,
+   * coste real (compras, partes, almacén y amortización), certificado,
+   * facturado, cobrado, márgenes, desviación y estado del control.
+   */
+  @Get('cost-control/margenes')
+  cuadro(
+    @Query(new ZodValidationPipe(cuadroMargenesQuerySchema))
+    q: CuadroMargenesQuery,
+  ) {
+    return this.control.cuadro(q);
+  }
+
+  /** Cuadro de una obra con desglose por partida y capítulo. */
+  @Get('projects/:id/margenes')
+  margenesObra(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query(new ZodValidationPipe(margenesObraQuerySchema)) q: MargenesObraQuery,
+  ) {
+    return this.control.margenesObra(id, q);
+  }
+
+  /** Configuración, evaluación y últimos eventos del control presupuestario. */
+  @Get('projects/:id/control-presupuestario')
+  estadoControl(@Param('id', ParseUUIDPipe) id: string) {
+    return this.control.estado(id);
+  }
+
+  /** Modo (observación / aviso / bloqueo), tolerancia y umbral de aviso. */
+  @Put('projects/:id/control-presupuestario')
+  @Roles('admin', 'gerente')
+  configurarControl(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(controlPresupuestarioUpdateSchema))
+    body: ControlPresupuestarioUpdateInput,
+    @VersionEsperada() version: number | undefined,
+  ) {
+    return this.control.configurar(id, body, version);
   }
 }

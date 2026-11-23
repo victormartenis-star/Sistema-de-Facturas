@@ -4,9 +4,15 @@ import {
   Injectable,
   NestInterceptor,
 } from '@nestjs/common';
-import { Observable } from 'rxjs';
+import { Observable, tap } from 'rxjs';
 import type { AuthenticatedRequest } from '../auth/jwt-auth.guard';
-import { runWithRequestContext } from './request-context';
+import {
+  iniciarAvisosRespuesta,
+  runWithRequestContext,
+} from './request-context';
+
+/** Cabecera con los avisos de negocio no bloqueantes de la respuesta. */
+export const CABECERA_AVISOS = 'X-Budget-Warning';
 
 /**
  * Publica la identidad del usuario autenticado (`req.user`, dejado por
@@ -25,7 +31,19 @@ export class RequestContextInterceptor implements NestInterceptor {
         companyId: req.user.companyId,
         role: req.user.role,
       },
-      () => next.handle(),
+      () => {
+        const avisos = iniciarAvisosRespuesta();
+        const res = context
+          .switchToHttp()
+          .getResponse<{ setHeader?: (k: string, v: string) => void }>();
+        return next.handle().pipe(
+          tap(() => {
+            if (avisos.length > 0) {
+              res.setHeader?.(CABECERA_AVISOS, avisos.join(', '));
+            }
+          }),
+        );
+      },
     );
   }
 }

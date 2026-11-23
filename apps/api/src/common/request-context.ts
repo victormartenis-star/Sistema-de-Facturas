@@ -22,6 +22,8 @@ export interface RequestContext {
 export interface CorrelationStore {
   correlationId: string;
   identidad?: RequestContext;
+  /** Avisos de negocio no bloqueantes que viajan en la cabecera de respuesta. */
+  avisos?: string[];
 }
 
 const storage = new AsyncLocalStorage<CorrelationStore>();
@@ -59,4 +61,20 @@ export function getRequestContext(): RequestContext | undefined {
 export function getCorrelationId(): string | null {
   const id = storage.getStore()?.correlationId;
   return id ? id : null;
+}
+
+/**
+ * Prepara la lista de avisos de la petición en curso y la devuelve: el
+ * interceptor la lee al responder (fuera ya del contexto asíncrono).
+ */
+export function iniciarAvisosRespuesta(): string[] {
+  const store = storage.getStore();
+  if (!store) return [];
+  store.avisos ??= [];
+  return store.avisos;
+}
+
+/** Anota un aviso no bloqueante (p. ej. exceso de presupuesto en modo aviso). */
+export function anotarAvisoRespuesta(aviso: string): void {
+  storage.getStore()?.avisos?.push(aviso);
 }

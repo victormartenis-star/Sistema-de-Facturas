@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
+import { CostControlModule } from '../cost-control/cost-control.module';
 import { ProveedoresModule } from '../modules/proveedores/proveedores.module';
 import { PurchaseOrdersController } from './purchase-orders.controller';
 import { PurchaseOrdersService } from './purchase-orders.service';
 
 @Module({
-  imports: [ProveedoresModule],
+  imports: [ProveedoresModule, CostControlModule],
   controllers: [PurchaseOrdersController],
   providers: [PurchaseOrdersService],
   // Los albaranes recalculan el estado del pedido al imputarse.

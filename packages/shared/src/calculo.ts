@@ -1016,3 +1016,347 @@ export function regularizacionStock(
     saldo: construirSaldo(s.cantidad + dif, s.valor + toCents(valor)),
   };
 }
+
+/* ─────────── control presupuestario y cuadro de márgenes por obra ───────────
+ * Modelo de SAP PS/CO (control de disponibilidad) y Oracle PPM: el coste
+ * consumido del presupuesto es lo REAL (ya imputado) más lo COMPROMETIDO
+ * (pedido y aún no facturado). Importes en céntimos BigInt; los porcentajes
+ * son ratios (coma flotante, 2 decimales) y no se reutilizan como dinero.
+ */
+
+type Importe = string | number;
+
+/** `a / b × 100` con 2 decimales; null si el divisor es 0. */
+function pct(a: bigint, b: bigint): number | null {
+  if (b === 0n) return null;
+  return Number(mulDivRound(a, 10_000n, b)) / 100;
+}
+
+/**
+ * Comprometido pendiente: por compromiso, `importe − ejecutado` sin bajar de
+ * cero (lo ya facturado o certificado está en el coste real; contarlo aquí
+ * sería contarlo dos veces). Un compromiso sobreejecutado no resta de otros.
+ */
+export function comprometidoPendiente(
+  compromisos: readonly { importe: Importe; ejecutado: Importe }[],
+): number {
+  return fromCents(
+    sumCents(
+      compromisos.map((c) => {
+        const p = toCents(c.importe) - toCents(c.ejecutado);
+        return p > 0n ? p : 0n;
+      }),
+    ),
+  );
+}
+
+/**
+ * Cobrado expresado en base imponible de la obra, para compararlo con lo
+ * facturado (que va en base): por factura, `baseObra × liquidado / total de
+ * vencimientos` (el total incluye IVA y retención). Exacto al céntimo.
+ */
+export function cobradoEnBase(
+  facturas: readonly {
+    baseObra: Importe;
+    totalVencimientos: Importe;
+    liquidado: Importe;
+  }[],
+): number {
+  return fromCents(
+    sumCents(
+      facturas.map((f) => {
+        const total = toCents(f.totalVencimientos);
+        if (total === 0n) return 0n;
+        return mulDivRound(toCents(f.baseObra), toCents(f.liquidado), total);
+      }),
+    ),
+  );
+}
+
+export interface EntradaCuadroMargenes {
+  /** Importe de contrato (venta); null si no consta. */
+  contrato: Importe | null;
+  /** Coste presupuestado (presupuesto activo). */
+  presupuestado: Importe;
+  comprometido: { pedidos: Importe; subcontratas: Importe };
+  costeReal: {
+    facturasCompra: Importe;
+    partesPersonal: Importe;
+    partesMaquinaria: Importe;
+    almacen: Importe;
+    amortizacion: Importe;
+  };
+  certificado: Importe;
+  facturado: Importe;
+  /** Cobrado en base imponible (ver `cobradoEnBase`). */
+  cobrado: Importe;
+}
+
+export interface CuadroMargenesCalculo {
+  contrato: number | null;
+  presupuestado: number;
+  comprometido: number;
+  comprometidoDesglose: { pedidos: number; subcontratas: number };
+  costeReal: number;
+  costeRealDesglose: {
+    facturasCompra: number;
+    partesPersonal: number;
+    partesMaquinaria: number;
+    almacen: number;
+    amortizacion: number;
+  };
+  /** Real + comprometido: lo que ya está gastado o atado. */
+  consumido: number;
+  /** Consumido / presupuestado. */
+  consumoPct: number | null;
+  /** Presupuestado − consumido (negativo = sobrecoste). */
+  desviacion: number;
+  desviacionPct: number | null;
+  /** Coste estimado al cierre: el mayor de presupuestado y consumido. */
+  costeEstimadoCierre: number;
+  /** Contrato − presupuestado. */
+  margenPrevisto: number | null;
+  margenPrevistoPct: number | null;
+  /** Contrato − coste estimado al cierre. */
+  margenProyectado: number | null;
+  margenProyectadoPct: number | null;
+  certificado: number;
+  facturado: number;
+  cobrado: number;
+  /** Certificado − coste real. */
+  margenReal: number;
+  margenRealPct: number | null;
+  pendienteCertificar: number | null;
+  pendienteFacturar: number;
+  pendienteCobro: number;
+}
+
+/** Suma campo a campo varias entradas (totales de una cartera de obras). */
+export function sumarEntradasCuadro(
+  entradas: readonly EntradaCuadroMargenes[],
+): EntradaCuadroMargenes {
+  const s = (f: (e: EntradaCuadroMargenes) => Importe) =>
+    centsToNumeric(sumCents(entradas.map((e) => toCents(f(e)))));
+  const conContrato = entradas.filter((e) => e.contrato !== null);
+  return {
+    contrato:
+      conContrato.length === 0
+        ? null
+        : centsToNumeric(
+            sumCents(conContrato.map((e) => toCents(e.contrato as Importe))),
+          ),
+    presupuestado: s((e) => e.presupuestado),
+    comprometido: {
+      pedidos: s((e) => e.comprometido.pedidos),
+      subcontratas: s((e) => e.comprometido.subcontratas),
+    },
+    costeReal: {
+      facturasCompra: s((e) => e.costeReal.facturasCompra),
+      partesPersonal: s((e) => e.costeReal.partesPersonal),
+      partesMaquinaria: s((e) => e.costeReal.partesMaquinaria),
+      almacen: s((e) => e.costeReal.almacen),
+      amortizacion: s((e) => e.costeReal.amortizacion),
+    },
+    certificado: s((e) => e.certificado),
+    facturado: s((e) => e.facturado),
+    cobrado: s((e) => e.cobrado),
+  };
+}
+
+/** Cuadro de márgenes y desviaciones de una obra (o de una cartera sumada). */
+export function cuadroMargenesObra(
+  e: EntradaCuadroMargenes,
+): CuadroMargenesCalculo {
+  const contrato = e.contrato === null ? null : toCents(e.contrato);
+  const presupuestado = toCents(e.presupuestado);
+  const pedidos = toCents(e.comprometido.pedidos);
+  const subcontratas = toCents(e.comprometido.subcontratas);
+  const comprometido = pedidos + subcontratas;
+  const r = {
+    facturasCompra: toCents(e.costeReal.facturasCompra),
+    partesPersonal: toCents(e.costeReal.partesPersonal),
+    partesMaquinaria: toCents(e.costeReal.partesMaquinaria),
+    almacen: toCents(e.costeReal.almacen),
+    amortizacion: toCents(e.costeReal.amortizacion),
+  };
+  const costeReal = sumCents(Object.values(r));
+  const consumido = costeReal + comprometido;
+  const desviacion = presupuestado - consumido;
+  const cierre = consumido > presupuestado ? consumido : presupuestado;
+  const certificado = toCents(e.certificado);
+  const facturado = toCents(e.facturado);
+  const cobrado = toCents(e.cobrado);
+  const margenReal = certificado - costeReal;
+  return {
+    contrato: contrato === null ? null : fromCents(contrato),
+    presupuestado: fromCents(presupuestado),
+    comprometido: fromCents(comprometido),
+    comprometidoDesglose: {
+      pedidos: fromCents(pedidos),
+      subcontratas: fromCents(subcontratas),
+    },
+    costeReal: fromCents(costeReal),
+    costeRealDesglose: {
+      facturasCompra: fromCents(r.facturasCompra),
+      partesPersonal: fromCents(r.partesPersonal),
+      partesMaquinaria: fromCents(r.partesMaquinaria),
+      almacen: fromCents(r.almacen),
+      amortizacion: fromCents(r.amortizacion),
+    },
+    consumido: fromCents(consumido),
+    consumoPct: pct(consumido, presupuestado),
+    desviacion: fromCents(desviacion),
+    desviacionPct: pct(desviacion, presupuestado),
+    costeEstimadoCierre: fromCents(cierre),
+    margenPrevisto:
+      contrato === null ? null : fromCents(contrato - presupuestado),
+    margenPrevistoPct:
+      contrato === null ? null : pct(contrato - presupuestado, contrato),
+    margenProyectado: contrato === null ? null : fromCents(contrato - cierre),
+    margenProyectadoPct:
+      contrato === null ? null : pct(contrato - cierre, contrato),
+    certificado: fromCents(certificado),
+    facturado: fromCents(facturado),
+    cobrado: fromCents(cobrado),
+    margenReal: fromCents(margenReal),
+    margenRealPct: pct(margenReal, certificado),
+    pendienteCertificar:
+      contrato === null ? null : fromCents(contrato - certificado),
+    pendienteFacturar: fromCents(certificado - facturado),
+    pendienteCobro: fromCents(facturado - cobrado),
+  };
+}
+
+export interface FilaPartidaEntrada {
+  phaseId: string | null;
+  codigo: string;
+  nombre: string;
+  /** Capítulo al que pertenece (lo resuelve el llamador) o null. */
+  capitulo: string | null;
+  presupuestado: Importe;
+  comprometido: Importe;
+  costeReal: Importe;
+}
+
+interface MagnitudesPartida {
+  presupuestado: number;
+  comprometido: number;
+  costeReal: number;
+  consumido: number;
+  desviacion: number;
+  consumoPct: number | null;
+}
+
+function magnitudes(p: bigint, c: bigint, r: bigint): MagnitudesPartida {
+  const consumido = c + r;
+  return {
+    presupuestado: fromCents(p),
+    comprometido: fromCents(c),
+    costeReal: fromCents(r),
+    consumido: fromCents(consumido),
+    desviacion: fromCents(p - consumido),
+    consumoPct: pct(consumido, p),
+  };
+}
+
+/**
+ * Presupuestado / comprometido / real por partida y su agregado por capítulo
+ * (exacto: los capítulos suman céntimos, no números redondeados). Una partida
+ * o capítulo está excedido si lo consumido supera lo presupuestado.
+ */
+export function margenPorPartida(filas: readonly FilaPartidaEntrada[]): {
+  partidas: (FilaPartidaEntrada & MagnitudesPartida & { excedida: boolean })[];
+  capitulos: (MagnitudesPartida & { capitulo: string; excedido: boolean })[];
+} {
+  const caps = new Map<string, [bigint, bigint, bigint]>();
+  const partidas = filas.map((f) => {
+    const p = toCents(f.presupuestado);
+    const c = toCents(f.comprometido);
+    const r = toCents(f.costeReal);
+    if (f.capitulo !== null) {
+      const acc = caps.get(f.capitulo) ?? [0n, 0n, 0n];
+      caps.set(f.capitulo, [acc[0] + p, acc[1] + c, acc[2] + r]);
+    }
+    return { ...f, ...magnitudes(p, c, r), excedida: c + r > p };
+  });
+  const capitulos = [...caps.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, 'es', { numeric: true }))
+    .map(([capitulo, [p, c, r]]) => ({
+      capitulo,
+      ...magnitudes(p, c, r),
+      excedido: c + r > p,
+    }));
+  return { partidas, capitulos };
+}
+
+export type ModoControlPresupuestario = 'observacion' | 'aviso' | 'bloqueo';
+export type EstadoControlPresupuestario =
+  'sin_presupuesto' | 'ok' | 'aviso' | 'excedido';
+
+export interface EvaluacionControlPresupuestario {
+  estado: EstadoControlPresupuestario;
+  presupuestado: number;
+  /** Real + comprometido antes de la operación. */
+  consumido: number;
+  /** Importe que añade la operación evaluada (0 al solo consultar). */
+  importe: number;
+  consumidoTras: number;
+  /** Presupuestado × (1 + tolerancia). */
+  limite: number;
+  /** Límite − consumido tras la operación (negativo = exceso). */
+  disponible: number;
+  /** Lo que supera el límite (0 si no lo supera). */
+  exceso: number;
+  consumoPct: number | null;
+  /** La operación debe rechazarse (modo bloqueo y excede). */
+  bloquea: boolean;
+  /** La operación se permite pero queda avisada (modo aviso y excede). */
+  avisa: boolean;
+}
+
+/**
+ * Control de disponibilidad presupuestaria. Una obra sin presupuesto no se
+ * controla (`sin_presupuesto`): bloquearla impediría arrancarla. Solo una
+ * operación que AÑADE coste (`importe > 0`) puede bloquear o avisar; una que
+ * reduce consumo siempre pasa. Estados: `excedido` si supera el límite
+ * (presupuesto + tolerancia), `aviso` si supera el umbral de aviso (% del
+ * presupuesto), `ok` en otro caso.
+ */
+export function evaluarControlPresupuestario(p: {
+  modo: ModoControlPresupuestario;
+  toleranciaPct: Importe;
+  umbralAvisoPct: Importe;
+  presupuestado: Importe;
+  consumido: Importe;
+  importe?: Importe;
+}): EvaluacionControlPresupuestario {
+  const presupuestado = toCents(p.presupuestado);
+  const consumido = toCents(p.consumido);
+  const importe = toCents(p.importe ?? 0);
+  const tras = consumido + importe;
+  const limite = presupuestado + applyPct(presupuestado, p.toleranciaPct);
+  const umbral = applyPct(presupuestado, p.umbralAvisoPct);
+  const exceso = tras > limite ? tras - limite : 0n;
+  const estado: EstadoControlPresupuestario =
+    presupuestado <= 0n
+      ? 'sin_presupuesto'
+      : tras > limite
+        ? 'excedido'
+        : tras > umbral
+          ? 'aviso'
+          : 'ok';
+  const afecta = estado === 'excedido' && importe > 0n;
+  return {
+    estado,
+    presupuestado: fromCents(presupuestado),
+    consumido: fromCents(consumido),
+    importe: fromCents(importe),
+    consumidoTras: fromCents(tras),
+    limite: fromCents(limite),
+    disponible: fromCents(limite - tras),
+    exceso: fromCents(exceso),
+    consumoPct: pct(tras, presupuestado),
+    bloquea: afecta && p.modo === 'bloqueo',
+    avisa: afecta && p.modo === 'aviso',
+  };
+}

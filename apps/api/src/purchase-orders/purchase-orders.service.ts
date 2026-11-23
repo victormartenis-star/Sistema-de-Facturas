@@ -31,16 +31,19 @@ import {
   TraceabilityReportDto,
   TraceabilityRowDto,
   buildOrderNumber,
+  centsToNumeric,
   daysBetween,
   deriveOrderStatus,
   pendingToDeliver,
   purchaseOrderCreateSchema,
   purchaseOrderUpdateSchema,
   round2,
+  toCents,
   todayIso,
   traceabilityReading,
 } from '@erp/shared';
 import { cambiarEstado } from '../common/cambiar-estado';
+import { ControlPresupuestarioService } from '../cost-control/control-presupuestario.service';
 import { DbService } from '../db/db.service';
 import {
   condicionVersion,
@@ -64,6 +67,7 @@ export class PurchaseOrdersService {
   constructor(
     private readonly dbs: DbService,
     private readonly proveedores: ProveedoresService,
+    private readonly control: ControlPresupuestarioService,
   ) {}
 
   async list(options: {
@@ -156,6 +160,14 @@ export class PurchaseOrdersService {
     );
 
     const id = await this.dbs.db.transaction(async (tx) => {
+      // Control presupuestario activo: el pedido compromete coste de la obra.
+      // Va antes de numerar: su bloqueo por obra serializa también el seq.
+      await this.control.verificar(tx, {
+        projectId: data.projectId,
+        importe: data.amount.toFixed(2),
+        operacion: 'pedido_compra',
+        referencia: project.code,
+      });
       const [last] = await tx
         .select({ seq: purchaseOrders.seq })
         .from(purchaseOrders)
@@ -211,6 +223,18 @@ export class PurchaseOrdersService {
 
     await this.dbs.db.transaction(async (tx) => {
       await this.bloquearPedidos(tx, [id]);
+      // Un aumento del importe de un pedido abierto compromete más coste.
+      if (
+        data.amount !== undefined &&
+        ['emitido', 'servido_parcial', 'servido'].includes(order.status)
+      ) {
+        await this.control.verificar(tx, {
+          projectId: order.projectId,
+          importe: centsToNumeric(toCents(data.amount) - toCents(order.amount)),
+          operacion: 'pedido_compra',
+          referencia: order.orderNumber,
+        });
+      }
       const editados = await tx
         .update(purchaseOrders)
         .set({

@@ -25,6 +25,10 @@ import type {
   ArticuloCreateInput,
   ArticuloDto,
   ConsumoObraDto,
+  ControlPresupuestarioDto,
+  ControlPresupuestarioUpdateInput,
+  CuadroMargenesDto,
+  MargenesObraDto,
   ConsumoObraInput,
   DevolucionObraInput,
   EntradaStockInput,
@@ -688,6 +692,42 @@ export const costControlApi = {
   /** Margen bruto, desviación por partida, retenciones e IVA de la obra. */
   economics: (projectId: string) =>
     request<ObraEconomicsDto>(`/projects/${projectId}/economics`),
+  /** Cuadro de márgenes de la cartera (presupuestado, comprometido, real…). */
+  cuadro: (f: {
+    estado?: string;
+    q?: string;
+    desde?: string;
+    hasta?: string;
+    soloAlertas?: boolean;
+  }) =>
+    request<CuadroMargenesDto>(
+      `/cost-control/margenes${qs({
+        estado: f.estado,
+        q: f.q,
+        desde: f.desde,
+        hasta: f.hasta,
+        soloAlertas: f.soloAlertas ? 'true' : undefined,
+      })}`,
+    ),
+  margenesObra: (projectId: string, f: { desde?: string; hasta?: string }) =>
+    request<MargenesObraDto>(`/projects/${projectId}/margenes${qs(f)}`),
+  control: (projectId: string) =>
+    request<ControlPresupuestarioDto>(
+      `/projects/${projectId}/control-presupuestario`,
+    ),
+  configurarControl: (
+    projectId: string,
+    input: ControlPresupuestarioUpdateInput,
+    version: number,
+  ) =>
+    request<ControlPresupuestarioDto>(
+      `/projects/${projectId}/control-presupuestario`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(input),
+        headers: version > 0 ? ifMatch(version) : {},
+      },
+    ),
 };
 
 export const invoicesApi = {

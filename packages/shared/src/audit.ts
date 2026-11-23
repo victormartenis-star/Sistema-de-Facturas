@@ -54,6 +54,7 @@ export const AUDIT_ENTITY_TYPES = [
   'stock_article',
   'stock_item',
   'stock_movement',
+  'project_budget_control',
   'iot_lectura_telemetria',
   'mantenimiento_equipo',
   'parte_maquinaria',
