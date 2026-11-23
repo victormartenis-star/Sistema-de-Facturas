@@ -3621,6 +3621,10 @@ export const journalEntrySourceEnum = pgEnum('journal_entry_source', [
   'anulacion',
   'amortizacion',
   'baja_inmovilizado',
+  'entrada_almacen',
+  'consumo_obra',
+  'devolucion_obra',
+  'regularizacion_inventario',
 ]);
 
 export const journalEntryStatusEnum = pgEnum('journal_entry_status', [
@@ -3923,3 +3927,243 @@ export const fixedAssetDepreciations = pgTable(
 
 export type FixedAssetDepreciation =
   typeof fixedAssetDepreciations.$inferSelect;
+
+/* ─────────────────────────── Almacén y stock ───────────────────────────
+ * Almacenes (centrales y acopios de obra), catálogo de artículos, saldo
+ * valorado por almacén y artículo (cantidad + valor; PMP = valor/cantidad) y
+ * movimientos inmutables (trigger en la migración 0052). Reglas puras de
+ * valoración en `calculo.ts`; contrato en `@erp/shared/almacen`.
+ */
+
+export const warehouseKindEnum = pgEnum('warehouse_kind', ['central', 'obra']);
+
+export const stockMovementTypeEnum = pgEnum('stock_movement_type', [
+  'entrada_compra',
+  'salida_obra',
+  'traspaso',
+  'regularizacion',
+  'devolucion',
+]);
+
+export const warehouses = pgTable(
+  'warehouses',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    code: varchar('code', { length: 20 }).notNull(),
+    name: varchar('name', { length: 120 }).notNull(),
+    kind: warehouseKindEnum('kind').notNull(),
+    /** Obra del acopio (solo `kind = 'obra'`). */
+    projectId: uuid('project_id').references(() => projects.id),
+    address: varchar('address', { length: 240 }),
+    isActive: boolean('is_active').notNull().default(true),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('warehouses_company_code_unique').on(t.companyId, t.code),
+    index('warehouses_company_project_idx').on(t.companyId, t.projectId),
+    check(
+      'warehouses_kind_project',
+      sql`(${t.kind} = 'obra') = (${t.projectId} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export type Warehouse = typeof warehouses.$inferSelect;
+
+export const stockArticles = pgTable(
+  'stock_articles',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    code: varchar('code', { length: 30 }).notNull(),
+    name: varchar('name', { length: 160 }).notNull(),
+    unit: varchar('unit', { length: 10 }).notNull(),
+    /** Cuenta PGC de existencias (grupo 3). */
+    inventoryAccount: varchar('inventory_account', { length: 10 })
+      .notNull()
+      .default('3000'),
+    /** Cuenta PGC de variación de existencias (subgrupo 61). */
+    variationAccount: varchar('variation_account', { length: 10 })
+      .notNull()
+      .default('6100'),
+    isActive: boolean('is_active').notNull().default(true),
+    notes: text('notes'),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('stock_articles_company_code_unique').on(t.companyId, t.code),
+    check(
+      'stock_articles_cuentas_pgc',
+      sql`${t.inventoryAccount} ~ '^3[0-9]{3,7}$' AND ${t.variationAccount} ~ '^61[0-9]{2,6}$'`,
+    ),
+  ],
+);
+
+export type StockArticle = typeof stockArticles.$inferSelect;
+
+/** Saldo valorado de un artículo en un almacén. */
+export const stockItems = pgTable(
+  'stock_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    warehouseId: uuid('warehouse_id')
+      .notNull()
+      .references(() => warehouses.id, { onDelete: 'restrict' }),
+    articleId: uuid('article_id')
+      .notNull()
+      .references(() => stockArticles.id, { onDelete: 'restrict' }),
+    quantity: numeric('quantity', { precision: 14, scale: 3 })
+      .notNull()
+      .default('0'),
+    reservedQuantity: numeric('reserved_quantity', { precision: 14, scale: 3 })
+      .notNull()
+      .default('0'),
+    /** Valor de las existencias (céntimos exactos): la fuente del PMP. */
+    stockValue: numeric('stock_value', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    /** PMP vigente; con saldo cero conserva el último conocido. */
+    averageCost: numeric('average_cost', { precision: 14, scale: 4 })
+      .notNull()
+      .default('0'),
+    minStock: numeric('min_stock', { precision: 14, scale: 3 })
+      .notNull()
+      .default('0'),
+    version: integer('version').notNull().default(1),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('stock_items_warehouse_article_unique').on(
+      t.warehouseId,
+      t.articleId,
+    ),
+    index('stock_items_company_article_idx').on(t.companyId, t.articleId),
+    check(
+      'stock_items_no_negativo',
+      sql`${t.quantity} >= 0 AND ${t.stockValue} >= 0 AND ${t.averageCost} >= 0 AND ${t.minStock} >= 0`,
+    ),
+    check(
+      'stock_items_reserva',
+      sql`${t.reservedQuantity} >= 0 AND ${t.reservedQuantity} <= ${t.quantity}`,
+    ),
+    check(
+      'stock_items_valor_sin_cantidad',
+      sql`${t.quantity} > 0 OR ${t.stockValue} = 0`,
+    ),
+  ],
+);
+
+export type StockItem = typeof stockItems.$inferSelect;
+
+/**
+ * Movimiento de stock (kárdex). Inmutable: un error se corrige con otro
+ * movimiento. Cantidad y valor con signo respecto a `warehouse_id` (en un
+ * traspaso, el origen; el destino es `target_warehouse_id`).
+ */
+export const stockMovements = pgTable(
+  'stock_movements',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    type: stockMovementTypeEnum('type').notNull(),
+    movementDate: date('movement_date').notNull(),
+    warehouseId: uuid('warehouse_id')
+      .notNull()
+      .references(() => warehouses.id, { onDelete: 'restrict' }),
+    targetWarehouseId: uuid('target_warehouse_id').references(
+      () => warehouses.id,
+      { onDelete: 'restrict' },
+    ),
+    articleId: uuid('article_id')
+      .notNull()
+      .references(() => stockArticles.id, { onDelete: 'restrict' }),
+    projectId: uuid('project_id').references(() => projects.id),
+    deliveryNoteId: uuid('delivery_note_id').references(() => deliveryNotes.id),
+    quantity: numeric('quantity', { precision: 14, scale: 3 }).notNull(),
+    unitCost: numeric('unit_cost', { precision: 14, scale: 4 }).notNull(),
+    totalValue: numeric('total_value', { precision: 14, scale: 2 }).notNull(),
+    /** Saldo del almacén `warehouse_id` tras el movimiento. */
+    quantityAfter: numeric('quantity_after', {
+      precision: 14,
+      scale: 3,
+    }).notNull(),
+    averageCostAfter: numeric('average_cost_after', {
+      precision: 14,
+      scale: 4,
+    }).notNull(),
+    reason: varchar('reason', { length: 240 }),
+    notes: text('notes'),
+    journalEntryId: uuid('journal_entry_id').references(
+      () => journalEntries.id,
+    ),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('stock_movements_company_date_idx').on(
+      t.companyId,
+      t.movementDate.desc(),
+      t.createdAt.desc(),
+    ),
+    index('stock_movements_warehouse_article_idx').on(
+      t.warehouseId,
+      t.articleId,
+      t.movementDate,
+    ),
+    index('stock_movements_target_warehouse_idx')
+      .on(t.targetWarehouseId)
+      .where(sql`target_warehouse_id IS NOT NULL`),
+    index('stock_movements_company_project_idx')
+      .on(t.companyId, t.projectId, t.movementDate)
+      .where(sql`project_id IS NOT NULL`),
+    // Un albarán se recepciona en stock una sola vez por artículo.
+    uniqueIndex('stock_movements_delivery_note_article_unique')
+      .on(t.deliveryNoteId, t.articleId)
+      .where(sql`delivery_note_id IS NOT NULL`),
+    check(
+      'stock_movements_signo',
+      sql`${t.quantity} <> 0 AND ${t.unitCost} >= 0 AND (
+        (${t.type} IN ('entrada_compra', 'devolucion') AND ${t.quantity} > 0 AND ${t.totalValue} >= 0)
+        OR (${t.type} IN ('salida_obra', 'traspaso') AND ${t.quantity} < 0 AND ${t.totalValue} <= 0)
+        OR (${t.type} = 'regularizacion' AND sign(${t.totalValue}) IN (0, sign(${t.quantity})))
+      )`,
+    ),
+    check(
+      'stock_movements_referencias',
+      sql`(${t.type} = 'traspaso') = (${t.targetWarehouseId} IS NOT NULL)
+        AND (${t.targetWarehouseId} IS NULL OR ${t.targetWarehouseId} <> ${t.warehouseId})
+        AND (${t.type} NOT IN ('salida_obra', 'devolucion') OR ${t.projectId} IS NOT NULL)
+        AND (${t.deliveryNoteId} IS NULL OR ${t.type} = 'entrada_compra')
+        AND (${t.type} <> 'regularizacion' OR ${t.reason} IS NOT NULL)`,
+    ),
+    check('stock_movements_saldo', sql`${t.quantityAfter} >= 0`),
+  ],
+);
+
+export type StockMovement = typeof stockMovements.$inferSelect;

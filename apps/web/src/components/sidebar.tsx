@@ -16,6 +16,7 @@ import {
   IconEuro,
   IconFileText,
   IconClock,
+  IconCube,
   IconGavel,
   IconHome,
   IconInbox,
@@ -67,6 +68,7 @@ const GESTION: NavItem[] = [
   { href: '/tesoreria', label: 'Tesorería', icon: IconWallet },
   { href: '/contabilidad', label: 'Contabilidad', icon: IconCalculator },
   { href: '/activos', label: 'Activos fijos', icon: IconCalculator },
+  { href: '/almacen', label: 'Almacén y stock', icon: IconCube },
   {
     href: '/tesoreria/conciliacion',
     label: 'Conciliación bancaria',

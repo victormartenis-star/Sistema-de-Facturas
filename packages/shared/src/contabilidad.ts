@@ -48,6 +48,10 @@ export const ORIGENES_ASIENTO = [
   'anulacion',
   'amortizacion',
   'baja_inmovilizado',
+  'entrada_almacen',
+  'consumo_obra',
+  'devolucion_obra',
+  'regularizacion_inventario',
 ] as const;
 export type OrigenAsiento = (typeof ORIGENES_ASIENTO)[number];
 
@@ -60,6 +64,10 @@ export const ORIGEN_ASIENTO_LABELS: Record<OrigenAsiento, string> = {
   anulacion: 'Contra-asiento',
   amortizacion: 'Amortización',
   baja_inmovilizado: 'Baja de inmovilizado',
+  entrada_almacen: 'Entrada en almacén',
+  consumo_obra: 'Consumo de material en obra',
+  devolucion_obra: 'Devolución de material de obra',
+  regularizacion_inventario: 'Regularización de inventario',
 };
 
 export const ESTADOS_ASIENTO = ['contabilizado', 'anulado'] as const;
@@ -161,6 +169,8 @@ export function planContableBase(): CuentaPlan[] {
     c('6000', 'Compras de materiales', 'gasto'),
     c('607', 'Trabajos realizados por otras empresas', 'gasto'),
     c('6070', 'Trabajos realizados por subcontratas', 'gasto'),
+    c('610', 'Variación de existencias de materiales', 'gasto'),
+    c('6100', 'Variación de existencias de materiales', 'gasto'),
     c('621', 'Arrendamientos y cánones', 'gasto'),
     c('6210', 'Alquiler de maquinaria', 'gasto'),
     c('622', 'Reparaciones y conservación', 'gasto'),

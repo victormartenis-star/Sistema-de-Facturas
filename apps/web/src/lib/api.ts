@@ -19,7 +19,21 @@ import type {
   ActivoCreateInput,
   ActivoDetalleDto,
   ActivoDto,
+  AlmacenCreateInput,
+  AlmacenDto,
+  AlmacenUpdateInput,
+  ArticuloCreateInput,
+  ArticuloDto,
+  ConsumoObraDto,
+  ConsumoObraInput,
+  DevolucionObraInput,
+  EntradaStockInput,
+  ExistenciaDto,
+  MovimientoStockDto,
+  RegularizacionStockInput,
   ResultadoAmortizacionDto,
+  ResumenAlmacenDto,
+  TraspasoStockInput,
 } from '@erp/shared';
 import type {
   CertSubcontrataCreateInput,
@@ -2101,4 +2115,82 @@ export const activosApi = {
       body: JSON.stringify(input),
       headers: { ...ifMatch(version), ...idempotencyKey(clave) },
     }),
+};
+
+/* ───────────────────────── Almacén y stock ───────────────────────── */
+
+const postJson = (body: unknown, clave: string, version?: number) => ({
+  method: 'POST',
+  body: JSON.stringify(body),
+  headers: {
+    ...idempotencyKey(clave),
+    ...(version !== undefined ? ifMatch(version) : {}),
+  },
+});
+
+export const almacenApi = {
+  resumen: () => request<ResumenAlmacenDto>('/almacen/resumen'),
+  almacenes: () => request<AlmacenDto[]>('/almacen/almacenes'),
+  crearAlmacen: (input: AlmacenCreateInput, clave: string) =>
+    request<AlmacenDto>('/almacen/almacenes', postJson(input, clave)),
+  actualizarAlmacen: (id: string, input: AlmacenUpdateInput, version: number) =>
+    request<AlmacenDto>(`/almacen/almacenes/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+      headers: ifMatch(version),
+    }),
+  articulos: (q?: string) =>
+    request<ArticuloDto[]>(`/almacen/articulos${qs({ q })}`),
+  crearArticulo: (input: ArticuloCreateInput, clave: string) =>
+    request<ArticuloDto>('/almacen/articulos', postJson(input, clave)),
+  existencias: (
+    f: { almacenId?: string; q?: string; bajoMinimo?: boolean } = {},
+  ) =>
+    request<ExistenciaDto[]>(
+      `/almacen/existencias${qs({
+        almacenId: f.almacenId,
+        q: f.q,
+        bajoMinimo: f.bajoMinimo ? 'true' : undefined,
+      })}`,
+    ),
+  stockMinimo: (id: string, stockMinimo: number, version: number) =>
+    request<ExistenciaDto>(`/almacen/existencias/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ stockMinimo }),
+      headers: ifMatch(version),
+    }),
+  movimientos: (f: {
+    almacenId?: string;
+    projectId?: string;
+    tipo?: string;
+    desde?: string;
+    hasta?: string;
+    page: number;
+    pageSize: number;
+  }) => request<PaginaDto<MovimientoStockDto>>(`/almacen/movimientos${qs(f)}`),
+  entrada: (input: EntradaStockInput, clave: string) =>
+    request<MovimientoStockDto[]>('/almacen/entradas', postJson(input, clave)),
+  consumo: (input: ConsumoObraInput, clave: string) =>
+    request<MovimientoStockDto[]>('/almacen/consumos', postJson(input, clave)),
+  devolucion: (input: DevolucionObraInput, clave: string) =>
+    request<MovimientoStockDto[]>(
+      '/almacen/devoluciones',
+      postJson(input, clave),
+    ),
+  traspaso: (input: TraspasoStockInput, clave: string, version?: number) =>
+    request<MovimientoStockDto>(
+      '/almacen/traspasos',
+      postJson(input, clave, version),
+    ),
+  regularizacion: (
+    input: RegularizacionStockInput,
+    clave: string,
+    version?: number,
+  ) =>
+    request<MovimientoStockDto>(
+      '/almacen/regularizaciones',
+      postJson(input, clave, version),
+    ),
+  consumosObra: (projectId: string) =>
+    request<ConsumoObraDto>(`/almacen/obras/${projectId}/consumos`),
 };

@@ -12,11 +12,14 @@
 
 import {
   applyPct,
+  centsToNumeric,
   fromCents,
   mulDivRound,
   repartirCents,
+  scaledToNumeric,
   sumCents,
   toCents,
+  toScaled,
 } from './dinero';
 
 /* ───────────────────────────── importes ───────────────────────────── */
@@ -785,5 +788,231 @@ export function resultadoBaja(p: {
   return {
     valorNeto: fromCents(neto),
     resultado: fromCents(toCents(p.importeVenta) - neto),
+  };
+}
+
+/* ──────────── stock: valoración a precio medio ponderado (PMP) ────────────
+ * Modelo de SAP MM (precio medio variable): el saldo de cada artículo en un
+ * almacén guarda la CANTIDAD (3 decimales, exacta en milésimas) y el VALOR
+ * (céntimos); el PMP es su cociente. Guardar el valor —y no el PMP— hace que
+ * la valoración no derive nunca: una salida se valora a `valor × q / cantidad`
+ * redondeado al céntimo y, si vacía el saldo, se lleva el valor restante
+ * entero. Así cantidad 0 ⇔ valor 0 y la suma de lo que sale es exactamente lo
+ * que entró. Todo en BigInt; entra y sale texto `numeric` para Drizzle.
+ */
+
+/** Decimales de las cantidades de stock. */
+export const ESCALA_CANTIDAD_STOCK = 3;
+/** Decimales del precio medio ponderado y de los costes unitarios. */
+export const ESCALA_PMP = 4;
+
+export type CodigoErrorStock =
+  'INSUFFICIENT_STOCK' | 'STOCK_COST_REQUIRED' | 'STOCK_QUANTITY_INVALID';
+
+/** Rechazo de una regla de stock; la API lo traduce a RFC 7807 con `codigo`. */
+export class ErrorStock extends Error {
+  constructor(
+    readonly codigo: CodigoErrorStock,
+    message: string,
+    /** Cantidad disponible cuando el rechazo es por falta de stock. */
+    readonly disponible?: string,
+  ) {
+    super(message);
+    this.name = 'ErrorStock';
+  }
+}
+
+/** Saldo valorado de un artículo en un almacén (texto `numeric`). */
+export interface SaldoValorado {
+  cantidad: string;
+  valor: string;
+  /** Valor / cantidad con 4 decimales; `null` sin existencias. */
+  pmp: string | null;
+}
+
+type SaldoEntrada = { cantidad: string | number; valor: string | number };
+
+/** valor(céntimos) × 10^k / cantidad(milésimas) = PMP con 4 decimales. */
+const FACTOR_PMP = 10n ** BigInt(ESCALA_PMP - 2 + ESCALA_CANTIDAD_STOCK);
+/** cantidad(milésimas) × coste(4 dec) / 10^k = céntimos. */
+const FACTOR_VALOR = 10n ** BigInt(ESCALA_CANTIDAD_STOCK + ESCALA_PMP - 2);
+
+const cantidadTexto = (q: bigint) => scaledToNumeric(q, ESCALA_CANTIDAD_STOCK);
+
+function construirSaldo(cantidad: bigint, valor: bigint): SaldoValorado {
+  return {
+    cantidad: cantidadTexto(cantidad),
+    valor: centsToNumeric(valor),
+    pmp:
+      cantidad === 0n
+        ? null
+        : scaledToNumeric(mulDivRound(valor, FACTOR_PMP, cantidad), ESCALA_PMP),
+  };
+}
+
+function leerSaldo(s: SaldoEntrada): { cantidad: bigint; valor: bigint } {
+  const cantidad = toScaled(s.cantidad, ESCALA_CANTIDAD_STOCK);
+  const valor = toCents(s.valor);
+  if (cantidad < 0n || valor < 0n) {
+    throw new RangeError('Saldo de stock negativo');
+  }
+  if (cantidad === 0n && valor !== 0n) {
+    throw new RangeError('Saldo incoherente: valor sin cantidad');
+  }
+  return { cantidad, valor };
+}
+
+function cantidadPositiva(v: string | number): bigint {
+  const q = toScaled(v, ESCALA_CANTIDAD_STOCK);
+  if (q <= 0n) {
+    throw new ErrorStock(
+      'STOCK_QUANTITY_INVALID',
+      'La cantidad debe ser mayor que cero',
+    );
+  }
+  return q;
+}
+
+/** PMP de un saldo (4 decimales) o `null` si no hay existencias. */
+export function pmpDe(s: SaldoEntrada): string | null {
+  const { cantidad, valor } = leerSaldo(s);
+  return construirSaldo(cantidad, valor).pmp;
+}
+
+/** Valor de una entrada: `cantidad × costeUnitario` (4 decimales) al céntimo. */
+export function valorEntradaStock(
+  cantidad: string | number,
+  costeUnitario: string | number,
+): string {
+  const q = cantidadPositiva(cantidad);
+  const coste = toScaled(costeUnitario, ESCALA_PMP);
+  if (coste < 0n) throw new RangeError('Coste unitario negativo');
+  return centsToNumeric(mulDivRound(q, coste, FACTOR_VALOR));
+}
+
+/**
+ * Entrada (compra, devolución, sobrante): suma cantidad y valor y recalcula
+ * PMP = (valorAnterior + valorEntrada) / (cantidadAnterior + cantidadEntrada).
+ */
+export function entradaStock(
+  actual: SaldoEntrada,
+  entrada: SaldoEntrada,
+): SaldoValorado {
+  const s = leerSaldo(actual);
+  const q = cantidadPositiva(entrada.cantidad);
+  const v = toCents(entrada.valor);
+  if (v < 0n) throw new RangeError('El valor de la entrada es negativo');
+  return construirSaldo(s.cantidad + q, s.valor + v);
+}
+
+/**
+ * Salida (consumo a obra, merma, origen de traspaso) valorada al PMP vigente
+ * sin alterarlo. Rechaza dejar el disponible (cantidad − reservada) negativo.
+ * Si la salida agota el saldo se lleva todo el valor restante.
+ */
+export function salidaStock(
+  actual: SaldoEntrada,
+  cantidad: string | number,
+  reservada: string | number = 0,
+): { valor: string; saldo: SaldoValorado } {
+  const s = leerSaldo(actual);
+  const q = cantidadPositiva(cantidad);
+  const disponible = s.cantidad - toScaled(reservada, ESCALA_CANTIDAD_STOCK);
+  if (q > disponible) {
+    const disp = cantidadTexto(disponible < 0n ? 0n : disponible);
+    throw new ErrorStock(
+      'INSUFFICIENT_STOCK',
+      `Stock insuficiente: disponible ${disp}, solicitado ${cantidadTexto(q)}`,
+      disp,
+    );
+  }
+  const valor =
+    q === s.cantidad ? s.valor : mulDivRound(s.valor, q, s.cantidad);
+  return {
+    valor: centsToNumeric(valor),
+    saldo: construirSaldo(s.cantidad - q, s.valor - valor),
+  };
+}
+
+/**
+ * Traspaso entre almacenes: sale del origen a su PMP y entra en el destino
+ * con ese mismo valor, recalculando el PMP del destino. El valor total de
+ * las existencias de la empresa no cambia.
+ */
+export function traspasoStock(
+  origen: SaldoEntrada,
+  destino: SaldoEntrada,
+  cantidad: string | number,
+  reservadaOrigen: string | number = 0,
+): { valor: string; origen: SaldoValorado; destino: SaldoValorado } {
+  const sal = salidaStock(origen, cantidad, reservadaOrigen);
+  return {
+    valor: sal.valor,
+    origen: sal.saldo,
+    destino: entradaStock(destino, { cantidad, valor: sal.valor }),
+  };
+}
+
+/**
+ * Regularización por recuento físico: diferencia = contada − teórica.
+ * Faltante: salida valorada al PMP (valor negativo). Sobrante: entrada al
+ * `costeUnitario` indicado o, si no, al PMP vigente o al último conocido
+ * (`pmpReferencia`); sin ninguno se exige el coste. Diferencia 0 → saldo intacto.
+ */
+export function regularizacionStock(
+  actual: SaldoEntrada,
+  cantidadContada: string | number,
+  opciones: {
+    reservada?: string | number;
+    costeUnitario?: string | number | null;
+    pmpReferencia?: string | number | null;
+  } = {},
+): { diferencia: string; valor: string; saldo: SaldoValorado } {
+  const s = leerSaldo(actual);
+  const contada = toScaled(cantidadContada, ESCALA_CANTIDAD_STOCK);
+  if (contada < 0n) {
+    throw new ErrorStock(
+      'STOCK_QUANTITY_INVALID',
+      'La cantidad contada no puede ser negativa',
+    );
+  }
+  const reservada = toScaled(opciones.reservada ?? 0, ESCALA_CANTIDAD_STOCK);
+  if (contada < reservada) {
+    throw new ErrorStock(
+      'INSUFFICIENT_STOCK',
+      `La cantidad contada (${cantidadTexto(contada)}) es menor que la reservada (${cantidadTexto(reservada)}): libera antes las reservas`,
+      cantidadTexto(contada),
+    );
+  }
+  const dif = contada - s.cantidad;
+  if (dif === 0n) {
+    return {
+      diferencia: cantidadTexto(0n),
+      valor: '0.00',
+      saldo: construirSaldo(s.cantidad, s.valor),
+    };
+  }
+  if (dif < 0n) {
+    const sal = salidaStock(actual, cantidadTexto(-dif));
+    return {
+      diferencia: cantidadTexto(dif),
+      valor: centsToNumeric(-toCents(sal.valor)),
+      saldo: sal.saldo,
+    };
+  }
+  const vigente = construirSaldo(s.cantidad, s.valor).pmp;
+  const coste =
+    opciones.costeUnitario ?? vigente ?? opciones.pmpReferencia ?? null;
+  if (coste === null || toScaled(coste, ESCALA_PMP) <= 0n) {
+    throw new ErrorStock(
+      'STOCK_COST_REQUIRED',
+      'Sin precio medio de referencia: indica el coste unitario del sobrante',
+    );
+  }
+  const valor = valorEntradaStock(cantidadTexto(dif), coste);
+  return {
+    diferencia: cantidadTexto(dif),
+    valor,
+    saldo: construirSaldo(s.cantidad + dif, s.valor + toCents(valor)),
   };
 }

@@ -168,3 +168,17 @@ export function lineAmountCents(
 ): bigint {
   return mulDivRound(toScaled(unitPrice, 4), toScaled(quantity, 4), pow10(6));
 }
+
+/** Entero escalado → texto `numeric` con `scale` decimales (`1234567n, 3` → `"1234.567"`). */
+export function scaledToNumeric(value: bigint, scale: number): string {
+  if (!Number.isInteger(scale) || scale < 0) {
+    throw new RangeError(`Escala no válida: ${scale}`);
+  }
+  const negative = value < 0n;
+  const abs = negative ? -value : value;
+  const den = pow10(scale);
+  const whole = abs / den;
+  const frac =
+    scale === 0 ? '' : `.${(abs % den).toString().padStart(scale, '0')}`;
+  return `${negative ? '-' : ''}${whole}${frac}`;
+}

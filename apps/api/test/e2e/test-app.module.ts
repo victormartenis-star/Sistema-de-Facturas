@@ -37,6 +37,7 @@ import { PurchaseOrdersModule } from '../../src/purchase-orders/purchase-orders.
 import { TreasuryModule } from '../../src/treasury/treasury.module';
 import { ContabilidadModule } from '../../src/contabilidad/contabilidad.module';
 import { ActivosModule } from '../../src/activos/activos.module';
+import { AlmacenModule } from '../../src/almacen/almacen.module';
 import { UsersModule } from '../../src/users/users.module';
 import { SubcontratasModule } from '../../src/modules/subcontratas/subcontratas.module';
 
@@ -104,6 +105,7 @@ import { SubcontratasModule } from '../../src/modules/subcontratas/subcontratas.
     TreasuryModule,
     ContabilidadModule,
     ActivosModule,
+    AlmacenModule,
     DashboardModule,
     CopilotoModule,
     UsersModule,
