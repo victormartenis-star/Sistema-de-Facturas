@@ -63,6 +63,7 @@ export const AUDIT_ENTITY_TYPES = [
   'corporate_group_member',
   'consolidation_adjustment',
   'consolidation_closing',
+  'material_request',
   'iot_lectura_telemetria',
   'mantenimiento_equipo',
   'parte_maquinaria',

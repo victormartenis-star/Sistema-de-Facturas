@@ -808,7 +808,10 @@ export const ESCALA_CANTIDAD_STOCK = 3;
 export const ESCALA_PMP = 4;
 
 export type CodigoErrorStock =
-  'INSUFFICIENT_STOCK' | 'STOCK_COST_REQUIRED' | 'STOCK_QUANTITY_INVALID';
+  | 'INSUFFICIENT_STOCK'
+  | 'STOCK_COST_REQUIRED'
+  | 'STOCK_QUANTITY_INVALID'
+  | 'MATERIAL_REQUEST_OVER_SERVED';
 
 /** Rechazo de una regla de stock; la API lo traduce a RFC 7807 con `codigo`. */
 export class ErrorStock extends Error {
@@ -1964,4 +1967,97 @@ export function posicionTesoreriaGrupo(
       pagos: fromCents(pagosIg),
     },
   };
+}
+
+/* ─────────────── solicitudes de material: reserva y servicio ───────────────
+ * Modelo de la reserva de SAP MM y la requisición de Oracle: la obra pide
+ * material a un almacén; lo disponible se reserva (ya no lo puede consumir
+ * otra obra) y el resto queda como faltante para comprar. Servir consume
+ * primero lo reservado. Cantidades exactas en milésimas (BigInt).
+ */
+
+export type EstadoSolicitudMaterial =
+  'abierta' | 'servida_parcial' | 'servida' | 'cancelada';
+
+const mil = (v: string | number) => toScaled(v, ESCALA_CANTIDAD_STOCK);
+const milTexto = (q: bigint) => scaledToNumeric(q, ESCALA_CANTIDAD_STOCK);
+
+/**
+ * Cuánto reservar de una línea: lo pendiente sin reservar
+ * (solicitada − servida − reservada), hasta lo disponible del almacén; lo
+ * demás es faltante (a comprar).
+ */
+export function planificarReserva(p: {
+  solicitada: string | number;
+  servida: string | number;
+  reservada: string | number;
+  disponible: string | number;
+}): { reservar: string; faltante: string } {
+  const pendiente = mil(p.solicitada) - mil(p.servida) - mil(p.reservada);
+  if (pendiente < 0n)
+    throw new RangeError('Línea sobre-reservada o sobre-servida');
+  const disponible = mil(p.disponible) > 0n ? mil(p.disponible) : 0n;
+  const reservar = pendiente < disponible ? pendiente : disponible;
+  return {
+    reservar: milTexto(reservar),
+    faltante: milTexto(pendiente - reservar),
+  };
+}
+
+/**
+ * Servir `cantidad` de una línea: no más de lo pendiente
+ * (solicitada − servida); se libera primero lo reservado y el resto sale del
+ * stock libre (si no lo hay, el consumo lo rechaza con INSUFFICIENT_STOCK).
+ */
+export function planificarServicio(p: {
+  solicitada: string | number;
+  servida: string | number;
+  reservada: string | number;
+  cantidad: string | number;
+}): { liberar: string; servidaTras: string; reservadaTras: string } {
+  const q = mil(p.cantidad);
+  if (q <= 0n) {
+    throw new ErrorStock(
+      'STOCK_QUANTITY_INVALID',
+      'La cantidad debe ser mayor que cero',
+    );
+  }
+  const pendiente = mil(p.solicitada) - mil(p.servida);
+  if (q > pendiente) {
+    throw new ErrorStock(
+      'MATERIAL_REQUEST_OVER_SERVED',
+      `Solo quedan ${milTexto(pendiente)} por servir de esta línea`,
+      milTexto(pendiente),
+    );
+  }
+  const reservada = mil(p.reservada);
+  const liberar = q < reservada ? q : reservada;
+  return {
+    liberar: milTexto(liberar),
+    servidaTras: milTexto(mil(p.servida) + q),
+    reservadaTras: milTexto(reservada - liberar),
+  };
+}
+
+/** Estado de la solicitud derivado de sus líneas (una cancelada no cambia). */
+export function estadoSolicitudMaterial(
+  actual: EstadoSolicitudMaterial,
+  lineas: readonly { solicitada: string | number; servida: string | number }[],
+): EstadoSolicitudMaterial {
+  if (actual === 'cancelada') return actual;
+  const servidas = lineas.map((l) => mil(l.servida));
+  if (lineas.every((l, i) => servidas[i] >= mil(l.solicitada)))
+    return 'servida';
+  if (servidas.some((s) => s > 0n)) return 'servida_parcial';
+  return 'abierta';
+}
+
+/** Faltante de una línea (lo que no está servido ni reservado). */
+export function faltanteLinea(p: {
+  solicitada: string | number;
+  servida: string | number;
+  reservada: string | number;
+}): string {
+  const f = mil(p.solicitada) - mil(p.servida) - mil(p.reservada);
+  return milTexto(f > 0n ? f : 0n);
 }

@@ -48,6 +48,8 @@ import {
   existenciaUpdateSchema,
   fromCents,
   normalizarPaginacion,
+  scaledToNumeric,
+  toScaled,
   pmpDe,
   regularizacionStock,
   regularizacionStockSchema,
@@ -273,7 +275,7 @@ export class AlmacenService {
         );
   }
 
-  private async cargarAlmacen(
+  async cargarAlmacen(
     tx: Tx,
     companyId: string,
     id: string,
@@ -300,7 +302,7 @@ export class AlmacenService {
     return w;
   }
 
-  private async cargarArticulo(
+  async cargarArticulo(
     tx: Tx,
     companyId: string,
     id: string,
@@ -323,7 +325,7 @@ export class AlmacenService {
   }
 
   /** La obra existe en la empresa y el usuario tiene acceso. */
-  private async validarObra(
+  async validarObra(
     tx: Tx,
     companyId: string,
     projectId: string,
@@ -344,7 +346,7 @@ export class AlmacenService {
   }
 
   /** Saldo del artículo en el almacén, creado si no existía, bloqueado. */
-  private async bloquearSaldo(
+  async bloquearSaldo(
     tx: Tx,
     companyId: string,
     warehouseId: string,
@@ -371,12 +373,15 @@ export class AlmacenService {
     tx: Tx,
     item: StockItem,
     s: SaldoValorado,
+    /** Nueva cantidad reservada (por defecto, la que tenía). */
+    reservada?: string,
   ): Promise<StockItem> {
     const [nuevo] = await tx
       .update(stockItems)
       .set({
         quantity: s.cantidad,
         stockValue: s.valor,
+        ...(reservada !== undefined && { reservedQuantity: reservada }),
         averageCost: pmpNumero(s, item.averageCost),
         version: item.version + 1,
         updatedAt: new Date(),
@@ -1092,7 +1097,44 @@ export class AlmacenService {
   async consumo(input: ConsumoObraInput): Promise<MovimientoStockDto[]> {
     const companyId = this.dbs.getCompanyId();
     const d = consumoObraSchema.parse(input);
-    const ids = await this.dbs.db.transaction(async (tx) => {
+    const ids = await this.dbs.db.transaction((tx) =>
+      this.consumoEnTx(tx, companyId, {
+        almacenId: d.almacenId,
+        projectId: d.projectId,
+        fecha: d.fecha,
+        notas: d.notas ?? null,
+        lineas: d.lineas.map((l) => ({
+          articuloId: l.articuloId,
+          cantidad: l.cantidad.toFixed(3),
+        })),
+      }),
+    );
+    return this.porIds(ids);
+  }
+
+  /** Movimientos por id (para quien consume dentro de su transacción). */
+  movimientosPorIds(ids: string[]): Promise<MovimientoStockDto[]> {
+    return this.porIds(ids);
+  }
+
+  /**
+   * Consumo a obra dentro de la transacción del llamador. `liberar` (por
+   * artículo) es la reserva que se suelta para este consumo: servir una
+   * solicitud de material consume primero lo que tenía reservado.
+   */
+  async consumoEnTx(
+    tx: Tx,
+    companyId: string,
+    d: {
+      almacenId: string;
+      projectId: string;
+      fecha: string;
+      notas: string | null;
+      lineas: { articuloId: string; cantidad: string }[];
+      liberar?: Map<string, string>;
+    },
+  ): Promise<string[]> {
+    {
       const w = await this.cargarAlmacen(tx, companyId, d.almacenId);
       const obra = await this.validarObra(tx, companyId, d.projectId);
       this.exigirAcopioDeLaObra(w, obra.id);
@@ -1104,15 +1146,21 @@ export class AlmacenService {
       for (const l of lineas) {
         const art = await this.cargarArticulo(tx, companyId, l.articuloId);
         const item = await this.bloquearSaldo(tx, companyId, w.id, art.id);
-        const cantidad = l.cantidad.toFixed(3);
+        const cantidad = l.cantidad;
+        // La reserva que se libera para este consumo deja de bloquearlo.
+        const libera = toScaled(d.liberar?.get(art.id) ?? '0', 3);
+        const reservadaTras = scaledToNumeric(
+          toScaled(item.reservedQuantity, 3) - libera,
+          3,
+        );
         const sal = regla(() =>
           salidaStock(
             { cantidad: item.quantity, valor: item.stockValue },
             cantidad,
-            item.reservedQuantity,
+            reservadaTras,
           ),
         );
-        valoradas.push({ art, item, cantidad, sal });
+        valoradas.push({ art, item, cantidad, sal, reservadaTras });
       }
       // 2) Control presupuestario activo con el coste total imputado (antes
       //    de cualquier escritura en audit_log de esta transacción).
@@ -1126,7 +1174,7 @@ export class AlmacenService {
       });
       // 3) Asientos, kárdex y saldos.
       const creados: string[] = [];
-      for (const { art, item, cantidad, sal } of valoradas) {
+      for (const { art, item, cantidad, sal, reservadaTras } of valoradas) {
         const id = randomUUID();
         const concepto = `Consumo ${art.code} de ${w.code} a obra ${obra.code}`;
         const asientoId = await this.asiento(tx, {
@@ -1156,15 +1204,19 @@ export class AlmacenService {
             asientoId,
           }),
         );
-        await this.guardarSaldo(tx, item, sal.saldo);
+        await this.guardarSaldo(
+          tx,
+          item,
+          sal.saldo,
+          d.liberar?.has(art.id) ? reservadaTras : undefined,
+        );
       }
       return creados;
-    });
-    return this.porIds(ids);
+    }
   }
 
   /** Un acopio de obra solo sirve (y recibe) material de su propia obra. */
-  private exigirAcopioDeLaObra(w: Warehouse, projectId: string): void {
+  exigirAcopioDeLaObra(w: Warehouse, projectId: string): void {
     if (w.kind === 'obra' && w.projectId !== projectId) {
       throw new UnprocessableEntityException({
         code: 'WAREHOUSE_PROJECT_MISMATCH',

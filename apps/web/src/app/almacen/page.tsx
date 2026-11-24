@@ -1,6 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Link from 'next/link';
 import { useRef, useState, type ReactNode } from 'react';
 import {
   TIPOS_MOVIMIENTO_STOCK,
@@ -106,6 +107,9 @@ export default function AlmacenPage() {
         subtitle="Existencias valoradas a precio medio ponderado, imputación de consumos a obra y asientos PGC automáticos."
         count={r?.articulosConStock}
       >
+        <Link href="/almacen/solicitudes" className={btnGhostCls}>
+          Solicitudes de material
+        </Link>
         <Autorizado accion="crear">
           <button
             type="button"

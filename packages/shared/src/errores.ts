@@ -47,6 +47,7 @@ export const TITULO_POR_CODIGO: Readonly<Record<string, string>> = {
   HOLDING_MEMBER_DUPLICATE: 'Sociedad ya integrada en el grupo',
   INTERCOMPANY_MISMATCH: 'Descuadre intercompañía',
   CONSOLIDATION_PERIOD_CLOSED: 'Periodo de consolidación cerrado',
+  MATERIAL_REQUEST_OVER_SERVED: 'Se sirve más de lo solicitado',
   WAREHOUSE_INACTIVE: 'Almacén inactivo',
   STOCK_ARTICLE_INACTIVE: 'Artículo inactivo',
   DELIVERY_NOTE_ALREADY_STOCKED: 'Albarán ya recepcionado en stock',

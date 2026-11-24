@@ -3393,8 +3393,9 @@ export const alertRuleTypeEnum = pgEnum('alert_rule_type', [
   'permiso',
   'sobrecoste',
   'garantia_postventa',
-  // Solo notificaciones por evento (no tiene regla configurable).
+  // Solo notificaciones por evento (no tienen regla configurable).
   'aprobacion',
+  'almacen',
 ]);
 
 export const alertRules = pgTable(
@@ -4553,3 +4554,109 @@ export const consolidationClosings = pgTable(
 );
 
 export type ConsolidationClosing = typeof consolidationClosings.$inferSelect;
+
+/* ───────────────────── Solicitudes de material de obra ─────────────────────
+ * Reserva de stock por obra y requisición de compra del faltante (SAP MM,
+ * Oracle Requisitions). Reglas puras en `calculo.ts`; contrato en
+ * `@erp/shared/solicitudes-material`.
+ */
+
+export const materialRequestStatusEnum = pgEnum('material_request_status', [
+  'abierta',
+  'servida_parcial',
+  'servida',
+  'cancelada',
+]);
+
+export const materialRequests = pgTable(
+  'material_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    /** Correlativo por empresa; con el prefijo forma el número (SM-000001). */
+    seq: integer('seq').notNull(),
+    number: varchar('number', { length: 20 }).notNull(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    warehouseId: uuid('warehouse_id')
+      .notNull()
+      .references(() => warehouses.id),
+    status: materialRequestStatusEnum('status').notNull().default('abierta'),
+    neededBy: date('needed_by'),
+    notes: varchar('notes', { length: 500 }),
+    cancelReason: varchar('cancel_reason', { length: 240 }),
+    requestedBy: uuid('requested_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('material_requests_company_seq_unique').on(t.companyId, t.seq),
+    index('material_requests_company_status_idx').on(
+      t.companyId,
+      t.status,
+      t.createdAt,
+    ),
+    index('material_requests_project_idx').on(t.companyId, t.projectId),
+    check(
+      'material_requests_cancelacion',
+      sql`(${t.status} = 'cancelada') = (${t.cancelReason} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export type MaterialRequest = typeof materialRequests.$inferSelect;
+
+export const materialRequestLines = pgTable(
+  'material_request_lines',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    requestId: uuid('request_id')
+      .notNull()
+      .references(() => materialRequests.id, { onDelete: 'restrict' }),
+    articleId: uuid('article_id')
+      .notNull()
+      .references(() => stockArticles.id),
+    quantityRequested: numeric('quantity_requested', {
+      precision: 14,
+      scale: 3,
+    }).notNull(),
+    /** Retenido ahora en `stock_items.reserved_quantity` por esta línea. */
+    quantityReserved: numeric('quantity_reserved', { precision: 14, scale: 3 })
+      .notNull()
+      .default('0'),
+    quantityServed: numeric('quantity_served', { precision: 14, scale: 3 })
+      .notNull()
+      .default('0'),
+    /** Pedido de compra que cubre el faltante. */
+    purchaseOrderId: uuid('purchase_order_id').references(
+      () => purchaseOrders.id,
+    ),
+  },
+  (t) => [
+    uniqueIndex('material_request_lines_article_unique').on(
+      t.requestId,
+      t.articleId,
+    ),
+    index('material_request_lines_po_idx')
+      .on(t.purchaseOrderId)
+      .where(sql`purchase_order_id IS NOT NULL`),
+    check(
+      'material_request_lines_cantidades',
+      sql`${t.quantityRequested} > 0 AND ${t.quantityReserved} >= 0 AND ${t.quantityServed} >= 0
+        AND ${t.quantityReserved} + ${t.quantityServed} <= ${t.quantityRequested}`,
+    ),
+  ],
+);
+
+export type MaterialRequestLine = typeof materialRequestLines.$inferSelect;

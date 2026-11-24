@@ -25,6 +25,8 @@ import type {
   ArticuloCreateInput,
   ArticuloDto,
   ConsumoObraDto,
+  SolicitudMaterialCreateInput,
+  SolicitudMaterialDto,
   AjusteConsolidacionCreateInput,
   AjusteConsolidacionDto,
   CierreConsolidacionDto,
@@ -2396,5 +2398,64 @@ export const holdingApi = {
     request<CierreConsolidacionDto[]>(
       `/holding/grupos/${grupoId}/cierres`,
       postHolding(p, clave),
+    ),
+};
+
+/* ───────────────────── Solicitudes de material de obra ───────────────────── */
+
+const postSolicitud = (body: unknown, clave: string, version?: number) => ({
+  method: 'POST',
+  body: JSON.stringify(body),
+  headers: {
+    ...idempotencyKey(clave),
+    ...(version !== undefined ? ifMatch(version) : {}),
+  },
+});
+
+export const solicitudesMaterialApi = {
+  listar: (f: { estado?: string; conFaltante?: boolean } = {}) =>
+    request<SolicitudMaterialDto[]>(
+      `/almacen/solicitudes${qs({
+        estado: f.estado,
+        conFaltante: f.conFaltante ? 'true' : undefined,
+      })}`,
+    ),
+  crear: (input: SolicitudMaterialCreateInput, clave: string) =>
+    request<SolicitudMaterialDto>(
+      '/almacen/solicitudes',
+      postSolicitud(input, clave),
+    ),
+  reservar: (id: string, version: number) =>
+    request<SolicitudMaterialDto>(`/almacen/solicitudes/${id}/reservar`, {
+      method: 'POST',
+      headers: ifMatch(version),
+    }),
+  servir: (
+    id: string,
+    body: { fecha: string; lineas?: { lineaId: string; cantidad: number }[] },
+    version: number,
+    clave: string,
+  ) =>
+    request<{ solicitud: SolicitudMaterialDto }>(
+      `/almacen/solicitudes/${id}/servir`,
+      postSolicitud(body, clave, version),
+    ),
+  cancelar: (id: string, motivo: string, version: number, clave: string) =>
+    request<SolicitudMaterialDto>(
+      `/almacen/solicitudes/${id}/cancelar`,
+      postSolicitud({ motivo }, clave, version),
+    ),
+  pedido: (
+    id: string,
+    body: {
+      contactId: string;
+      fecha: string;
+      lineas: { lineaId: string; costeUnitario: number }[];
+    },
+    clave: string,
+  ) =>
+    request<{ solicitud: SolicitudMaterialDto; pedido: PurchaseOrderDto }>(
+      `/almacen/solicitudes/${id}/pedido`,
+      postSolicitud(body, clave),
     ),
 };

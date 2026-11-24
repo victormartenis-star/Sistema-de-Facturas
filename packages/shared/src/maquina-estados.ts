@@ -22,6 +22,8 @@ import { PURCHASE_ORDER_TRANSITIONS } from './purchase-orders';
 import type { EstadoSolicitudAprobacion } from './calculo';
 import { APPROVAL_REQUEST_TRANSITIONS } from './aprobaciones';
 import type { EstadoAjusteConsolidacion } from './consolidacion';
+import type { EstadoSolicitudMaterial } from './calculo';
+import { SOLICITUD_MATERIAL_TRANSITIONS } from './solicitudes-material';
 import { AJUSTE_CONSOLIDACION_TRANSITIONS } from './consolidacion';
 import type { EstadoActivo } from './activos';
 import { ACTIVO_TRANSITIONS } from './activos';
@@ -72,6 +74,7 @@ export interface EstadoPorEntidad {
   fixed_asset: EstadoActivo;
   approval_request: EstadoSolicitudAprobacion;
   consolidation_adjustment: EstadoAjusteConsolidacion;
+  material_request: EstadoSolicitudMaterial;
 }
 
 export type EntidadConEstado = keyof EstadoPorEntidad;
@@ -124,6 +127,8 @@ function tablaDe(entidad: EntidadConEstado): Record<string, readonly string[]> {
       return APPROVAL_REQUEST_TRANSITIONS;
     case 'consolidation_adjustment':
       return AJUSTE_CONSOLIDACION_TRANSITIONS;
+    case 'material_request':
+      return SOLICITUD_MATERIAL_TRANSITIONS;
   }
 }
 

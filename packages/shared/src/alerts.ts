@@ -21,7 +21,11 @@ export type AlertRuleType = (typeof ALERT_RULE_TYPES)[number];
  * Tipos de notificación de la bandeja: los de las reglas configurables más
  * los que nacen de un evento (aprobaciones), que no tienen regla.
  */
-export const TIPOS_NOTIFICACION = [...ALERT_RULE_TYPES, 'aprobacion'] as const;
+export const TIPOS_NOTIFICACION = [
+  ...ALERT_RULE_TYPES,
+  'aprobacion',
+  'almacen',
+] as const;
 export type TipoNotificacion = (typeof TIPOS_NOTIFICACION)[number];
 
 export const TIPO_NOTIFICACION_LABELS: Record<TipoNotificacion, string> = {
@@ -30,6 +34,7 @@ export const TIPO_NOTIFICACION_LABELS: Record<TipoNotificacion, string> = {
   sobrecoste: 'Sobrecoste',
   garantia_postventa: 'Postventa',
   aprobacion: 'Aprobaciones',
+  almacen: 'Almacén',
 };
 
 export const ALERT_RULE_TYPE_LABELS: Record<AlertRuleType, string> = {
