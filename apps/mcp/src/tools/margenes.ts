@@ -3,8 +3,10 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   controlPresupuestarioUpdateSchema,
   type ControlPresupuestarioDto,
+  type CostControlDto,
   type CuadroMargenesDto,
   type MargenesObraDto,
+  type ObraEconomicsDto,
 } from '@erp/shared';
 import { pedir, pedirVersionado, query } from '../api';
 import { ejecutar } from '../comun';
@@ -62,6 +64,41 @@ export function registrarMargenes(server: McpServer) {
     async ({ projectId, ...f }) =>
       ejecutar(() =>
         pedir<MargenesObraDto>(`/projects/${projectId}/margenes${query(f)}`),
+      ),
+  );
+
+  server.registerTool(
+    'economia_obra',
+    {
+      title: 'Economía de la obra',
+      description:
+        'Margen bruto sobre certificado y sobre facturado, coste real por ' +
+        'origen (facturas de compra, partes, almacén y amortización), ' +
+        'desviación por partida (con «Sin partida»), retenciones a cobrar y a ' +
+        'pagar, IVA de la obra y margen previsto frente al actual.',
+      inputSchema: { projectId: z.string().uuid() },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ projectId }) =>
+      ejecutar(() =>
+        pedir<ObraEconomicsDto>(`/projects/${projectId}/economics`),
+      ),
+  );
+
+  server.registerTool(
+    'control_costes_obra',
+    {
+      title: 'Valor ganado (BAC / AC / EV)',
+      description:
+        'Coste previsto (BAC), coste real imputado (AC, con su desglose) y ' +
+        'producción certificada (EV) de la obra, margen actual, CPI, EAC, ' +
+        'sobrecoste por partida y curva S mensual (real, ganado y planificado).',
+      inputSchema: { projectId: z.string().uuid() },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ projectId }) =>
+      ejecutar(() =>
+        pedir<CostControlDto>(`/projects/${projectId}/cost-control`),
       ),
   );
 

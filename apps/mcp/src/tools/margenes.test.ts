@@ -55,6 +55,25 @@ describe('herramientas MCP de márgenes y control presupuestario', () => {
     expect(url).toContain('soloAlertas=true');
   });
 
+  it('economía y EVM de la obra: rutas y structuredContent', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        json({ projectId: OBRA, margen: { costeReal: 270 } }),
+      )
+      .mockResolvedValueOnce(json({ projectId: OBRA, ac: 270 }));
+    const h = herramientas();
+    const e = await h.get('economia_obra')!({ projectId: OBRA });
+    expect(e.structuredContent).toMatchObject({ margen: { costeReal: 270 } });
+    const c = await h.get('control_costes_obra')!({ projectId: OBRA });
+    expect(c.structuredContent).toMatchObject({ ac: 270 });
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      `/projects/${OBRA}/economics`,
+    );
+    expect(String(fetchMock.mock.calls[1][0])).toContain(
+      `/projects/${OBRA}/cost-control`,
+    );
+  });
+
   it('configurar: con versión previa envía If-Match', async () => {
     fetchMock
       .mockResolvedValueOnce(json({ config: { version: 3 } }))
