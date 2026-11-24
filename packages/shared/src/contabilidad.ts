@@ -156,6 +156,12 @@ export function planContableBase(): CuentaPlan[] {
     c('4309', 'Clientes, producción ejecutada pendiente de facturar', 'activo'),
     c('438', 'Anticipos de clientes', 'pasivo'),
     c('4389', 'Clientes, producción facturada por anticipado', 'pasivo'),
+    c('499', 'Provisiones por operaciones comerciales', 'pasivo'),
+    c('4994', 'Provisión por contratos onerosos', 'pasivo'),
+    c('695', 'Dotación a la provisión por operaciones comerciales', 'gasto'),
+    c('6954', 'Dotación a la provisión por contratos onerosos', 'gasto'),
+    c('795', 'Exceso de provisiones', 'ingreso'),
+    c('7954', 'Exceso de provisión por contratos onerosos', 'ingreso'),
     c('465', 'Remuneraciones pendientes de pago', 'pasivo'),
     c('4650', 'Remuneraciones pendientes de pago', 'pasivo'),
     c('472', 'Hacienda Pública, IVA soportado', 'activo'),
@@ -216,6 +222,8 @@ export function tipoCuentaPorCodigo(codigo: string): TipoCuenta {
         // 437 envases a devolver y 438 anticipos de clientes: pasivo.
         codigo.startsWith('437') ||
         codigo.startsWith('438') ||
+        // 499 provisiones por operaciones comerciales: pasivo.
+        codigo.startsWith('499') ||
         codigo.startsWith('46') ||
         codigo.startsWith('475') ||
         codigo.startsWith('476') ||

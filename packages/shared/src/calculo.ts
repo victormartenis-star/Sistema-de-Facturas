@@ -2155,3 +2155,70 @@ export function asientoRegularizacionWip(
   apunte(cuentas.ingreso, -(n - a), true);
   return lineas;
 }
+
+/* ──────────── provisión por pérdidas previstas (contratos onerosos) ────────────
+ * NRV 14 PGC y adaptación sectorial de constructoras: la pérdida esperada de
+ * un contrato se reconoce ENTERA en cuanto se prevé. El grado de avance ya
+ * lleva a resultados la parte realizada (coste real > producción), así que
+ * la provisión cubre solo el resto:
+ *   pérdida total   = máx(0, coste estimado al cierre − contrato)
+ *   ya reconocida   = máx(0, coste real − producción)
+ *   provisión       = máx(0, pérdida total − ya reconocida); 0 con la obra
+ *                     terminada (la pérdida ya está realizada).
+ * Cada cierre contabiliza el ajuste frente a la provisión vigente: dotación
+ * 6954 (obra) a 4994, o exceso 4994 a 7954 (obra).
+ */
+
+export interface CalculoProvisionPerdidas {
+  contrato: number | null;
+  costeEstimadoCierre: number;
+  perdidaTotal: number;
+  perdidaReconocida: number;
+  provisionNecesaria: number;
+  provisionAnterior: number;
+  /** > 0 dotación; < 0 exceso (reversión). */
+  ajuste: number;
+}
+
+export function calcularProvisionPerdidas(p: {
+  contrato: Importe | null;
+  costeEstimadoCierre: Importe;
+  produccion: Importe;
+  costeReal: Importe;
+  provisionAnterior: Importe;
+  obraTerminada?: boolean;
+}): CalculoProvisionPerdidas {
+  const coste = toCents(p.costeEstimadoCierre);
+  const anterior = toCents(p.provisionAnterior);
+  const contrato = p.contrato === null ? null : toCents(p.contrato);
+  const max0 = (x: bigint) => (x > 0n ? x : 0n);
+  // Sin contrato no hay ingreso previsto con el que comparar: no se provisiona.
+  const perdida = contrato === null ? 0n : max0(coste - contrato);
+  const reconocida = max0(toCents(p.costeReal) - toCents(p.produccion));
+  const necesaria = p.obraTerminada ? 0n : max0(perdida - reconocida);
+  return {
+    contrato: contrato === null ? null : fromCents(contrato),
+    costeEstimadoCierre: fromCents(coste),
+    perdidaTotal: fromCents(perdida),
+    perdidaReconocida: fromCents(reconocida),
+    provisionNecesaria: fromCents(necesaria),
+    provisionAnterior: fromCents(anterior),
+    ajuste: fromCents(necesaria - anterior),
+  };
+}
+
+/** Asiento del ajuste: dotación (6954 obra a 4994) o exceso (4994 a 7954 obra). */
+export function asientoProvisionPerdidas(ajuste: Importe): LineaAsientoWip[] {
+  const a = toCents(ajuste);
+  if (a === 0n) return [];
+  const imp = centsToNumeric(a > 0n ? a : -a);
+  return a > 0n
+    ? [
+        { cuenta: '6954', debe: imp, haber: '0.00', imputaObra: true },
+        { cuenta: '4994', debe: '0.00', haber: imp, imputaObra: false },
+      ]
+    : [
+        { cuenta: '4994', debe: imp, haber: '0.00', imputaObra: false },
+        { cuenta: '7954', debe: '0.00', haber: imp, imputaObra: true },
+      ];
+}
