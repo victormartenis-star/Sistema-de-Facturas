@@ -15,6 +15,7 @@ import {
   projectsApi,
   purchaseOrdersApi,
 } from '@/lib/api';
+import { AprobacionDocumento } from '@/components/aprobacion-documento';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { IconInbox } from '@/components/icons';
 import { useToast } from '@/components/toast';
@@ -309,6 +310,12 @@ export default function PedidosPage() {
                         Editar
                       </button>
                     </Autorizado>
+                    {o.status !== 'cerrado' && o.status !== 'anulado' && (
+                      <AprobacionDocumento
+                        operacion="pedido_compra"
+                        entidadId={o.id}
+                      />
+                    )}
                     {o.status !== 'cerrado' && o.status !== 'anulado' && (
                       <Autorizado accion="cambiarEstado">
                         <button

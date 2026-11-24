@@ -38,6 +38,7 @@ import { TreasuryModule } from './treasury/treasury.module';
 import { ContabilidadModule } from './contabilidad/contabilidad.module';
 import { ActivosModule } from './activos/activos.module';
 import { AlmacenModule } from './almacen/almacen.module';
+import { AprobacionesModule } from './aprobaciones/aprobaciones.module';
 import { EsgModule } from './modules/esg/esg.module';
 import { FleetIotModule } from './modules/fleet-iot/fleet-iot.module';
 import { ChangeOrdersModule } from './modules/change-orders/change-orders.module';
@@ -84,6 +85,7 @@ import { InformesModule } from './modules/informes/informes.module';
     ContabilidadModule,
     ActivosModule,
     AlmacenModule,
+    AprobacionesModule,
     OcrModule,
     ComplianceModule,
     BudgetsModule,

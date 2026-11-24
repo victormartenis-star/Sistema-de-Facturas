@@ -22,6 +22,7 @@ import {
   projectsApi,
 } from '@/lib/api';
 import { useListadoPaginado } from '@/lib/use-listado-paginado';
+import { AprobacionDocumento } from '@/components/aprobacion-documento';
 import { usePermisos } from '@/lib/permisos';
 import { textoDeError } from '@/lib/errores';
 import {
@@ -464,6 +465,14 @@ export default function FacturasPage() {
           <>
             {inv.status === 'borrador' && (
               <>
+                {kind === 'compra' &&
+                  !inv.rectifiesInvoiceId &&
+                  !inv.certSubcontrataId && (
+                    <AprobacionDocumento
+                      operacion="factura_compra"
+                      entidadId={inv.id}
+                    />
+                  )}
                 {can('cambiarEstado', 'factura') && (
                   <button
                     onClick={() => approveMutation.mutate(inv.id)}

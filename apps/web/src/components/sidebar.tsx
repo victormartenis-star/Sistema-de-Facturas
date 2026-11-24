@@ -63,6 +63,7 @@ const GESTION: NavItem[] = [
   { href: '/equipos', label: 'Maquinaria y equipos', icon: IconTruck },
   { href: '/trabajadores', label: 'Trabajadores', icon: IconUsers },
   { href: '/pedidos', label: 'Pedidos', icon: IconClipboard },
+  { href: '/aprobaciones', label: 'Aprobaciones', icon: IconCheck },
   { href: '/facturas', label: 'Facturas', icon: IconReceipt },
   { href: '/albaranes', label: 'Albaranes', icon: IconInbox },
   { href: '/tesoreria', label: 'Tesorería', icon: IconWallet },

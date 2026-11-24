@@ -38,6 +38,7 @@ import { TreasuryModule } from '../../src/treasury/treasury.module';
 import { ContabilidadModule } from '../../src/contabilidad/contabilidad.module';
 import { ActivosModule } from '../../src/activos/activos.module';
 import { AlmacenModule } from '../../src/almacen/almacen.module';
+import { AprobacionesModule } from '../../src/aprobaciones/aprobaciones.module';
 import { UsersModule } from '../../src/users/users.module';
 import { SubcontratasModule } from '../../src/modules/subcontratas/subcontratas.module';
 
@@ -106,6 +107,7 @@ import { SubcontratasModule } from '../../src/modules/subcontratas/subcontratas.
     ContabilidadModule,
     ActivosModule,
     AlmacenModule,
+    AprobacionesModule,
     DashboardModule,
     CopilotoModule,
     UsersModule,

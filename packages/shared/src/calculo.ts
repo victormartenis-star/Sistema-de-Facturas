@@ -1360,3 +1360,196 @@ export function evaluarControlPresupuestario(p: {
     avisa: afecta && p.modo === 'aviso',
   };
 }
+
+/* ─────────────── flujos de aprobación por umbral (release strategy) ───────────────
+ * Modelo de la estrategia de liberación de SAP / Oracle Approvals: una regla
+ * por operación (y opcionalmente por obra) fija desde qué importe hace falta
+ * aprobación y qué nivel la da. Importes comparados en céntimos BigInt.
+ */
+
+export type OperacionAprobacion =
+  'pedido_compra' | 'factura_compra' | 'certificacion_subcontrata';
+
+/** Roles que pueden aprobar, de menor a mayor nivel. */
+export type RolAprobador = 'administracion' | 'gerente' | 'admin';
+
+export const NIVEL_ROL_APROBADOR: Readonly<Record<RolAprobador, number>> = {
+  administracion: 1,
+  gerente: 2,
+  admin: 3,
+};
+
+export interface ReglaUmbral {
+  id: string;
+  operacion: OperacionAprobacion;
+  /** Importe desde el que aplica (inclusive). */
+  importeMinimo: Importe;
+  /** Obra concreta o null (todas). */
+  projectId: string | null;
+  rolRequerido: RolAprobador;
+  activa: boolean;
+}
+
+/**
+ * Regla que gobierna una operación: entre las activas de esa operación que
+ * aplican a la obra (las de la obra o las generales) y cuyo umbral alcanza
+ * el importe, la de mayor umbral. A igual umbral, la específica de la obra; y
+ * a igualdad de todo, la que exige mayor nivel. Null: no requiere aprobación.
+ */
+export function reglaAplicable<R extends ReglaUmbral>(
+  reglas: readonly R[],
+  p: {
+    operacion: OperacionAprobacion;
+    projectId: string | null;
+    importe: Importe;
+  },
+): R | null {
+  const importe = toCents(p.importe);
+  let mejor: R | null = null;
+  for (const r of reglas) {
+    if (!r.activa || r.operacion !== p.operacion) continue;
+    if (r.projectId !== null && r.projectId !== p.projectId) continue;
+    const min = toCents(r.importeMinimo);
+    if (importe < min) continue;
+    if (!mejor) {
+      mejor = r;
+      continue;
+    }
+    const minMejor = toCents(mejor.importeMinimo);
+    const gana =
+      min > minMejor ||
+      (min === minMejor &&
+        ((r.projectId !== null && mejor.projectId === null) ||
+          ((r.projectId === null) === (mejor.projectId === null) &&
+            NIVEL_ROL_APROBADOR[r.rolRequerido] >
+              NIVEL_ROL_APROBADOR[mejor.rolRequerido])));
+    if (gana) mejor = r;
+  }
+  return mejor;
+}
+
+export type CodigoDecisionAprobacion =
+  'SELF_APPROVAL_FORBIDDEN' | 'APPROVAL_ROLE_INSUFFICIENT';
+
+/**
+ * ¿Puede este usuario decidir (aprobar o rechazar) la solicitud? Segregación
+ * de funciones: quien la pidió no la decide; y el rol debe alcanzar el nivel
+ * requerido (un nivel superior también vale). Null = puede.
+ */
+export function impedimentoAprobador(p: {
+  aprobadorId: string;
+  solicitanteId: string | null;
+  rolAprobador: string;
+  rolRequerido: RolAprobador;
+}): CodigoDecisionAprobacion | null {
+  if (p.solicitanteId !== null && p.aprobadorId === p.solicitanteId) {
+    return 'SELF_APPROVAL_FORBIDDEN';
+  }
+  const nivel = NIVEL_ROL_APROBADOR[p.rolAprobador as RolAprobador] ?? 0;
+  if (nivel < NIVEL_ROL_APROBADOR[p.rolRequerido]) {
+    return 'APPROVAL_ROLE_INSUFFICIENT';
+  }
+  return null;
+}
+
+export type EstadoSolicitudAprobacion =
+  'pendiente' | 'aprobada' | 'rechazada' | 'invalidada' | 'anulada';
+
+export type ResultadoAprobacion =
+  'no_requerida' | 'aprobada' | 'pendiente' | 'rechazada' | 'sin_solicitud';
+
+export interface EvaluacionAprobacion {
+  requerida: boolean;
+  resultado: ResultadoAprobacion;
+  /** Código RFC 7807 si la operación debe bloquearse; null si puede seguir. */
+  errorCode:
+    'APPROVAL_REQUIRED' | 'APPROVAL_PENDING' | 'APPROVAL_REJECTED' | null;
+  motivo: string;
+}
+
+/**
+ * ¿Puede avanzar la operación? Con regla aplicable necesita la última
+ * solicitud del documento aprobada, por un importe que cubra el actual y con
+ * un nivel al menos igual al que exige hoy la regla (si el importe subió de
+ * tramo, la aprobación vieja no basta).
+ */
+export function evaluarAprobacion(p: {
+  regla: Pick<ReglaUmbral, 'rolRequerido' | 'importeMinimo'> | null;
+  solicitud: {
+    estado: EstadoSolicitudAprobacion;
+    importe: Importe;
+    rolRequerido: RolAprobador;
+  } | null;
+  importeActual: Importe;
+}): EvaluacionAprobacion {
+  if (!p.regla) {
+    return {
+      requerida: false,
+      resultado: 'no_requerida',
+      errorCode: null,
+      motivo: 'Por debajo de los umbrales de aprobación',
+    };
+  }
+  const s = p.solicitud;
+  if (!s || s.estado === 'invalidada' || s.estado === 'anulada') {
+    return {
+      requerida: true,
+      resultado: 'sin_solicitud',
+      errorCode: 'APPROVAL_REQUIRED',
+      motivo: `Requiere aprobación de ${p.regla.rolRequerido}: solicítala antes de continuar`,
+    };
+  }
+  if (s.estado === 'pendiente') {
+    return {
+      requerida: true,
+      resultado: 'pendiente',
+      errorCode: 'APPROVAL_PENDING',
+      motivo: 'La aprobación está pendiente de decisión',
+    };
+  }
+  if (s.estado === 'rechazada') {
+    return {
+      requerida: true,
+      resultado: 'rechazada',
+      errorCode: 'APPROVAL_REJECTED',
+      motivo:
+        'La aprobación fue rechazada: corrige el documento y vuelve a solicitarla',
+    };
+  }
+  if (toCents(p.importeActual) > toCents(s.importe)) {
+    return {
+      requerida: true,
+      resultado: 'sin_solicitud',
+      errorCode: 'APPROVAL_REQUIRED',
+      motivo: `El importe actual supera el aprobado (${centsToNumeric(toCents(s.importe))} €): requiere nueva aprobación`,
+    };
+  }
+  if (
+    NIVEL_ROL_APROBADOR[s.rolRequerido] <
+    NIVEL_ROL_APROBADOR[p.regla.rolRequerido]
+  ) {
+    return {
+      requerida: true,
+      resultado: 'sin_solicitud',
+      errorCode: 'APPROVAL_REQUIRED',
+      motivo: `El importe exige ahora aprobación de ${p.regla.rolRequerido}`,
+    };
+  }
+  return {
+    requerida: true,
+    resultado: 'aprobada',
+    errorCode: null,
+    motivo: 'Aprobada',
+  };
+}
+
+/**
+ * Una edición posterior invalida la aprobación (o la solicitud pendiente) si
+ * sube el importe: lo aprobado ya no lo cubre. Bajarlo la mantiene.
+ */
+export function exigeReaprobacion(
+  importeAprobado: Importe,
+  importeNuevo: Importe,
+): boolean {
+  return toCents(importeNuevo) > toCents(importeAprobado);
+}

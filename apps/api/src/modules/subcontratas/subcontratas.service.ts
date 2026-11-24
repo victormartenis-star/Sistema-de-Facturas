@@ -55,6 +55,7 @@ import {
   RETENCION_MAXIMA_FACTURA_PCT,
   resumenRetencionGarantia,
 } from '@erp/shared';
+import { AprobacionesService } from '../../aprobaciones/aprobaciones.service';
 import { AuditService } from '../../audit/audit.service';
 import { cambiarEstado } from '../../common/cambiar-estado';
 import {
@@ -167,6 +168,7 @@ export class SubcontratasService {
     private readonly proveedores: ProveedoresService,
     private readonly invoices: InvoicesService,
     private readonly compliance: ComplianceService,
+    private readonly aprobaciones: AprobacionesService,
   ) {}
 
   /* ─────────────────────────── contratos ─────────────────────────── */
@@ -409,6 +411,12 @@ export class SubcontratasService {
           'Certificación no encontrada',
         );
       }
+      await this.aprobaciones.invalidarSiProcede(tx, {
+        operacion: 'certificacion_subcontrata',
+        entidadId: id,
+        importeNuevo: columnas.importePeriodo,
+        motivo: 'Certificación modificada',
+      });
       await this.audit.registrar(tx, {
         entityType: 'cert_subcontrata',
         entityId: id,
@@ -468,6 +476,7 @@ export class SubcontratasService {
         });
       }
       await this.exigirAptaPrl(contrato, 'aprobar la certificación');
+      await this.aprobaciones.exigir(tx, 'certificacion_subcontrata', id);
       const previas = await this.certsDelContrato(tx, cert.contratoId);
       const { pctEjecutado, ...columnas } = calcular(
         contrato,

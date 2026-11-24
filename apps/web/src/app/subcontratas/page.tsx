@@ -29,6 +29,7 @@ import {
   puedeMedir,
   TONO_ESTADO_CERT,
 } from '@/lib/subcontratas';
+import { AprobacionDocumento } from '@/components/aprobacion-documento';
 import { IconPlus, IconWrench } from '@/components/icons';
 import { useAvisarError, useToast } from '@/components/toast';
 import {
@@ -595,6 +596,12 @@ function DetalleContrato({
                         >
                           Generar factura de compra
                         </button>
+                      )}
+                      {acciones.includes('aprobar') && (
+                        <AprobacionDocumento
+                          operacion="certificacion_subcontrata"
+                          entidadId={c.id}
+                        />
                       )}
                       {acciones.includes('aprobar') && (
                         <button

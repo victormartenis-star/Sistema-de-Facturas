@@ -43,6 +43,7 @@ import {
   calcularOffset,
   type PaginaDto,
 } from '@erp/shared';
+import { AprobacionesService } from '../aprobaciones/aprobaciones.service';
 import { AuditService } from '../audit/audit.service';
 import { cambiarEstado } from '../common/cambiar-estado';
 import { DbService } from '../db/db.service';
@@ -102,6 +103,7 @@ export class DeliveryNotesService {
     private readonly dbs: DbService,
     private readonly orders: PurchaseOrdersService,
     private readonly audit: AuditService,
+    private readonly aprobaciones: AprobacionesService,
   ) {}
 
   /**
@@ -374,6 +376,10 @@ export class DeliveryNotesService {
       if (dto.blockReason) {
         // 422: la petición es correcta, la regla de negocio no se cumple.
         throw new UnprocessableEntityException(dto.blockReason);
+      }
+      // Liberación del pedido: sin aprobación vigente no se recepciona contra él.
+      if (dto.orderId) {
+        await this.aprobaciones.exigir(tx, 'pedido_compra', dto.orderId);
       }
 
       await cambiarEstado(

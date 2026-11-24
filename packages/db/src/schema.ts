@@ -4217,3 +4217,132 @@ export const projectBudgetControls = pgTable(
 );
 
 export type ProjectBudgetControl = typeof projectBudgetControls.$inferSelect;
+
+/* ──────────────────── Flujos de aprobación por umbral ────────────────────
+ * Estrategia de liberación (SAP Release Strategy / Oracle Approvals): reglas
+ * de umbral por operación y obra, y solicitudes con su decisión. Reglas puras
+ * en `calculo.ts`; contrato en `@erp/shared/aprobaciones`.
+ */
+
+export const approvalOperationEnum = pgEnum('approval_operation', [
+  'pedido_compra',
+  'factura_compra',
+  'certificacion_subcontrata',
+]);
+
+export const approvalRoleEnum = pgEnum('approval_role', [
+  'administracion',
+  'gerente',
+  'admin',
+]);
+
+export const approvalRequestStatusEnum = pgEnum('approval_request_status', [
+  'pendiente',
+  'aprobada',
+  'rechazada',
+  'invalidada',
+  'anulada',
+]);
+
+export const approvalRules = pgTable(
+  'approval_rules',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    name: varchar('name', { length: 120 }).notNull(),
+    operation: approvalOperationEnum('operation').notNull(),
+    /** Importe desde el que aplica (inclusive). */
+    minAmount: numeric('min_amount', { precision: 14, scale: 2 }).notNull(),
+    requiredRole: approvalRoleEnum('required_role').notNull(),
+    /** Obra concreta; null = todas. */
+    projectId: uuid('project_id').references(() => projects.id),
+    isActive: boolean('is_active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('approval_rules_company_operation_idx').on(
+      t.companyId,
+      t.operation,
+      t.isActive,
+    ),
+    // Un mismo tramo no se repite por operación y alcance (obra o general).
+    uniqueIndex('approval_rules_tramo_unique')
+      .on(
+        t.companyId,
+        t.operation,
+        sql`coalesce(${t.projectId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
+        t.minAmount,
+      )
+      .where(sql`is_active`),
+    check('approval_rules_min_amount', sql`${t.minAmount} >= 0`),
+  ],
+);
+
+export type ApprovalRule = typeof approvalRules.$inferSelect;
+
+export const approvalRequests = pgTable(
+  'approval_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    operation: approvalOperationEnum('operation').notNull(),
+    /** Documento sujeto: pedido, factura o certificación de subcontrata. */
+    entityId: uuid('entity_id').notNull(),
+    reference: varchar('reference', { length: 80 }).notNull(),
+    projectId: uuid('project_id').references(() => projects.id),
+    ruleId: uuid('rule_id').references(() => approvalRules.id),
+    /** Snapshot del importe solicitado. */
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    requiredRole: approvalRoleEnum('required_role').notNull(),
+    status: approvalRequestStatusEnum('status').notNull().default('pendiente'),
+    comment: varchar('comment', { length: 500 }),
+    requestedBy: uuid('requested_by').references(() => users.id),
+    requestedAt: timestamp('requested_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    decidedBy: uuid('decided_by').references(() => users.id),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    decisionReason: varchar('decision_reason', { length: 500 }),
+    version: integer('version').notNull().default(1),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Una sola solicitud viva (pendiente o aprobada) por documento.
+    uniqueIndex('approval_requests_viva_unique')
+      .on(t.companyId, t.operation, t.entityId)
+      .where(sql`status IN ('pendiente', 'aprobada')`),
+    index('approval_requests_company_status_idx').on(
+      t.companyId,
+      t.status,
+      t.requestedAt,
+    ),
+    index('approval_requests_entity_idx').on(
+      t.companyId,
+      t.operation,
+      t.entityId,
+      t.requestedAt,
+    ),
+    check('approval_requests_amount', sql`${t.amount} >= 0`),
+    check(
+      'approval_requests_decision',
+      sql`(${t.status} = 'pendiente') = (${t.decidedAt} IS NULL)
+        AND (${t.status} NOT IN ('rechazada', 'invalidada', 'anulada') OR ${t.decisionReason} IS NOT NULL)
+        AND (${t.decidedBy} IS NULL OR ${t.requestedBy} IS NULL OR ${t.decidedBy} <> ${t.requestedBy} OR ${t.status} IN ('invalidada', 'anulada'))`,
+    ),
+  ],
+);
+
+export type ApprovalRequest = typeof approvalRequests.$inferSelect;

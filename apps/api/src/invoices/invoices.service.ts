@@ -72,6 +72,7 @@ import {
 } from '@erp/shared';
 import { ComplianceService } from '../compliance/compliance.service';
 import { ProveedoresService } from '../modules/proveedores/proveedores.service';
+import { AprobacionesService } from '../aprobaciones/aprobaciones.service';
 import { AuditService } from '../audit/audit.service';
 import {
   cambiarEstado,
@@ -109,6 +110,7 @@ export class InvoicesService {
     private readonly compliance: ComplianceService,
     private readonly proveedores: ProveedoresService,
     private readonly audit: AuditService,
+    private readonly aprobaciones: AprobacionesService,
   ) {}
 
   async list(
@@ -471,6 +473,21 @@ export class InvoicesService {
           })),
         );
       }
+      if (
+        invoice.kind === 'compra' &&
+        !invoice.rectifiesInvoiceId &&
+        !invoice.certSubcontrataId
+      ) {
+        await this.aprobaciones.invalidarSiProcede(tx, {
+          operacion: 'factura_compra',
+          entidadId: id,
+          importeNuevo: amounts.totalAmount.toFixed(2),
+          motivo: 'Factura modificada',
+          forzar:
+            data.contactId !== undefined &&
+            data.contactId !== invoice.contactId,
+        });
+      }
       if (data.deliveryNoteIds) {
         // Relink completo: soltar los actuales y vincular los nuevos
         await tx
@@ -528,6 +545,17 @@ export class InvoicesService {
         invoice.contactId,
         'aprobar la factura',
       );
+    }
+
+    // Flujo de aprobación por umbral (antes de la transacción: el bloqueo
+    // se audita aparte). Rectificativas y facturas de subcontrata siguen a
+    // su documento de origen.
+    if (
+      invoice.kind === 'compra' &&
+      !invoice.rectifiesInvoiceId &&
+      !invoice.certSubcontrataId
+    ) {
+      await this.aprobaciones.exigir(this.dbs.db, 'factura_compra', id);
     }
 
     await this.dbs.db.transaction(async (tx) => {

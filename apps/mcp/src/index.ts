@@ -31,6 +31,7 @@ import { registrarContabilidad } from './tools/contabilidad';
 import { registrarActivos } from './tools/activos';
 import { registrarAlmacen } from './tools/almacen';
 import { registrarMargenes } from './tools/margenes';
+import { registrarAprobaciones } from './tools/aprobaciones';
 
 async function main() {
   const server = new McpServer({
@@ -57,6 +58,7 @@ async function main() {
   registrarActivos(server);
   registrarAlmacen(server);
   registrarMargenes(server);
+  registrarAprobaciones(server);
 
   await server.connect(new StdioServerTransport());
   console.error(`[erp-mcp] conectado. API: ${BASE_URL}`);

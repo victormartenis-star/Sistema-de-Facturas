@@ -25,6 +25,12 @@ import type {
   ArticuloCreateInput,
   ArticuloDto,
   ConsumoObraDto,
+  EstadoAprobacionDto,
+  OperacionAprobacion,
+  ReglaAprobacionCreateInput,
+  ReglaAprobacionDto,
+  ReglaAprobacionUpdateInput,
+  SolicitudAprobacionDto,
   ControlPresupuestarioDto,
   ControlPresupuestarioUpdateInput,
   CuadroMargenesDto,
@@ -2233,4 +2239,65 @@ export const almacenApi = {
     ),
   consumosObra: (projectId: string) =>
     request<ConsumoObraDto>(`/almacen/obras/${projectId}/consumos`),
+};
+
+/* ─────────────────────── Aprobaciones por umbral ─────────────────────── */
+
+export const aprobacionesApi = {
+  reglas: (operacion?: string) =>
+    request<ReglaAprobacionDto[]>(`/aprobaciones/reglas${qs({ operacion })}`),
+  crearRegla: (input: ReglaAprobacionCreateInput, clave: string) =>
+    request<ReglaAprobacionDto>('/aprobaciones/reglas', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: idempotencyKey(clave),
+    }),
+  actualizarRegla: (
+    id: string,
+    input: ReglaAprobacionUpdateInput,
+    version: number,
+  ) =>
+    request<ReglaAprobacionDto>(`/aprobaciones/reglas/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+      headers: ifMatch(version),
+    }),
+  solicitudes: (f: { estado?: string; operacion?: string; paraMi?: boolean }) =>
+    request<SolicitudAprobacionDto[]>(
+      `/aprobaciones/solicitudes${qs({
+        estado: f.estado,
+        operacion: f.operacion,
+        paraMi: f.paraMi ? 'true' : undefined,
+      })}`,
+    ),
+  estado: (operacion: OperacionAprobacion, entidadId: string) =>
+    request<EstadoAprobacionDto>(
+      `/aprobaciones/estado${qs({ operacion, entidadId })}`,
+    ),
+  solicitar: (
+    operacion: OperacionAprobacion,
+    entidadId: string,
+    comentario: string | null,
+    clave: string,
+  ) =>
+    request<SolicitudAprobacionDto>('/aprobaciones/solicitudes', {
+      method: 'POST',
+      body: JSON.stringify({ operacion, entidadId, comentario }),
+      headers: idempotencyKey(clave),
+    }),
+  decidir: (
+    id: string,
+    accion: 'aprobar' | 'rechazar' | 'anular',
+    body: { comentario?: string | null; motivo?: string },
+    version: number,
+    clave: string,
+  ) =>
+    request<SolicitudAprobacionDto>(
+      `/aprobaciones/solicitudes/${id}/${accion}`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+        headers: { ...ifMatch(version), ...idempotencyKey(clave) },
+      },
+    ),
 };

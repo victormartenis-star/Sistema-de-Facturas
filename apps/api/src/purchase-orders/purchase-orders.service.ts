@@ -43,6 +43,7 @@ import {
   traceabilityReading,
 } from '@erp/shared';
 import { cambiarEstado } from '../common/cambiar-estado';
+import { AprobacionesService } from '../aprobaciones/aprobaciones.service';
 import { ControlPresupuestarioService } from '../cost-control/control-presupuestario.service';
 import { DbService } from '../db/db.service';
 import {
@@ -68,6 +69,7 @@ export class PurchaseOrdersService {
     private readonly dbs: DbService,
     private readonly proveedores: ProveedoresService,
     private readonly control: ControlPresupuestarioService,
+    private readonly aprobaciones: AprobacionesService,
   ) {}
 
   async list(options: {
@@ -279,6 +281,19 @@ export class PurchaseOrdersService {
             }),
           'Pedido no encontrado',
         );
+      }
+      const proveedorCambia =
+        data.contactId !== undefined && data.contactId !== order.contactId;
+      if (data.amount !== undefined || proveedorCambia) {
+        await this.aprobaciones.invalidarSiProcede(tx, {
+          operacion: 'pedido_compra',
+          entidadId: id,
+          importeNuevo: (data.amount ?? Number(order.amount)).toFixed(2),
+          motivo: proveedorCambia
+            ? 'Pedido modificado: cambio de proveedor'
+            : 'Pedido modificado',
+          forzar: proveedorCambia,
+        });
       }
       await this.refreshStatus(id, tx);
     });
