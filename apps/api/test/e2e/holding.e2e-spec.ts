@@ -353,6 +353,20 @@ describe('Consolidación de grupo / holding (integración)', () => {
     });
     expect(dup.body.errorCode).toBe('HOLDING_MEMBER_DUPLICATE');
 
+    // Listado de varios grupos (carga agrupada): cada uno con sus miembros.
+    const lista = await A().get('/holding/grupos').expect(200);
+    const porNombre = new Map(
+      lista.body.map((x: { nombre: string; miembros: unknown[] }) => [
+        x.nombre,
+        x.miembros.length,
+      ]),
+    );
+    expect(porNombre.get('Grupo sin permiso')).toBe(1);
+    expect(lista.body).toHaveLength(2);
+    expect(
+      lista.body.find((x: { id: string }) => x.id === gr.id).miembros,
+    ).toHaveLength(2);
+
     // La filial revoca el permiso: el consolidado deja de ser accesible.
     const permisos = await B().get('/holding/permisos').expect(200);
     await B()

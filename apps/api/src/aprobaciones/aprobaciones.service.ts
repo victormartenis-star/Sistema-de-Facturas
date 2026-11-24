@@ -348,11 +348,12 @@ export class AprobacionesService {
 
   /* ───────────────────────────── reglas ───────────────────────────── */
 
-  async listarReglas(operacion?: OperacionAprobacion) {
+  async listarReglas(operacion?: OperacionAprobacion, id?: string) {
     const filtros: SQL[] = [
       eq(approvalRules.companyId, this.dbs.getCompanyId()),
     ];
     if (operacion) filtros.push(eq(approvalRules.operation, operacion));
+    if (id) filtros.push(eq(approvalRules.id, id));
     const filas = await this.dbs.db
       .select({ r: approvalRules, codigo: projects.code })
       .from(approvalRules)
@@ -363,7 +364,7 @@ export class AprobacionesService {
   }
 
   private async reglaPorId(id: string): Promise<ReglaAprobacionDto> {
-    const r = (await this.listarReglas()).find((x) => x.id === id);
+    const [r] = await this.listarReglas(undefined, id);
     if (!r) throw reglaNoEncontrada();
     return r;
   }

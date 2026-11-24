@@ -472,13 +472,16 @@ export class AlmacenService {
 
   /* ─────────────────────────── almacenes ─────────────────────────── */
 
-  async listarAlmacenes(f: { activo?: boolean } = {}): Promise<AlmacenDto[]> {
+  async listarAlmacenes(
+    f: { activo?: boolean; id?: string } = {},
+  ): Promise<AlmacenDto[]> {
     const companyId = this.dbs.getCompanyId();
     const filtros: (SQL | undefined)[] = [
       eq(warehouses.companyId, companyId),
       await this.filtroVisibles(),
     ];
     if (f.activo !== undefined) filtros.push(eq(warehouses.isActive, f.activo));
+    if (f.id) filtros.push(eq(warehouses.id, f.id));
     const filas = await this.dbs.db
       .select({
         w: warehouses,
@@ -506,8 +509,8 @@ export class AlmacenService {
   }
 
   private async almacenDto(id: string): Promise<AlmacenDto> {
-    const todos = await this.listarAlmacenes();
-    const a = todos.find((w) => w.id === id);
+    // Solo esa fila (con sus subconsultas de valor y alertas), no el listado.
+    const [a] = await this.listarAlmacenes({ id });
     if (!a) throw almacenNoEncontrado();
     return a;
   }
@@ -614,10 +617,11 @@ export class AlmacenService {
   /* ─────────────────────────── artículos ─────────────────────────── */
 
   async listarArticulos(
-    f: { q?: string; activo?: boolean } = {},
+    f: { q?: string; activo?: boolean; id?: string } = {},
   ): Promise<ArticuloDto[]> {
     const companyId = this.dbs.getCompanyId();
     const filtros: SQL[] = [eq(stockArticles.companyId, companyId)];
+    if (f.id) filtros.push(eq(stockArticles.id, f.id));
     if (f.activo !== undefined) {
       filtros.push(eq(stockArticles.isActive, f.activo));
     }
@@ -652,7 +656,7 @@ export class AlmacenService {
   }
 
   private async articuloDto(id: string): Promise<ArticuloDto> {
-    const a = (await this.listarArticulos()).find((x) => x.id === id);
+    const [a] = await this.listarArticulos({ id });
     if (!a) throw articuloNoEncontrado();
     return a;
   }

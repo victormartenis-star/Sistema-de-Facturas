@@ -5,7 +5,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { and, asc, desc, eq, isNull, sql, SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql, SQL } from 'drizzle-orm';
 import {
   companies,
   consolidationAdjustments,
@@ -268,7 +268,11 @@ export class HoldingService {
     return g;
   }
 
-  private async miembros(groupId: string): Promise<MiembroCargado[]> {
+  private async miembros(
+    groupIds: string | string[],
+  ): Promise<MiembroCargado[]> {
+    const ids = Array.isArray(groupIds) ? groupIds : [groupIds];
+    if (ids.length === 0) return [];
     const filas = await this.dbs.db
       .select({
         m: corporateGroupMembers,
@@ -280,17 +284,37 @@ export class HoldingService {
         companies,
         eq(companies.id, corporateGroupMembers.memberCompanyId),
       )
-      .where(eq(corporateGroupMembers.groupId, groupId))
+      .where(inArray(corporateGroupMembers.groupId, ids))
       .orderBy(asc(corporateGroupMembers.startDate), asc(companies.name));
     return filas;
   }
 
-  private async grupoDto(g: CorporateGroup): Promise<GrupoDto> {
-    const [ms, acc] = await Promise.all([
-      this.miembros(g.id),
+  /** DTO de varios grupos con dos consultas en total (miembros y accesos). */
+  private async gruposDto(gs: CorporateGroup[]): Promise<GrupoDto[]> {
+    if (gs.length === 0) return [];
+    const [todos, acc] = await Promise.all([
+      this.miembros(gs.map((g) => g.id)),
       this.sociedadesAccesibles(),
     ]);
     const accesibles = new Set(acc.map((s) => s.companyId));
+    return gs.map((g) =>
+      this.componerGrupo(
+        g,
+        todos.filter(({ m }) => m.groupId === g.id),
+        accesibles,
+      ),
+    );
+  }
+
+  private async grupoDto(g: CorporateGroup): Promise<GrupoDto> {
+    return (await this.gruposDto([g]))[0];
+  }
+
+  private componerGrupo(
+    g: CorporateGroup,
+    ms: MiembroCargado[],
+    accesibles: Set<string>,
+  ): GrupoDto {
     return {
       id: g.id,
       nombre: g.name,
@@ -318,7 +342,7 @@ export class HoldingService {
       .from(corporateGroups)
       .where(eq(corporateGroups.companyId, this.ctx().companyId))
       .orderBy(asc(corporateGroups.name));
-    return Promise.all(gs.map((g) => this.grupoDto(g)));
+    return this.gruposDto(gs);
   }
 
   async grupo(id: string): Promise<GrupoDto> {
