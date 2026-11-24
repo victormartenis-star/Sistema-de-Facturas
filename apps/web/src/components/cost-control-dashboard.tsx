@@ -75,7 +75,7 @@ export function CostControlDashboard({ projectId }: { projectId: string }) {
         <p className="mb-1 text-[11px] font-semibold tracking-wide text-gray-500 uppercase">
           Desglose del coste real imputado
         </p>
-        <div className="mt-2 grid grid-cols-3 gap-3 text-sm">
+        <div className="mt-2 grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
           <div>
             <p className="text-gray-500">Facturas de compra</p>
             <p className="font-semibold tabular-nums">
@@ -92,6 +92,18 @@ export function CostControlDashboard({ projectId }: { projectId: string }) {
             <p className="text-gray-500">Partes de maquinaria</p>
             <p className="font-semibold tabular-nums">
               {formatEur(cc.acBreakdown.partesMaquinaria)}
+            </p>
+          </div>
+          <div>
+            <p className="text-gray-500">Almacén (consumo neto)</p>
+            <p className="font-semibold tabular-nums">
+              {formatEur(cc.acBreakdown.almacen)}
+            </p>
+          </div>
+          <div>
+            <p className="text-gray-500">Amortización imputada</p>
+            <p className="font-semibold tabular-nums">
+              {formatEur(cc.acBreakdown.amortizacion)}
             </p>
           </div>
         </div>

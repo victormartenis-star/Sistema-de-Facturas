@@ -23,6 +23,7 @@ import {
   SobrecostePartidaInput,
   buildCurvaS,
   buildPlannedByPeriod,
+  centsToNumeric,
   computeCostControl,
   computeDesviacionPorPartida,
   computeIvaObra,
@@ -37,6 +38,7 @@ import {
   todayIso,
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
+import { costeAlmacen, costeAmortizacion } from './costes-imputados';
 
 type CosteFila = {
   projectId: string | null;
@@ -64,6 +66,9 @@ interface DatosEconomiaObra {
     vatPct: string;
   }[];
   movimientos: RetencionMovimientoFactura[];
+  /** Consumo neto de almacén y amortización imputada (céntimos, sin partida). */
+  almacen: bigint;
+  amortizacion: bigint;
 }
 
 @Injectable()
@@ -133,7 +138,19 @@ export class CostControlService {
       (s, r) => s + Number(r.total),
       0,
     );
-    const ac = facturasCompra + partesPersonalTotal + partesMaquinariaTotal;
+    // Almacén y amortización imputados (sin partida), como en el cuadro de márgenes.
+    const [almacenMap, amortizacionMap] = await Promise.all([
+      costeAlmacen(this.dbs.db, [projectId]),
+      costeAmortizacion(this.dbs.db, [projectId]),
+    ]);
+    const almacenTotal = fromCents(almacenMap.get(projectId) ?? 0n);
+    const amortizacionTotal = fromCents(amortizacionMap.get(projectId) ?? 0n);
+    const ac =
+      facturasCompra +
+      partesPersonalTotal +
+      partesMaquinariaTotal +
+      almacenTotal +
+      amortizacionTotal;
 
     const actualByPhase = new Map<string, number>();
     for (const [phaseId, total] of [
@@ -193,6 +210,8 @@ export class CostControlService {
         facturasCompra: Math.round(facturasCompra * 100) / 100,
         partesPersonal: Math.round(partesPersonalTotal * 100) / 100,
         partesMaquinaria: Math.round(partesMaquinariaTotal * 100) / 100,
+        almacen: almacenTotal,
+        amortizacion: amortizacionTotal,
       },
       sobrecostePorPartida,
       curvaS,
@@ -299,6 +318,8 @@ export class CostControlService {
         lastCert: undefined,
         lineas: [],
         movimientos: [],
+        almacen: 0n,
+        amortizacion: 0n,
       });
     }
     const de = (projectId: string | null) => datos.get(projectId ?? '');
@@ -374,6 +395,16 @@ export class CostControlService {
       de(r.projectId)?.maquinariaRows.push(r);
     const borrador = await this.loadCostRowsMany(ids, true);
     for (const r of borrador.invoiceRows) de(r.projectId)?.borradorRows.push(r);
+
+    // Almacén y amortización imputados (mismo criterio que el cuadro de márgenes).
+    const [almacenMap, amortizacionMap] = await Promise.all([
+      costeAlmacen(db, ids),
+      costeAmortizacion(db, ids),
+    ]);
+    for (const [projectId, v] of almacenMap) de(projectId)!.almacen = v;
+    for (const [projectId, v] of amortizacionMap) {
+      de(projectId)!.amortizacion = v;
+    }
 
     // EV: última certificación (mayor seq) de cada obra.
     const ultimas = await db
@@ -534,7 +565,12 @@ export class CostControlService {
     const lastCert = d.lastCert;
     const lineas = d.lineas;
     const movimientos = d.movimientos;
-    type Origen = 'facturasCompra' | 'partesPersonal' | 'partesMaquinaria';
+    type Origen =
+      | 'facturasCompra'
+      | 'partesPersonal'
+      | 'partesMaquinaria'
+      | 'almacen'
+      | 'amortizacion';
     const costes = new Map<string | null, Record<Origen, bigint>>();
     const imputa = (
       rows: { phaseId: string | null; total: string }[],
@@ -545,6 +581,8 @@ export class CostControlService {
           facturasCompra: 0n,
           partesPersonal: 0n,
           partesMaquinaria: 0n,
+          almacen: 0n,
+          amortizacion: 0n,
         };
         fila[origen] += toCents(r.total);
         costes.set(r.phaseId, fila);
@@ -553,11 +591,19 @@ export class CostControlService {
     imputa(invoiceRows, 'facturasCompra');
     imputa(personalRows, 'partesPersonal');
     imputa(maquinariaRows, 'partesMaquinaria');
+    // Almacén y amortización no tienen partida: van a «Sin partida».
+    imputa([{ phaseId: null, total: centsToNumeric(d.almacen) }], 'almacen');
+    imputa(
+      [{ phaseId: null, total: centsToNumeric(d.amortizacion) }],
+      'amortizacion',
+    );
 
     const cero = {
       facturasCompra: 0n,
       partesPersonal: 0n,
       partesMaquinaria: 0n,
+      almacen: 0n,
+      amortizacion: 0n,
     };
     const filaDe = (
       phaseId: string | null,
@@ -574,6 +620,8 @@ export class CostControlService {
         facturasCompra: fromCents(c.facturasCompra),
         partesPersonal: fromCents(c.partesPersonal),
         partesMaquinaria: fromCents(c.partesMaquinaria),
+        almacen: fromCents(c.almacen),
+        amortizacion: fromCents(c.amortizacion),
       };
     };
     const desviacionRows = phases.map((ph) =>
@@ -630,6 +678,8 @@ export class CostControlService {
         facturasCompra: totalOrigen('facturasCompra'),
         partesPersonal: totalOrigen('partesPersonal'),
         partesMaquinaria: totalOrigen('partesMaquinaria'),
+        almacen: totalOrigen('almacen'),
+        amortizacion: totalOrigen('amortizacion'),
       },
       facturasCompraEnBorrador: fromCents(
         sumCents(borradorRows.map((r) => toCents(r.total))),
@@ -714,6 +764,19 @@ export class CostControlService {
       );
 
     const actualByPeriod = new Map<string, number>();
+    const [almacenMes, amortizacionMes] = await Promise.all([
+      costeAlmacen(this.dbs.db, [projectId], { porMes: true }),
+      costeAmortizacion(this.dbs.db, [projectId], { porMes: true }),
+    ]);
+    for (const mapa of [almacenMes, amortizacionMes]) {
+      for (const [clave, v] of mapa) {
+        const period = clave.slice(clave.indexOf('|') + 1);
+        actualByPeriod.set(
+          period,
+          (actualByPeriod.get(period) ?? 0) + fromCents(v),
+        );
+      }
+    }
     for (const row of [...invoiceRows, ...personalRows, ...maquinariaRows]) {
       const period = row.date.slice(0, 7);
       actualByPeriod.set(

@@ -145,7 +145,9 @@ function Contenido({ d }: { d: ObraEconomicsDto }) {
           <p className="mt-2 tabular-nums">
             Facturas de compra {formatEur(margen.costes.facturasCompra)} ·
             Partes de personal {formatEur(margen.costes.partesPersonal)} ·
-            Partes de maquinaria {formatEur(margen.costes.partesMaquinaria)}
+            Partes de maquinaria {formatEur(margen.costes.partesMaquinaria)} ·
+            Almacén {formatEur(margen.costes.almacen)} · Amortización{' '}
+            {formatEur(margen.costes.amortizacion)}
           </p>
         </details>
       </Seccion>

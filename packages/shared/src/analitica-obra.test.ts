@@ -71,10 +71,35 @@ describe('computeDesviacionPorPartida', () => {
       facturasCompra: 800,
       partesPersonal: 300,
       partesMaquinaria: 0,
+      almacen: 0,
+      amortizacion: 0,
     });
     expect(a.deviation).toBe(100);
     expect(a.deviationPct).toBe(10);
     expect(a.overBudget).toBe(true);
+  });
+
+  it('almacén y amortización suman al coste real y van a "Sin partida"', () => {
+    const r = computeDesviacionPorPartida([
+      rows[0],
+      { ...rows[1], almacen: '250.10', amortizacion: 200 },
+    ]);
+    const sin = r.find((f) => f.phaseId === null)!;
+    expect(sin.costes).toMatchObject({ almacen: 250.1, amortizacion: 200 });
+    expect(sin.actual).toBe(710.6);
+    const m = computeMargenBrutoObra({
+      certificado: 1000,
+      facturadoVenta: 0,
+      costes: {
+        facturasCompra: 100,
+        partesPersonal: 0,
+        partesMaquinaria: 0,
+        almacen: '0.10',
+        amortizacion: '0.20',
+      },
+    });
+    expect(m.costeReal).toBe(100.3);
+    expect(m.costes).toMatchObject({ almacen: 0.1, amortizacion: 0.2 });
   });
 
   it('la fila "Sin partida" recoge el coste sin partida y la suma cuadra', () => {

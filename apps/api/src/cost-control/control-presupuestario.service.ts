@@ -26,9 +26,6 @@ import {
   contratosSubcontrata,
   invoiceLines,
   invoices,
-  journalEntries,
-  journalEntryLines,
-  ledgerAccounts,
   partesMaquinaria,
   partesPersonal,
   paymentMilestones,
@@ -36,7 +33,6 @@ import {
   projectPhases,
   projects,
   purchaseOrders,
-  stockMovements,
   type DbOrTx,
   type ProjectBudgetControl,
   type Tx,
@@ -77,13 +73,12 @@ import {
 } from '../common/request-context';
 import { verificarVersion } from '../common/version';
 import { DbService } from '../db/db.service';
+import { costeAlmacen, costeAmortizacion } from './costes-imputados';
 
 /** Estados de pedido que aún comprometen coste. */
 const PEDIDOS_ABIERTOS = ['emitido', 'servido_parcial', 'servido'] as const;
 /** Facturas de venta que cuentan como facturadas. */
 const VENTA_EMITIDA = ['aprobada', 'pagada', 'rectificada'] as const;
-/** Cuentas de amortización del inmovilizado (PGC 681x). */
-const PATRON_AMORTIZACION = '681%';
 const ENTIDAD_AUDITORIA = 'project_budget_control';
 /*
  * Referencias cualificadas a la fila exterior en subconsultas correlacionadas:
@@ -343,57 +338,22 @@ export class ControlPresupuestarioService {
         )
         .groupBy(partesMaquinaria.projectId, partesMaquinaria.phaseId),
     );
-    // Almacén: consumos − devoluciones ± regularizaciones de acopio (kárdex).
-    imputa(
-      'almacen',
-      await ex
-        .select({
-          projectId: stockMovements.projectId,
-          phaseId: sql<string | null>`null`,
-          total: sql<string>`coalesce(-sum(${stockMovements.totalValue}), 0)`,
-        })
-        .from(stockMovements)
-        .where(
-          and(
-            inArray(stockMovements.projectId, ids),
-            inArray(stockMovements.type, [
-              'salida_obra',
-              'devolucion',
-              'regularizacion',
-            ]),
-            ...enRango(stockMovements.movementDate, rango),
-          ),
-        )
-        .groupBy(stockMovements.projectId),
-    );
-    // Amortización: saldo deudor de 681x imputado a la obra en el mayor (los
-    // contra-asientos de anulación netean solos).
-    imputa(
-      'amortizacion',
-      await ex
-        .select({
-          projectId: journalEntryLines.projectId,
-          phaseId: sql<string | null>`null`,
-          total: sql<string>`coalesce(sum(${journalEntryLines.debit} - ${journalEntryLines.credit}), 0)`,
-        })
-        .from(journalEntryLines)
-        .innerJoin(
-          ledgerAccounts,
-          eq(ledgerAccounts.id, journalEntryLines.accountId),
-        )
-        .innerJoin(
-          journalEntries,
-          eq(journalEntries.id, journalEntryLines.entryId),
-        )
-        .where(
-          and(
-            inArray(journalEntryLines.projectId, ids),
-            sql`${ledgerAccounts.code} LIKE ${PATRON_AMORTIZACION}`,
-            ...enRango(journalEntries.entryDate, rango),
-          ),
-        )
-        .groupBy(journalEntryLines.projectId),
-    );
+    // Almacén y amortización: mismas consultas que la economía de obra.
+    const [almacen, amortizacion] = await Promise.all([
+      costeAlmacen(ex, ids, { rango }),
+      costeAmortizacion(ex, ids, { rango }),
+    ]);
+    const sinPartida = (origen: Origen, mapa: Map<string, bigint>) => {
+      for (const [projectId, v] of mapa) {
+        const o = de(projectId);
+        if (!o) continue;
+        const acc = o.realPorPartida.get(null) ?? ORIGEN_CERO();
+        acc[origen] += v;
+        o.realPorPartida.set(null, acc);
+      }
+    };
+    sinPartida('almacen', almacen);
+    sinPartida('amortizacion', amortizacion);
 
     // Comprometido: pedidos abiertos con lo facturado vía albaranes.
     const pedidos = await ex

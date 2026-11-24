@@ -61,6 +61,10 @@ export interface CostControlAcBreakdownDto {
   facturasCompra: number;
   partesPersonal: number;
   partesMaquinaria: number;
+  /** Consumo neto de almacén imputado a la obra (kárdex). */
+  almacen: number;
+  /** Amortización (681x) imputada a la obra en el mayor. */
+  amortizacion: number;
 }
 
 /** Respuesta completa de `GET /projects/:id/cost-control`. */
@@ -281,6 +285,21 @@ export interface CosteRealDesglose {
   facturasCompra: number | string;
   partesPersonal: number | string;
   partesMaquinaria: number | string;
+  /** Consumo neto de almacén (opcional: 0 si no se informa). */
+  almacen?: number | string;
+  /** Amortización imputada (opcional: 0 si no se informa). */
+  amortizacion?: number | string;
+}
+
+/** Coste real total de un desglose, en céntimos. */
+function costeTotal(c: CosteRealDesglose): bigint {
+  return sumCents([
+    toCents(c.facturasCompra),
+    toCents(c.partesPersonal),
+    toCents(c.partesMaquinaria),
+    toCents(c.almacen ?? 0),
+    toCents(c.amortizacion ?? 0),
+  ]);
 }
 
 function costesToDto(c: CosteRealDesglose): CostControlAcBreakdownDto {
@@ -288,6 +307,8 @@ function costesToDto(c: CosteRealDesglose): CostControlAcBreakdownDto {
     facturasCompra: fromCents(toCents(c.facturasCompra)),
     partesPersonal: fromCents(toCents(c.partesPersonal)),
     partesMaquinaria: fromCents(toCents(c.partesMaquinaria)),
+    almacen: fromCents(toCents(c.almacen ?? 0)),
+    amortizacion: fromCents(toCents(c.amortizacion ?? 0)),
   };
 }
 
@@ -320,11 +341,7 @@ export function computeMargenBrutoObra(
 ): MargenBrutoObraDto {
   const certificado = toCents(input.certificado);
   const facturado = toCents(input.facturadoVenta);
-  const coste = sumCents([
-    toCents(input.costes.facturasCompra),
-    toCents(input.costes.partesPersonal),
-    toCents(input.costes.partesMaquinaria),
-  ]);
+  const coste = costeTotal(input.costes);
   const sobreCert = certificado - coste;
   const sobreFact = facturado - coste;
   return {
@@ -394,6 +411,8 @@ export interface DesviacionPartidaInput {
   facturasCompra: number | string;
   partesPersonal: number | string;
   partesMaquinaria: number | string;
+  almacen?: number | string;
+  amortizacion?: number | string;
 }
 
 export interface DesviacionPartidaDto {
@@ -423,7 +442,9 @@ export function computeDesviacionPorPartida(
     const fc = toCents(r.facturasCompra);
     const pp = toCents(r.partesPersonal);
     const pm = toCents(r.partesMaquinaria);
-    const actual = fc + pp + pm;
+    const al = toCents(r.almacen ?? 0);
+    const am = toCents(r.amortizacion ?? 0);
+    const actual = fc + pp + pm + al + am;
     const deviation = actual - budget;
     return {
       phaseId: r.phaseId,
@@ -435,6 +456,8 @@ export function computeDesviacionPorPartida(
         facturasCompra: fromCents(fc),
         partesPersonal: fromCents(pp),
         partesMaquinaria: fromCents(pm),
+        almacen: fromCents(al),
+        amortizacion: fromCents(am),
       },
       deviation: fromCents(deviation),
       deviationPct: budget > 0n ? pctOf(deviation, budget) : null,
@@ -456,6 +479,8 @@ export function computeDesviacionPorPartida(
     facturasCompra: suma((r) => r.facturasCompra),
     partesPersonal: suma((r) => r.partesPersonal),
     partesMaquinaria: suma((r) => r.partesMaquinaria),
+    almacen: suma((r) => r.almacen ?? 0),
+    amortizacion: suma((r) => r.amortizacion ?? 0),
   });
   if (agregada.budget === 0 && agregada.actual === 0) return conPartida;
   return [...conPartida, agregada];

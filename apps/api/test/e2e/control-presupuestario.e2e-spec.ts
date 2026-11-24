@@ -421,6 +421,57 @@ describe('Control presupuestario y márgenes (integración)', () => {
     expect(ajena.body.errorCode).toBe('PROJECT_NOT_FOUND');
   });
 
+  it('economía de obra, EVM y cuadro de márgenes dan el mismo coste real (con almacén y amortización)', async () => {
+    const { obraId } = await obraConPresupuesto();
+    const st = await almacenConStock();
+    await consumo(st.almacenId, obraId, st.articuloId, 12).expect(201); // 120 €
+    await api()
+      .post('/activos')
+      .send({
+        codigo: 'AF-2',
+        nombre: 'Compresor',
+        categoria: 'maquinaria',
+        projectId: obraId,
+        fechaAdquisicion: '2026-01-01',
+        fechaInicio: '2026-01-01',
+        coste: 600,
+        vidaUtilMeses: 12,
+      })
+      .expect(201);
+    await api()
+      .post('/activos/amortizar')
+      .send({ hasta: '2026-03' })
+      .expect(200); // 150 €
+
+    const margenes = await api()
+      .get(`/projects/${obraId}/margenes`)
+      .expect(200);
+    const economia = await api()
+      .get(`/projects/${obraId}/economics`)
+      .expect(200);
+    const evm = await api().get(`/projects/${obraId}/cost-control`).expect(200);
+
+    expect(margenes.body.obra.costeReal).toBe(270);
+    expect(economia.body.margen.costeReal).toBe(270);
+    expect(economia.body.margen.costes).toMatchObject({
+      almacen: 120,
+      amortizacion: 150,
+    });
+    expect(evm.body.ac).toBeCloseTo(270, 2);
+    expect(evm.body.acBreakdown).toMatchObject({
+      almacen: 120,
+      amortizacion: 150,
+    });
+    // Sin partida: la fila «Sin partida» de la desviación recoge ambos.
+    const sin = economia.body.desviaciones.find(
+      (d: { phaseId: string | null }) => d.phaseId === null,
+    );
+    expect(sin.costes).toMatchObject({ almacen: 120, amortizacion: 150 });
+    // La curva S acumula ambos por mes.
+    const ultimo = evm.body.curvaS.at(-1);
+    expect(ultimo.actualCumulative).toBeCloseTo(270, 2);
+  });
+
   it('pedidos concurrentes en modo bloqueo: no pasan ambos', async () => {
     const { obraId, proveedorId } = await obraConPresupuesto();
     await configurar(obraId, { modo: 'bloqueo' }).expect(200);
