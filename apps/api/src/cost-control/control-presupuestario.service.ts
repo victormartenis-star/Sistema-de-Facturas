@@ -516,6 +516,23 @@ export class ControlPresupuestarioService {
     };
   }
 
+  /**
+   * Coste real a origen de una obra hasta una fecha (compras, partes, almacén
+   * y amortización), con el mismo criterio que el cuadro de márgenes. Lo usa
+   * el cierre de obra en curso para el margen reconocido.
+   */
+  async costeRealHasta(
+    ex: DbOrTx,
+    projectId: string,
+    hasta: string,
+  ): Promise<string> {
+    const datos = await this.cargar(ex, [projectId], { hasta });
+    const cuadro = cuadroMargenesObra(
+      this.entrada(null, datos.get(projectId)!),
+    );
+    return centsToNumeric(toCents(cuadro.costeReal));
+  }
+
   /* ──────────────────────────── obras ──────────────────────────── */
 
   private async obrasVisibles(f: {

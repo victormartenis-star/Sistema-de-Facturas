@@ -3628,6 +3628,7 @@ export const journalEntrySourceEnum = pgEnum('journal_entry_source', [
   'consumo_obra',
   'devolucion_obra',
   'regularizacion_inventario',
+  'obra_en_curso',
 ]);
 
 export const journalEntryStatusEnum = pgEnum('journal_entry_status', [
@@ -4660,3 +4661,79 @@ export const materialRequestLines = pgTable(
 );
 
 export type MaterialRequestLine = typeof materialRequestLines.$inferSelect;
+
+/* ─────────────────────── Obra en curso (WIP) al cierre ───────────────────────
+ * Un cierre por obra y mes (grado de avance): producción ejecutada y
+ * facturado a origen, WIP y la regularización contabilizada respecto del
+ * anterior. Reglas puras en `calculo.ts`; contrato en `@erp/shared/wip`.
+ */
+
+export const wipStatusEnum = pgEnum('wip_status', ['contabilizado', 'anulado']);
+
+export const workInProgress = pgTable(
+  'work_in_progress',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    year: smallint('year').notNull(),
+    month: smallint('month').notNull(),
+    closingDate: date('closing_date').notNull(),
+    /** Producción ejecutada a origen (última certificación hasta el cierre). */
+    production: numeric('production', { precision: 14, scale: 2 }).notNull(),
+    /** Facturado a origen (base de venta emitida hasta el cierre). */
+    invoiced: numeric('invoiced', { precision: 14, scale: 2 }).notNull(),
+    /** WIP a origen: production − invoiced (con signo). */
+    wipAmount: numeric('wip_amount', { precision: 14, scale: 2 }).notNull(),
+    previousWip: numeric('previous_wip', { precision: 14, scale: 2 }).notNull(),
+    /** Lo contabilizado: wip_amount − previous_wip. */
+    adjustment: numeric('adjustment', { precision: 14, scale: 2 }).notNull(),
+    /** Coste real a origen (informativo: margen reconocido). */
+    actualCost: numeric('actual_cost', { precision: 14, scale: 2 }).notNull(),
+    status: wipStatusEnum('status').notNull().default('contabilizado'),
+    /** Null si la regularización es 0 (no hay asiento). */
+    journalEntryId: uuid('journal_entry_id').references(
+      () => journalEntries.id,
+    ),
+    reversalEntryId: uuid('reversal_entry_id').references(
+      () => journalEntries.id,
+    ),
+    cancelReason: varchar('cancel_reason', { length: 240 }),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Un solo cierre vigente por obra y mes.
+    uniqueIndex('work_in_progress_vigente_unique')
+      .on(t.companyId, t.projectId, t.year, t.month)
+      .where(sql`status = 'contabilizado'`),
+    index('work_in_progress_company_period_idx').on(
+      t.companyId,
+      t.year,
+      t.month,
+    ),
+    index('work_in_progress_project_idx').on(t.projectId, t.year, t.month),
+    check(
+      'work_in_progress_cuadre',
+      sql`${t.month} BETWEEN 1 AND 12
+        AND ${t.wipAmount} = ${t.production} - ${t.invoiced}
+        AND ${t.adjustment} = ${t.wipAmount} - ${t.previousWip}`,
+    ),
+    check(
+      'work_in_progress_anulacion',
+      sql`(${t.status} = 'anulado') = (${t.cancelReason} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export type WorkInProgress = typeof workInProgress.$inferSelect;

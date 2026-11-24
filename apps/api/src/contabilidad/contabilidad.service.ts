@@ -431,7 +431,11 @@ export class ContabilidadService {
     return this.obtenerAsiento(contraId);
   }
 
-  private async anularEnTx(
+  /**
+   * Anula un asiento por contra-asiento dentro de la transacción del
+   * llamador (p. ej. la anulación de un cierre de obra en curso).
+   */
+  async anularEnTx(
     tx: Tx,
     companyId: string,
     id: string,

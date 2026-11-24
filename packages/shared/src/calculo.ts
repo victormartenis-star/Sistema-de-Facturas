@@ -2061,3 +2061,97 @@ export function faltanteLinea(p: {
   const f = mil(p.solicitada) - mil(p.servida) - mil(p.reservada);
   return milTexto(f > 0n ? f : 0n);
 }
+
+/* ─────────────── obra en curso (WIP) al cierre: grado de avance ───────────────
+ * Método del grado de avance (NRV 14 PGC y adaptación sectorial de empresas
+ * constructoras): el ingreso de la obra es la producción ejecutada. Los costes
+ * ya están en la cuenta de resultados por naturaleza, así que el ajuste de
+ * cierre va del lado del ingreso:
+ *   WIP a origen = producción ejecutada (certificada a origen) − facturado.
+ *   > 0: obra ejecutada pendiente de facturar (4309 a 7050).
+ *   < 0: producción facturada por anticipado (7050 a 4389).
+ * Cada cierre contabiliza solo la regularización respecto del WIP anterior,
+ * así el saldo de 4309/4389 es siempre el WIP vigente y nada se duplica.
+ */
+
+export type EstadoWip = 'contabilizado' | 'anulado';
+
+export interface CalculoWip {
+  produccion: number;
+  facturado: number;
+  /** Producción − facturado (a origen). */
+  wip: number;
+  wipAnterior: number;
+  /** Lo que se contabiliza en este cierre: wip − wipAnterior. */
+  regularizacion: number;
+  costeReal: number;
+  /** Producción − coste real: el margen que reconoce el grado de avance. */
+  margenReconocido: number;
+  margenReconocidoPct: number | null;
+}
+
+export function calcularWip(p: {
+  produccion: Importe;
+  facturado: Importe;
+  wipAnterior: Importe;
+  costeReal: Importe;
+}): CalculoWip {
+  const produccion = toCents(p.produccion);
+  const facturado = toCents(p.facturado);
+  const anterior = toCents(p.wipAnterior);
+  const coste = toCents(p.costeReal);
+  const wip = produccion - facturado;
+  const margen = produccion - coste;
+  return {
+    produccion: fromCents(produccion),
+    facturado: fromCents(facturado),
+    wip: fromCents(wip),
+    wipAnterior: fromCents(anterior),
+    regularizacion: fromCents(wip - anterior),
+    costeReal: fromCents(coste),
+    margenReconocido: fromCents(margen),
+    margenReconocidoPct: pct(margen, produccion),
+  };
+}
+
+export interface LineaAsientoWip {
+  cuenta: string;
+  debe: string;
+  haber: string;
+  /** La línea lleva la obra (analítica): solo la de ingreso. */
+  imputaObra: boolean;
+}
+
+/**
+ * Asiento de regularización del WIP de `anterior` a `nuevo` (céntimos):
+ *  - 4309 (pendiente de facturar) recoge la parte positiva del WIP;
+ *  - 4389 (facturado por anticipado) recoge la parte negativa;
+ *  - 7050 (obra) cuadra con la variación total.
+ * Cuadra siempre: Δ4309 − Δ4389 = nuevo − anterior. Sin variación, vacío.
+ */
+export function asientoRegularizacionWip(
+  anterior: Importe,
+  nuevo: Importe,
+  cuentas: { pendiente: string; anticipado: string; ingreso: string },
+): LineaAsientoWip[] {
+  const a = toCents(anterior);
+  const n = toCents(nuevo);
+  const pos = (x: bigint) => (x > 0n ? x : 0n);
+  const neg = (x: bigint) => (x < 0n ? -x : 0n);
+  const lineas: LineaAsientoWip[] = [];
+  const apunte = (cuenta: string, deudor: bigint, imputaObra: boolean) => {
+    if (deudor === 0n) return;
+    lineas.push({
+      cuenta,
+      debe: centsToNumeric(deudor > 0n ? deudor : 0n),
+      haber: centsToNumeric(deudor < 0n ? -deudor : 0n),
+      imputaObra,
+    });
+  };
+  apunte(cuentas.pendiente, pos(n) - pos(a), false);
+  // 4389 es de pasivo: crece al haber.
+  apunte(cuentas.anticipado, -(neg(n) - neg(a)), false);
+  // El ingreso crece al haber.
+  apunte(cuentas.ingreso, -(n - a), true);
+  return lineas;
+}

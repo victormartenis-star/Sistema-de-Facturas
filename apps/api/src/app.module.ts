@@ -40,6 +40,7 @@ import { ActivosModule } from './activos/activos.module';
 import { AlmacenModule } from './almacen/almacen.module';
 import { AprobacionesModule } from './aprobaciones/aprobaciones.module';
 import { HoldingModule } from './holding/holding.module';
+import { WipModule } from './wip/wip.module';
 import { EsgModule } from './modules/esg/esg.module';
 import { FleetIotModule } from './modules/fleet-iot/fleet-iot.module';
 import { ChangeOrdersModule } from './modules/change-orders/change-orders.module';
@@ -88,6 +89,7 @@ import { InformesModule } from './modules/informes/informes.module';
     AlmacenModule,
     AprobacionesModule,
     HoldingModule,
+    WipModule,
     OcrModule,
     ComplianceModule,
     BudgetsModule,

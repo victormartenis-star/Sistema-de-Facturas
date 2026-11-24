@@ -60,4 +60,5 @@ export * from './almacen';
 export * from './control-presupuestario';
 export * from './aprobaciones';
 export * from './solicitudes-material';
+export * from './wip';
 export * from './consolidacion';

@@ -27,6 +27,9 @@ import type {
   ConsumoObraDto,
   SolicitudMaterialCreateInput,
   SolicitudMaterialDto,
+  PropuestaWipDto,
+  ResultadoCierreWipDto,
+  WipDto,
   AjusteConsolidacionCreateInput,
   AjusteConsolidacionDto,
   CierreConsolidacionDto,
@@ -2458,4 +2461,31 @@ export const solicitudesMaterialApi = {
       `/almacen/solicitudes/${id}/pedido`,
       postSolicitud(body, clave),
     ),
+};
+
+/* ─────────────────────── Obra en curso (WIP) al cierre ─────────────────────── */
+
+export const wipApi = {
+  propuesta: (periodo: string) =>
+    request<PropuestaWipDto[]>(`/wip/propuesta${qs({ periodo })}`),
+  listar: (f: { periodo?: string; projectId?: string } = {}) =>
+    request<WipDto[]>(`/wip${qs(f)}`),
+  contabilizar: (periodo: string, projectId: string, clave: string) =>
+    request<WipDto>('/wip', {
+      method: 'POST',
+      body: JSON.stringify({ periodo, projectId }),
+      headers: idempotencyKey(clave),
+    }),
+  cierre: (periodo: string, clave: string) =>
+    request<ResultadoCierreWipDto>('/wip/cierre', {
+      method: 'POST',
+      body: JSON.stringify({ periodo }),
+      headers: idempotencyKey(clave),
+    }),
+  anular: (id: string, motivo: string, version: number, clave: string) =>
+    request<WipDto>(`/wip/${id}/anular`, {
+      method: 'POST',
+      body: JSON.stringify({ motivo }),
+      headers: { ...ifMatch(version), ...idempotencyKey(clave) },
+    }),
 };

@@ -52,6 +52,7 @@ export const ORIGENES_ASIENTO = [
   'consumo_obra',
   'devolucion_obra',
   'regularizacion_inventario',
+  'obra_en_curso',
 ] as const;
 export type OrigenAsiento = (typeof ORIGENES_ASIENTO)[number];
 
@@ -68,6 +69,7 @@ export const ORIGEN_ASIENTO_LABELS: Record<OrigenAsiento, string> = {
   consumo_obra: 'Consumo de material en obra',
   devolucion_obra: 'Devolución de material de obra',
   regularizacion_inventario: 'Regularización de inventario',
+  obra_en_curso: 'Obra en curso (cierre)',
 };
 
 export const ESTADOS_ASIENTO = ['contabilizado', 'anulado'] as const;
@@ -151,6 +153,9 @@ export function planContableBase(): CuentaPlan[] {
     c('430', 'Clientes', 'activo'),
     c('4300', 'Clientes', 'activo'),
     c('4301', 'Clientes, retenciones de garantía', 'activo'),
+    c('4309', 'Clientes, producción ejecutada pendiente de facturar', 'activo'),
+    c('438', 'Anticipos de clientes', 'pasivo'),
+    c('4389', 'Clientes, producción facturada por anticipado', 'pasivo'),
     c('465', 'Remuneraciones pendientes de pago', 'pasivo'),
     c('4650', 'Remuneraciones pendientes de pago', 'pasivo'),
     c('472', 'Hacienda Pública, IVA soportado', 'activo'),
@@ -208,6 +213,9 @@ export function tipoCuentaPorCodigo(codigo: string): TipoCuenta {
     case '4':
       return codigo.startsWith('40') ||
         codigo.startsWith('41') ||
+        // 437 envases a devolver y 438 anticipos de clientes: pasivo.
+        codigo.startsWith('437') ||
+        codigo.startsWith('438') ||
         codigo.startsWith('46') ||
         codigo.startsWith('475') ||
         codigo.startsWith('476') ||
