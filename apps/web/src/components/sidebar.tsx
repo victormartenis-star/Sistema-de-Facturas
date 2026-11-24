@@ -70,6 +70,11 @@ const GESTION: NavItem[] = [
   { href: '/margenes', label: 'Márgenes y presupuesto', icon: IconTrendingUp },
   { href: '/contabilidad', label: 'Contabilidad', icon: IconCalculator },
   { href: '/activos', label: 'Activos fijos', icon: IconCalculator },
+  {
+    href: '/consolidacion',
+    label: 'Consolidación de grupo',
+    icon: IconBuilding,
+  },
   { href: '/almacen', label: 'Almacén y stock', icon: IconCube },
   {
     href: '/tesoreria/conciliacion',

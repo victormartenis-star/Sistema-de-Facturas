@@ -21,6 +21,8 @@ import type { PurchaseOrderStatus } from './purchase-orders';
 import { PURCHASE_ORDER_TRANSITIONS } from './purchase-orders';
 import type { EstadoSolicitudAprobacion } from './calculo';
 import { APPROVAL_REQUEST_TRANSITIONS } from './aprobaciones';
+import type { EstadoAjusteConsolidacion } from './consolidacion';
+import { AJUSTE_CONSOLIDACION_TRANSITIONS } from './consolidacion';
 import type { EstadoActivo } from './activos';
 import { ACTIVO_TRANSITIONS } from './activos';
 import type { EstadoAsiento } from './contabilidad';
@@ -69,6 +71,7 @@ export interface EstadoPorEntidad {
   settlement: SettlementStatus;
   fixed_asset: EstadoActivo;
   approval_request: EstadoSolicitudAprobacion;
+  consolidation_adjustment: EstadoAjusteConsolidacion;
 }
 
 export type EntidadConEstado = keyof EstadoPorEntidad;
@@ -119,6 +122,8 @@ function tablaDe(entidad: EntidadConEstado): Record<string, readonly string[]> {
       return ACTIVO_TRANSITIONS;
     case 'approval_request':
       return APPROVAL_REQUEST_TRANSITIONS;
+    case 'consolidation_adjustment':
+      return AJUSTE_CONSOLIDACION_TRANSITIONS;
   }
 }
 

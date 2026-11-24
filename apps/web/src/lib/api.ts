@@ -25,6 +25,16 @@ import type {
   ArticuloCreateInput,
   ArticuloDto,
   ConsumoObraDto,
+  AjusteConsolidacionCreateInput,
+  AjusteConsolidacionDto,
+  CierreConsolidacionDto,
+  EstadosConsolidadosDto,
+  GrupoDto,
+  MiembroCreateInput,
+  MiembroUpdateInput,
+  PermisoConsolidacionDto,
+  SociedadAccesibleDto,
+  TesoreriaGrupoDto,
   EstadoAprobacionDto,
   OperacionAprobacion,
   ReglaAprobacionCreateInput,
@@ -2299,5 +2309,92 @@ export const aprobacionesApi = {
         body: JSON.stringify(body),
         headers: { ...ifMatch(version), ...idempotencyKey(clave) },
       },
+    ),
+};
+
+/* ─────────────────────── Consolidación de grupo ─────────────────────── */
+
+const postHolding = (body: unknown, clave?: string) => ({
+  method: 'POST',
+  body: JSON.stringify(body),
+  headers: clave ? idempotencyKey(clave) : {},
+});
+
+export const holdingApi = {
+  sociedades: () => request<SociedadAccesibleDto[]>('/holding/sociedades'),
+  permisos: () => request<PermisoConsolidacionDto[]>('/holding/permisos'),
+  conceder: (email: string, clave: string) =>
+    request<PermisoConsolidacionDto[]>(
+      '/holding/permisos',
+      postHolding({ email }, clave),
+    ),
+  revocar: (id: string) =>
+    request<PermisoConsolidacionDto[]>(
+      `/holding/permisos/${id}/revocar`,
+      postHolding({}),
+    ),
+  grupos: () => request<GrupoDto[]>('/holding/grupos'),
+  crearGrupo: (nombre: string, clave: string) =>
+    request<GrupoDto>('/holding/grupos', postHolding({ nombre }, clave)),
+  integrar: (grupoId: string, input: MiembroCreateInput, clave: string) =>
+    request<GrupoDto>(
+      `/holding/grupos/${grupoId}/miembros`,
+      postHolding(input, clave),
+    ),
+  actualizarMiembro: (
+    grupoId: string,
+    miembroId: string,
+    input: MiembroUpdateInput,
+    version: number,
+  ) =>
+    request<GrupoDto>(`/holding/grupos/${grupoId}/miembros/${miembroId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+      headers: ifMatch(version),
+    }),
+  estados: (grupoId: string, desde: string, hasta: string) =>
+    request<EstadosConsolidadosDto>(
+      `/holding/grupos/${grupoId}/estados${qs({ desde, hasta })}`,
+    ),
+  tesoreria: (grupoId: string, hasta: string) =>
+    request<TesoreriaGrupoDto>(
+      `/holding/grupos/${grupoId}/tesoreria${qs({ hasta })}`,
+    ),
+  ajustes: (grupoId: string) =>
+    request<AjusteConsolidacionDto[]>(`/holding/grupos/${grupoId}/ajustes`),
+  crearAjuste: (
+    grupoId: string,
+    input: AjusteConsolidacionCreateInput,
+    clave: string,
+  ) =>
+    request<AjusteConsolidacionDto>(
+      `/holding/grupos/${grupoId}/ajustes`,
+      postHolding(input, clave),
+    ),
+  anularAjuste: (
+    grupoId: string,
+    ajusteId: string,
+    motivo: string,
+    version: number,
+    clave: string,
+  ) =>
+    request<AjusteConsolidacionDto>(
+      `/holding/grupos/${grupoId}/ajustes/${ajusteId}/anular`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ motivo }),
+        headers: { ...ifMatch(version), ...idempotencyKey(clave) },
+      },
+    ),
+  cierres: (grupoId: string) =>
+    request<CierreConsolidacionDto[]>(`/holding/grupos/${grupoId}/cierres`),
+  cerrar: (
+    grupoId: string,
+    p: { desde: string; hasta: string; forzar: boolean },
+    clave: string,
+  ) =>
+    request<CierreConsolidacionDto[]>(
+      `/holding/grupos/${grupoId}/cierres`,
+      postHolding(p, clave),
     ),
 };

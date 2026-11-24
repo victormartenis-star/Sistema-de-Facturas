@@ -21,6 +21,7 @@ import {
   toCents,
   toScaled,
 } from './dinero';
+import { tipoCuentaPorCodigo, type TipoCuenta } from './contabilidad';
 
 /* ───────────────────────────── importes ───────────────────────────── */
 
@@ -1552,4 +1553,415 @@ export function exigeReaprobacion(
   importeNuevo: Importe,
 ): boolean {
   return toCents(importeNuevo) > toCents(importeAprobado);
+}
+
+/* ─────────────────── consolidación de grupo (holding) ───────────────────
+ * Modelo de SAP Group Reporting / Oracle FCC adaptado a las NOFCAC: saldos del
+ * mayor de cada sociedad, integración global (100 % con socios externos) o
+ * proporcional (al % de participación), eliminaciones intragrupo como
+ * asientos de consolidación cuadrados y descuadres llevados a 5550. Todo en
+ * céntimos BigInt; los saldos van como saldo deudor (debe − haber).
+ */
+
+export type MetodoConsolidacion = 'global' | 'proporcional';
+
+/** Cuenta puente de las diferencias de conciliación intragrupo (PGC 555). */
+export const CUENTA_DESCUADRE_INTRAGRUPO = '5550';
+/** Resultados de periodos anteriores no regularizados (remanente). */
+export const CUENTA_RESULTADOS_ANTERIORES = '1200';
+
+export interface SaldoCuenta {
+  codigo: string;
+  /** Saldo deudor: debe − haber. */
+  saldoDeudor: Importe;
+}
+
+export interface SociedadConsolidable {
+  companyId: string;
+  nombre: string;
+  metodo: MetodoConsolidacion;
+  /** Participación del grupo, 0,01–100 con 2 decimales. */
+  participacionPct: Importe;
+  saldos: SaldoCuenta[];
+}
+
+export interface LineaAjusteConsolidacion {
+  cuenta: string;
+  debe: Importe;
+  haber: Importe;
+}
+
+export interface AjusteConsolidacion {
+  concepto: string;
+  origen: 'automatico' | 'manual';
+  lineas: LineaAjusteConsolidacion[];
+}
+
+export type MasaConsolidacion = TipoCuenta;
+const MASAS: readonly MasaConsolidacion[] = [
+  'activo',
+  'pasivo',
+  'patrimonio',
+  'ingreso',
+  'gasto',
+];
+const GRUPOS_PGC = ['1', '2', '3', '4', '5', '6', '7'] as const;
+
+/** Saldo natural (positivo en su lado) de una masa a partir del deudor. */
+function natural(masa: MasaConsolidacion, deudor: bigint): bigint {
+  return masa === 'activo' || masa === 'gasto' ? deudor : -deudor;
+}
+
+export interface FilaConsolidacion {
+  clave: string;
+  porSociedad: Record<string, number>;
+  agregado: number;
+  eliminaciones: number;
+  consolidado: number;
+}
+
+export interface EstadosConsolidadosCalculo {
+  /** Saldo deudor neto por grupo PGC 1–7. */
+  porGrupo: FilaConsolidacion[];
+  /** Saldo natural por masa: activo, pasivo, patrimonio, ingreso, gasto. */
+  porMasa: FilaConsolidacion[];
+  totales: {
+    activo: number;
+    pasivo: number;
+    /** Patrimonio neto total (incluye socios externos). */
+    patrimonio: number;
+    ingresos: number;
+    gastos: number;
+    /** Resultado consolidado del periodo (ingresos − gastos). */
+    resultado: number;
+    /** Activo − (pasivo + patrimonio + resultado): 0 si el balance cuadra. */
+    descuadreBalance: number;
+  };
+  sociosExternos: {
+    /** Patrimonio atribuido a socios externos (integración global < 100 %). */
+    patrimonio: number;
+    resultado: number;
+    porSociedad: { companyId: string; patrimonio: number; resultado: number }[];
+  };
+  resultadoAtribuidoDominante: number;
+  /** Céntimos de redondeo de la integración proporcional llevados a patrimonio. */
+  redondeoProporcional: number;
+}
+
+function acumula(m: Map<string, bigint>, k: string, v: bigint) {
+  m.set(k, (m.get(k) ?? 0n) + v);
+}
+
+/**
+ * Estados consolidados: agrega los saldos de cada sociedad (al 100 % en
+ * global; a su % en proporcional, con el redondeo llevado a patrimonio para
+ * que siga cuadrando), aplica los ajustes de consolidación (eliminaciones) y
+ * calcula socios externos de las integradas globalmente al < 100 %.
+ */
+export function consolidarEstados(p: {
+  sociedades: readonly SociedadConsolidable[];
+  ajustes: readonly AjusteConsolidacion[];
+}): EstadosConsolidadosCalculo {
+  const ids = p.sociedades.map((s) => s.companyId);
+  // grupo|masa -> companyId -> saldo deudor (céntimos)
+  const porGrupo = new Map<string, Map<string, bigint>>();
+  const porMasa = new Map<string, Map<string, bigint>>();
+  const minoritarios: {
+    companyId: string;
+    patrimonio: bigint;
+    resultado: bigint;
+  }[] = [];
+  let redondeo = 0n;
+
+  for (const s of p.sociedades) {
+    const pctCent = toScaled(s.participacionPct, 2);
+    if (pctCent <= 0n || pctCent > 10_000n) {
+      throw new RangeError(`Participación no válida: ${s.participacionPct}`);
+    }
+    const proporcional = s.metodo === 'proporcional';
+    let suma = 0n;
+    let patrimonio = 0n;
+    let resultado = 0n;
+    const filas: { codigo: string; v: bigint }[] = [];
+    for (const c of s.saldos) {
+      const original = toCents(c.saldoDeudor);
+      const v = proporcional
+        ? applyPct(original, s.participacionPct)
+        : original;
+      filas.push({ codigo: c.codigo, v });
+      suma += v;
+    }
+    if (proporcional && suma !== 0n) {
+      // El escalado por cuenta puede descuadrar céntimos: a patrimonio.
+      filas.push({ codigo: CUENTA_RESULTADOS_ANTERIORES, v: -suma });
+      redondeo += -suma;
+    }
+    for (const { codigo, v } of filas) {
+      const grupo = codigo.charAt(0);
+      const masa = tipoCuentaPorCodigo(codigo);
+      if (!porGrupo.has(grupo)) porGrupo.set(grupo, new Map());
+      if (!porMasa.has(masa)) porMasa.set(masa, new Map());
+      acumula(porGrupo.get(grupo)!, s.companyId, v);
+      acumula(porMasa.get(masa)!, s.companyId, v);
+      if (masa === 'patrimonio') patrimonio += -v;
+      if (masa === 'ingreso' || masa === 'gasto') resultado += -v;
+    }
+    if (!proporcional && pctCent < 10_000n) {
+      const externos = 10_000n - pctCent;
+      minoritarios.push({
+        companyId: s.companyId,
+        patrimonio: mulDivRound(patrimonio, externos, 10_000n),
+        resultado: mulDivRound(resultado, externos, 10_000n),
+      });
+    }
+  }
+
+  // Ajustes de consolidación (eliminaciones), cuadrados por definición.
+  const elimGrupo = new Map<string, bigint>();
+  const elimMasa = new Map<string, bigint>();
+  for (const a of p.ajustes) {
+    let cuadre = 0n;
+    for (const l of a.lineas) {
+      const v = toCents(l.debe) - toCents(l.haber);
+      cuadre += v;
+      acumula(elimGrupo, l.cuenta.charAt(0), v);
+      acumula(elimMasa, tipoCuentaPorCodigo(l.cuenta), v);
+    }
+    if (cuadre !== 0n) {
+      throw new RangeError(
+        `Ajuste de consolidación descuadrado: ${a.concepto}`,
+      );
+    }
+  }
+
+  const fila = (
+    clave: string,
+    datos: Map<string, bigint> | undefined,
+    elim: bigint,
+    signo: (v: bigint) => bigint,
+  ): FilaConsolidacion & { _consolidado: bigint } => {
+    const porSociedad: Record<string, number> = {};
+    let agregado = 0n;
+    for (const id of ids) {
+      const v = datos?.get(id) ?? 0n;
+      porSociedad[id] = fromCents(signo(v));
+      agregado += v;
+    }
+    const consolidado = agregado + elim;
+    return {
+      clave,
+      porSociedad,
+      agregado: fromCents(signo(agregado)),
+      eliminaciones: fromCents(signo(elim)),
+      consolidado: fromCents(signo(consolidado)),
+      _consolidado: signo(consolidado),
+    };
+  };
+  const limpiar = ({
+    _consolidado: _c,
+    ...f
+  }: FilaConsolidacion & { _consolidado: bigint }) => f;
+
+  const filasGrupo = GRUPOS_PGC.map((g) =>
+    fila(g, porGrupo.get(g), elimGrupo.get(g) ?? 0n, (v) => v),
+  );
+  const filasMasa = MASAS.map((m) =>
+    fila(m, porMasa.get(m), elimMasa.get(m) ?? 0n, (v) => natural(m, v)),
+  );
+  const total = (m: MasaConsolidacion) =>
+    filasMasa.find((f) => f.clave === m)!._consolidado;
+  const activo = total('activo');
+  const pasivo = total('pasivo');
+  const patrimonio = total('patrimonio');
+  const ingresos = total('ingreso');
+  const gastos = total('gasto');
+  const resultado = ingresos - gastos;
+  const extPatrimonio = sumCents(minoritarios.map((m) => m.patrimonio));
+  const extResultado = sumCents(minoritarios.map((m) => m.resultado));
+
+  return {
+    porGrupo: filasGrupo.map(limpiar),
+    porMasa: filasMasa.map(limpiar),
+    totales: {
+      activo: fromCents(activo),
+      pasivo: fromCents(pasivo),
+      patrimonio: fromCents(patrimonio),
+      ingresos: fromCents(ingresos),
+      gastos: fromCents(gastos),
+      resultado: fromCents(resultado),
+      descuadreBalance: fromCents(activo - (pasivo + patrimonio + resultado)),
+    },
+    sociosExternos: {
+      patrimonio: fromCents(extPatrimonio),
+      resultado: fromCents(extResultado),
+      porSociedad: minoritarios.map((m) => ({
+        companyId: m.companyId,
+        patrimonio: fromCents(m.patrimonio),
+        resultado: fromCents(m.resultado),
+      })),
+    },
+    resultadoAtribuidoDominante: fromCents(resultado - extResultado),
+    redondeoProporcional: fromCents(redondeo),
+  };
+}
+
+export interface OperacionesIntragrupo {
+  /** Sociedad que vende / acreedora. */
+  vendedor: string;
+  /** Sociedad que compra / deudora. */
+  comprador: string;
+  /** Base de las ventas registradas por el vendedor al comprador. */
+  ventas: Importe;
+  /** Base de las compras registradas por el comprador al vendedor. */
+  compras: Importe;
+  /** Saldo pendiente de cobro en el vendedor. */
+  cobrar: Importe;
+  /** Saldo pendiente de pago en el comprador. */
+  pagar: Importe;
+}
+
+export interface ConciliacionIntragrupo {
+  vendedor: string;
+  comprador: string;
+  ventas: number;
+  compras: number;
+  diferenciaOperaciones: number;
+  cobrar: number;
+  pagar: number;
+  diferenciaSaldos: number;
+  descuadre: boolean;
+}
+
+/**
+ * Conciliación y eliminación intragrupo por pareja vendedor → comprador:
+ *  - Operaciones: 7050 (ventas del vendedor) a 6000 (compras del comprador).
+ *  - Saldos: 4000 (deuda del comprador) a 4300 (crédito del vendedor).
+ * Cada lado se elimina por su propio importe; la diferencia va a 5550 y se
+ * marca como descuadre (operación no registrada o mal registrada en un lado).
+ * Con integración proporcional las eliminaciones se escalan al menor % de
+ * las dos sociedades (la parte que el grupo integra de ambas).
+ */
+export function eliminacionesIntragrupo(
+  operaciones: readonly OperacionesIntragrupo[],
+  factorPct: (vendedor: string, comprador: string) => Importe = () => 100,
+): { conciliacion: ConciliacionIntragrupo[]; ajustes: AjusteConsolidacion[] } {
+  const conciliacion: ConciliacionIntragrupo[] = [];
+  const ajustes: AjusteConsolidacion[] = [];
+  for (const o of operaciones) {
+    const pct = factorPct(o.vendedor, o.comprador);
+    const esc = (v: Importe) =>
+      toScaled(pct, 2) === 10_000n ? toCents(v) : applyPct(toCents(v), pct);
+    const ventas = esc(o.ventas);
+    const compras = esc(o.compras);
+    const cobrar = esc(o.cobrar);
+    const pagar = esc(o.pagar);
+    const difOp = ventas - compras;
+    const difSal = cobrar - pagar;
+    conciliacion.push({
+      vendedor: o.vendedor,
+      comprador: o.comprador,
+      ventas: fromCents(ventas),
+      compras: fromCents(compras),
+      diferenciaOperaciones: fromCents(difOp),
+      cobrar: fromCents(cobrar),
+      pagar: fromCents(pagar),
+      diferenciaSaldos: fromCents(difSal),
+      descuadre: difOp !== 0n || difSal !== 0n,
+    });
+    const lado = (
+      cuenta: string,
+      debe: bigint,
+      haber: bigint,
+    ): LineaAjusteConsolidacion => ({
+      cuenta,
+      debe: centsToNumeric(debe),
+      haber: centsToNumeric(haber),
+    });
+    const puente = (dif: bigint) =>
+      dif > 0n
+        ? lado(CUENTA_DESCUADRE_INTRAGRUPO, 0n, dif)
+        : lado(CUENTA_DESCUADRE_INTRAGRUPO, -dif, 0n);
+    if (ventas !== 0n || compras !== 0n) {
+      ajustes.push({
+        concepto: `Eliminación de operaciones intragrupo ${o.vendedor} → ${o.comprador}`,
+        origen: 'automatico',
+        lineas: [
+          lado('7050', ventas, 0n),
+          lado('6000', 0n, compras),
+          ...(difOp !== 0n ? [puente(difOp)] : []),
+        ],
+      });
+    }
+    if (cobrar !== 0n || pagar !== 0n) {
+      ajustes.push({
+        concepto: `Eliminación de saldos intragrupo ${o.vendedor} → ${o.comprador}`,
+        origen: 'automatico',
+        lineas: [
+          lado('4000', pagar, 0n),
+          lado('4300', 0n, cobrar),
+          ...(difSal !== 0n ? [puente(-difSal)] : []),
+        ],
+      });
+    }
+  }
+  return { conciliacion, ajustes };
+}
+
+export interface TesoreriaSociedadEntrada {
+  companyId: string;
+  metodo: MetodoConsolidacion;
+  participacionPct: Importe;
+  /** Saldo de tesorería (cuentas 57x). */
+  liquidez: Importe;
+  cobrosExternos: Importe;
+  cobrosIntragrupo: Importe;
+  pagosExternos: Importe;
+  pagosIntragrupo: Importe;
+}
+
+/**
+ * Posición de tesorería del grupo: liquidez y cartera de cobros y pagos
+ * pendientes con terceros. Los recíprocos intragrupo se informan pero no
+ * cuentan (se eliminan). Proporcional: al % de participación.
+ */
+export function posicionTesoreriaGrupo(
+  sociedades: readonly TesoreriaSociedadEntrada[],
+) {
+  let liquidez = 0n;
+  let cobros = 0n;
+  let pagos = 0n;
+  let cobrosIg = 0n;
+  let pagosIg = 0n;
+  const porSociedad = sociedades.map((s) => {
+    const esc = (v: Importe) =>
+      s.metodo === 'proporcional'
+        ? applyPct(toCents(v), s.participacionPct)
+        : toCents(v);
+    const l = esc(s.liquidez);
+    const c = esc(s.cobrosExternos);
+    const pg = esc(s.pagosExternos);
+    liquidez += l;
+    cobros += c;
+    pagos += pg;
+    cobrosIg += esc(s.cobrosIntragrupo);
+    pagosIg += esc(s.pagosIntragrupo);
+    return {
+      companyId: s.companyId,
+      liquidez: fromCents(l),
+      cobrosPendientes: fromCents(c),
+      pagosPendientes: fromCents(pg),
+      posicionNeta: fromCents(l + c - pg),
+    };
+  });
+  return {
+    porSociedad,
+    liquidez: fromCents(liquidez),
+    cobrosPendientes: fromCents(cobros),
+    pagosPendientes: fromCents(pagos),
+    posicionNeta: fromCents(liquidez + cobros - pagos),
+    intragrupoEliminado: {
+      cobros: fromCents(cobrosIg),
+      pagos: fromCents(pagosIg),
+    },
+  };
 }

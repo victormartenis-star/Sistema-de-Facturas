@@ -4346,3 +4346,208 @@ export const approvalRequests = pgTable(
 );
 
 export type ApprovalRequest = typeof approvalRequests.$inferSelect;
+
+/* ─────────────────── Consolidación de grupo / holding ───────────────────
+ * Permisos de consolidación entre sociedades, grupos con sus miembros,
+ * ajustes manuales de consolidación y cierres (snapshot por periodo). Reglas
+ * puras en `calculo.ts`; contrato en `@erp/shared/consolidacion`.
+ */
+
+/**
+ * Permiso de consolidación: la sociedad `company_id` (dueña de los datos)
+ * autoriza a `user_id`, de otra sociedad, a leer sus estados financieros
+ * para consolidarlos. Lo concede y lo revoca el admin de `company_id`.
+ */
+export const userCompanyGrants = pgTable(
+  'user_company_grants',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    grantedBy: uuid('granted_by').references(() => users.id),
+    grantedAt: timestamp('granted_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    revokedBy: uuid('revoked_by').references(() => users.id),
+  },
+  (t) => [
+    uniqueIndex('user_company_grants_vigente_unique')
+      .on(t.companyId, t.userId)
+      .where(sql`revoked_at IS NULL`),
+    index('user_company_grants_user_idx').on(t.userId),
+  ],
+);
+
+export type UserCompanyGrant = typeof userCompanyGrants.$inferSelect;
+
+export const consolidationMethodEnum = pgEnum('consolidation_method', [
+  'global',
+  'proporcional',
+]);
+
+export const corporateGroups = pgTable(
+  'corporate_groups',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** Sociedad matriz: dueña del grupo y de su configuración. */
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    name: varchar('name', { length: 120 }).notNull(),
+    baseCurrency: char('base_currency', { length: 3 }).notNull().default('EUR'),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('corporate_groups_company_name_unique').on(t.companyId, t.name),
+  ],
+);
+
+export type CorporateGroup = typeof corporateGroups.$inferSelect;
+
+export const corporateGroupMembers = pgTable(
+  'corporate_group_members',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    groupId: uuid('group_id')
+      .notNull()
+      .references(() => corporateGroups.id, { onDelete: 'restrict' }),
+    /** Sociedad integrada. */
+    memberCompanyId: uuid('member_company_id')
+      .notNull()
+      .references(() => companies.id),
+    ownershipPct: numeric('ownership_pct', {
+      precision: 5,
+      scale: 2,
+    }).notNull(),
+    method: consolidationMethodEnum('method').notNull().default('global'),
+    startDate: date('start_date').notNull(),
+    endDate: date('end_date'),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Una sociedad no puede estar dos veces activa en el mismo grupo.
+    uniqueIndex('corporate_group_members_activa_unique')
+      .on(t.groupId, t.memberCompanyId)
+      .where(sql`end_date IS NULL`),
+    index('corporate_group_members_company_idx').on(t.memberCompanyId),
+    check(
+      'corporate_group_members_pct',
+      sql`${t.ownershipPct} >= 0.01 AND ${t.ownershipPct} <= 100`,
+    ),
+    check(
+      'corporate_group_members_fechas',
+      sql`${t.endDate} IS NULL OR ${t.endDate} >= ${t.startDate}`,
+    ),
+  ],
+);
+
+export type CorporateGroupMember = typeof corporateGroupMembers.$inferSelect;
+
+export const consolidationAdjustmentStatusEnum = pgEnum(
+  'consolidation_adjustment_status',
+  ['vigente', 'anulado'],
+);
+
+/** Ajuste manual de consolidación (debe/haber, cuadrado por construcción). */
+export const consolidationAdjustments = pgTable(
+  'consolidation_adjustments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** Matriz (dueña del grupo). */
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    groupId: uuid('group_id')
+      .notNull()
+      .references(() => corporateGroups.id, { onDelete: 'restrict' }),
+    adjustmentDate: date('adjustment_date').notNull(),
+    description: varchar('description', { length: 240 }).notNull(),
+    debitAccount: varchar('debit_account', { length: 10 }).notNull(),
+    creditAccount: varchar('credit_account', { length: 10 }).notNull(),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    /** Sociedad a la que se refiere (informativo). */
+    memberCompanyId: uuid('member_company_id').references(() => companies.id),
+    status: consolidationAdjustmentStatusEnum('status')
+      .notNull()
+      .default('vigente'),
+    cancelReason: varchar('cancel_reason', { length: 240 }),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('consolidation_adjustments_group_date_idx').on(
+      t.groupId,
+      t.adjustmentDate,
+    ),
+    check(
+      'consolidation_adjustments_importe',
+      sql`${t.amount} > 0 AND ${t.debitAccount} <> ${t.creditAccount}
+        AND ${t.debitAccount} ~ '^[1-7][0-9]{2,9}$' AND ${t.creditAccount} ~ '^[1-7][0-9]{2,9}$'`,
+    ),
+    check(
+      'consolidation_adjustments_anulacion',
+      sql`(${t.status} = 'anulado') = (${t.cancelReason} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export type ConsolidationAdjustment =
+  typeof consolidationAdjustments.$inferSelect;
+
+/** Cierre de consolidación: congela el resultado de un periodo. */
+export const consolidationClosings = pgTable(
+  'consolidation_closings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    groupId: uuid('group_id')
+      .notNull()
+      .references(() => corporateGroups.id, { onDelete: 'restrict' }),
+    periodFrom: date('period_from').notNull(),
+    periodTo: date('period_to').notNull(),
+    snapshot: jsonb('snapshot').notNull(),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('consolidation_closings_periodo_unique').on(
+      t.groupId,
+      t.periodFrom,
+      t.periodTo,
+    ),
+    check(
+      'consolidation_closings_periodo',
+      sql`${t.periodTo} >= ${t.periodFrom}`,
+    ),
+  ],
+);
+
+export type ConsolidationClosing = typeof consolidationClosings.$inferSelect;

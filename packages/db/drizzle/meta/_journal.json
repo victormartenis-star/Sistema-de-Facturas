@@ -386,6 +386,13 @@
       "when": 1795449953430,
       "tag": "0054_aprobaciones_umbral",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1795532733846,
+      "tag": "0055_consolidacion_grupo",
+      "breakpoints": true
     }
   ]
 }
