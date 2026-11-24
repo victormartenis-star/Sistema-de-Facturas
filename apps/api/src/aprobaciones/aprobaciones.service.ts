@@ -22,6 +22,9 @@ import {
   type Tx,
 } from '@erp/db';
 import {
+  ESTADO_SOLICITUD_LABELS,
+  OPERACION_APROBACION_LABELS,
+  ROL_APROBADOR_LABELS,
   centsToNumeric,
   decisionAprobarSchema,
   decisionMotivoSchema,
@@ -47,6 +50,7 @@ import {
   type SolicitudAprobacionDto,
   type SolicitudesQuery,
 } from '@erp/shared';
+import { NotificacionesService } from '../alerts/notificaciones.service';
 import { AuditService } from '../audit/audit.service';
 import { cambiarEstado } from '../common/cambiar-estado';
 import { getRequestContext } from '../common/request-context';
@@ -122,6 +126,7 @@ export class AprobacionesService {
   constructor(
     private readonly dbs: DbService,
     private readonly audit: AuditService,
+    private readonly notificaciones: NotificacionesService,
   ) {}
 
   /* ─────────────────────────── documentos ─────────────────────────── */
@@ -583,6 +588,15 @@ export class AprobacionesService {
         action: 'create',
         newData: s,
       });
+      // Bandeja in-app: los aprobadores se enteran de que hay algo pendiente.
+      await this.notificaciones.notificar(tx, {
+        companyId,
+        tipo: 'aprobacion',
+        titulo: `Aprobación pendiente: ${doc.referencia}`,
+        cuerpo: `${OPERACION_APROBACION_LABELS[d.operacion]} por ${centsToNumeric(toCents(doc.importe))} € · aprueba ${ROL_APROBADOR_LABELS[regla.requiredRole as RolAprobador]} o superior`,
+        enlace: '/aprobaciones',
+        clave: `aprobacion:solicitud:${s.id}`,
+      });
       return s.id;
     });
     return this.solicitudPorId(id);
@@ -622,6 +636,16 @@ export class AprobacionesService {
         importe: Number(s.amount),
       },
     });
+    if (a !== 'anulada') {
+      await this.notificaciones.notificar(tx, {
+        companyId: s.companyId,
+        tipo: 'aprobacion',
+        titulo: `Aprobación ${ESTADO_SOLICITUD_LABELS[a].toLowerCase()}: ${s.reference}`,
+        cuerpo: `${OPERACION_APROBACION_LABELS[s.operation as OperacionAprobacion]} por ${s.amount} €${p.motivo ? ` · ${p.motivo}` : ''}`,
+        enlace: '/aprobaciones',
+        clave: `aprobacion:${a}:${s.id}`,
+      });
+    }
     return nueva as ApprovalRequest;
   }
 

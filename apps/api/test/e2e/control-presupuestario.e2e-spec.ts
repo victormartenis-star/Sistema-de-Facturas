@@ -318,6 +318,19 @@ describe('Control presupuestario y márgenes (integración)', () => {
 
     const integridad = await api().get('/audit/verify-integrity').expect(200);
     expect(integridad.body.integra).toBe(true);
+
+    // El bloqueo deja notificación (una por obra, evento y día) aunque la
+    // operación se deshaga.
+    const bandeja = await api().get('/alerts/notifications').expect(200);
+    const sobrecoste = bandeja.body.filter(
+      (n: { type: string }) => n.type === 'sobrecoste',
+    );
+    expect(sobrecoste).toEqual([
+      expect.objectContaining({
+        title: expect.stringContaining('operación bloqueada'),
+        link: '/margenes',
+      }),
+    ]);
   });
 
   it('modo bloqueo: ampliar un pedido abierto por encima del límite se rechaza', async () => {

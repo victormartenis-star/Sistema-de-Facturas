@@ -393,6 +393,13 @@
       "when": 1795532733846,
       "tag": "0055_consolidacion_grupo",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1795535273174,
+      "tag": "0056_notificaciones_aprobacion",
+      "breakpoints": true
     }
   ]
 }

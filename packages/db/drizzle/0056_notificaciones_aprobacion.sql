@@ -1,0 +1,1 @@
+ALTER TYPE "public"."alert_rule_type" ADD VALUE 'aprobacion';

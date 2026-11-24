@@ -51,6 +51,7 @@ import {
   sumCents,
   sumarEntradasCuadro,
   toCents,
+  todayIso,
   type ConfigControlPresupuestarioDto,
   type ControlPresupuestarioDto,
   type ControlPresupuestarioUpdateInput,
@@ -66,6 +67,7 @@ import {
   type ModoControlPresupuestario,
   type OperacionControl,
 } from '@erp/shared';
+import { NotificacionesService } from '../alerts/notificaciones.service';
 import { AuditService } from '../audit/audit.service';
 import {
   anotarAvisoRespuesta,
@@ -190,6 +192,7 @@ export class ControlPresupuestarioService {
   constructor(
     private readonly dbs: DbService,
     private readonly audit: AuditService,
+    private readonly notificaciones: NotificacionesService,
   ) {}
 
   /* ───────────────────────────── carga ───────────────────────────── */
@@ -856,14 +859,25 @@ export class ControlPresupuestarioService {
       action: 'create' as const,
       newData: datos,
     };
+    const companyId = this.dbs.getCompanyId();
+    const notificacion = {
+      companyId,
+      tipo: 'sobrecoste' as const,
+      titulo: `Presupuesto ${ev.bloquea ? 'excedido (operación bloqueada)' : 'excedido'}: obra ${obra?.code ?? p.projectId}`,
+      cuerpo: `Límite ${ev.limite} €, consumido ${ev.consumidoTras} € (exceso ${ev.exceso} €) en ${p.operacion === 'pedido_compra' ? 'un pedido de compra' : 'un consumo de almacén'}`,
+      enlace: '/margenes',
+      // Una por obra, tipo de evento y día: no inunda la bandeja.
+      clave: `presupuesto:${datos.evento}:${p.projectId}:${todayIso()}`,
+    };
     if (ev.bloquea) {
-      const companyId = this.dbs.getCompanyId();
-      await this.dbs.db.transaction((trx) =>
-        this.audit.registrar(trx, entrada, { companyId }),
-      );
+      await this.dbs.db.transaction(async (trx) => {
+        await this.audit.registrar(trx, entrada, { companyId });
+        await this.notificaciones.notificar(trx, notificacion);
+      });
       throw presupuestoExcedido(ev, obra?.code ?? p.projectId);
     }
     await this.audit.registrar(tx, entrada);
+    await this.notificaciones.notificar(tx, notificacion);
     anotarAvisoRespuesta(
       `BUDGET_EXCEEDED; obra=${obra?.code ?? p.projectId}; exceso=${ev.exceso}`,
     );

@@ -3,16 +3,12 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { TIPO_NOTIFICACION_LABELS } from '@erp/shared';
 import { alertsApi, formatDate } from '@/lib/api';
 import { IconBell, IconCheck } from './icons';
 import { Autorizado } from './autorizado';
 
-const TYPE_LABELS: Record<string, string> = {
-  compliance_doc: 'Homologación',
-  permiso: 'Permisos',
-  sobrecoste: 'Sobrecoste',
-  garantia_postventa: 'Postventa',
-};
+const TYPE_LABELS: Record<string, string> = TIPO_NOTIFICACION_LABELS;
 
 /**
  * Campana de notificaciones (Fase 13): sondea el contador de no leídas cada

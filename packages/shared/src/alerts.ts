@@ -17,6 +17,21 @@ export const ALERT_RULE_TYPES = [
 ] as const;
 export type AlertRuleType = (typeof ALERT_RULE_TYPES)[number];
 
+/**
+ * Tipos de notificación de la bandeja: los de las reglas configurables más
+ * los que nacen de un evento (aprobaciones), que no tienen regla.
+ */
+export const TIPOS_NOTIFICACION = [...ALERT_RULE_TYPES, 'aprobacion'] as const;
+export type TipoNotificacion = (typeof TIPOS_NOTIFICACION)[number];
+
+export const TIPO_NOTIFICACION_LABELS: Record<TipoNotificacion, string> = {
+  compliance_doc: 'Homologación',
+  permiso: 'Permisos',
+  sobrecoste: 'Sobrecoste',
+  garantia_postventa: 'Postventa',
+  aprobacion: 'Aprobaciones',
+};
+
 export const ALERT_RULE_TYPE_LABELS: Record<AlertRuleType, string> = {
   compliance_doc: 'Documentación de homologación',
   permiso: 'Permisos y licencias',
@@ -83,7 +98,7 @@ export interface AlertRuleDto {
 
 export interface NotificationDto {
   id: string;
-  type: AlertRuleType;
+  type: TipoNotificacion;
   title: string;
   body: string;
   link: string | null;

@@ -3393,6 +3393,8 @@ export const alertRuleTypeEnum = pgEnum('alert_rule_type', [
   'permiso',
   'sobrecoste',
   'garantia_postventa',
+  // Solo notificaciones por evento (no tiene regla configurable).
+  'aprobacion',
 ]);
 
 export const alertRules = pgTable(

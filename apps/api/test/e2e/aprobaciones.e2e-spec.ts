@@ -161,6 +161,23 @@ describe('Aprobaciones por umbral (integración)', () => {
       .send({ comentario: 'Conforme' })
       .expect(200);
     await validar(alb).expect(201);
+
+    // Bandeja in-app: la solicitud y la decisión llegan como notificaciones.
+    const bandeja = await como(admin).get('/alerts/notifications').expect(200);
+    const titulos = bandeja.body
+      .filter((n: { type: string }) => n.type === 'aprobacion')
+      .map((n: { title: string }) => n.title);
+    expect(titulos).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Aprobación pendiente'),
+        expect.stringContaining('Aprobación aprobada'),
+      ]),
+    );
+    const noLeidas = await como(admin)
+      .get('/alerts/notifications/no-leidas')
+      .expect(200);
+    expect(noLeidas.body).toEqual({ count: bandeja.body.length });
+    expect(titulos.length).toBeGreaterThanOrEqual(2);
   });
 
   it('rechazo con motivo obligatorio; tras rechazar se puede volver a solicitar', async () => {

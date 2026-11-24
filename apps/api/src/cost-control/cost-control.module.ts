@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
+import { NotificacionesModule } from '../alerts/notificaciones.module';
 import { ControlPresupuestarioService } from './control-presupuestario.service';
 import { CostControlController } from './cost-control.controller';
 import { CostControlService } from './cost-control.service';
 
 @Module({
+  imports: [NotificacionesModule],
   controllers: [CostControlController],
   providers: [CostControlService, ControlPresupuestarioService],
   // El control presupuestario lo aplican pedidos y almacén en sus transacciones.

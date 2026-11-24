@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   AlertRule,
   Notification,
@@ -43,7 +43,9 @@ interface AlertItem {
 function toRuleDto(row: AlertRule): AlertRuleDto {
   return {
     id: row.id,
-    type: row.type,
+    // Las reglas solo existen para ALERT_RULE_TYPES (se siembran y validan
+    // contra esa lista); 'aprobacion' es solo de notificaciones por evento.
+    type: row.type as AlertRuleType,
     thresholdDays: row.thresholdDays,
     thresholdPct: row.thresholdPct === null ? null : Number(row.thresholdPct),
     channels: (row.channels as AlertChannel[] | null) ?? ['in_app'],
@@ -181,8 +183,9 @@ export class AlertsService {
 
   async unreadCount(): Promise<number> {
     const companyId = this.dbs.getCompanyId();
-    const rows = await this.dbs.db
-      .select({ id: notifications.id })
+    // count(*) en la base: no trae las filas para contarlas.
+    const [{ n }] = await this.dbs.db
+      .select({ n: sql<number>`count(*)::int` })
       .from(notifications)
       .where(
         and(
@@ -190,7 +193,7 @@ export class AlertsService {
           isNull(notifications.readAt),
         ),
       );
-    return rows.length;
+    return Number(n);
   }
 
   async markRead(id: string): Promise<void> {
