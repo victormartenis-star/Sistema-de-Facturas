@@ -20,6 +20,8 @@ import {
 import { alias } from 'drizzle-orm/pg-core';
 import {
   deliveryNotes,
+  materialRequestLines,
+  materialRequests,
   projects,
   stockArticles,
   stockItems,
@@ -50,6 +52,7 @@ import {
   normalizarPaginacion,
   scaledToNumeric,
   toScaled,
+  planificarReserva,
   pmpDe,
   regularizacionStock,
   regularizacionStockSchema,
@@ -993,7 +996,11 @@ export class AlmacenService {
     const d = entradaStockSchema.parse(input);
     const ids = await this.dbs.db.transaction(async (tx) => {
       const w = await this.cargarAlmacen(tx, companyId, d.almacenId);
-      let albaran: { id: string; number: string } | null = null;
+      let albaran: {
+        id: string;
+        number: string;
+        orderId: string | null;
+      } | null = null;
       const valores = d.lineas.map((l) =>
         regla(() => valorEntradaStock(l.cantidad, l.costeUnitario)),
       );
@@ -1036,7 +1043,7 @@ export class AlmacenService {
             message: `La entrada (${centsToNumeric(total)} €) supera el importe del albarán ${n.noteNumber} (${n.amount} €)`,
           });
         }
-        albaran = { id: n.id, number: n.noteNumber };
+        albaran = { id: n.id, number: n.noteNumber, orderId: n.orderId };
       }
       const lineas = d.lineas
         .map((l, i) => ({ ...l, valor: valores[i] }))
@@ -1083,9 +1090,102 @@ export class AlmacenService {
         );
         await this.guardarSaldo(tx, item, saldo);
       }
+      // Lo recibido por el pedido del faltante de una solicitud de material
+      // se reserva para ella en la misma transacción.
+      if (albaran?.orderId) {
+        await this.reservarFaltantesDelPedido(
+          tx,
+          companyId,
+          w.id,
+          albaran.orderId,
+        );
+      }
       return creados;
     });
     return this.porIds(ids);
+  }
+
+  /**
+   * Reserva automática al recibir: las líneas de solicitudes de material
+   * abiertas de este almacén cuyo faltante cubre el pedido `orderId` reservan
+   * lo que ahora hay libre (mismo criterio que «Reservar faltante»).
+   */
+  private async reservarFaltantesDelPedido(
+    tx: Tx,
+    companyId: string,
+    warehouseId: string,
+    orderId: string,
+  ): Promise<void> {
+    const lineas = await tx
+      .select({ l: materialRequestLines, requestId: materialRequests.id })
+      .from(materialRequestLines)
+      .innerJoin(
+        materialRequests,
+        eq(materialRequests.id, materialRequestLines.requestId),
+      )
+      .where(
+        and(
+          eq(materialRequestLines.purchaseOrderId, orderId),
+          eq(materialRequests.companyId, companyId),
+          eq(materialRequests.warehouseId, warehouseId),
+          inArray(materialRequests.status, ['abierta', 'servida_parcial']),
+        ),
+      )
+      .orderBy(asc(materialRequestLines.articleId))
+      .for('update');
+    const reservadas: { lineaId: string; reservado: string }[] = [];
+    for (const { l } of lineas) {
+      const item = await this.bloquearSaldo(
+        tx,
+        companyId,
+        warehouseId,
+        l.articleId,
+      );
+      const plan = planificarReserva({
+        solicitada: l.quantityRequested,
+        servida: l.quantityServed,
+        reservada: l.quantityReserved,
+        disponible: scaledToNumeric(
+          toScaled(item.quantity, 3) - toScaled(item.reservedQuantity, 3),
+          3,
+        ),
+      });
+      const reservar = toScaled(plan.reservar, 3);
+      if (reservar === 0n) continue;
+      await tx
+        .update(stockItems)
+        .set({
+          reservedQuantity: scaledToNumeric(
+            toScaled(item.reservedQuantity, 3) + reservar,
+            3,
+          ),
+          version: item.version + 1,
+          updatedAt: new Date(),
+        })
+        .where(eq(stockItems.id, item.id));
+      await tx
+        .update(materialRequestLines)
+        .set({
+          quantityReserved: scaledToNumeric(
+            toScaled(l.quantityReserved, 3) + reservar,
+            3,
+          ),
+        })
+        .where(eq(materialRequestLines.id, l.id));
+      reservadas.push({ lineaId: l.id, reservado: plan.reservar });
+    }
+    if (reservadas.length > 0) {
+      await this.audit.registrar(tx, {
+        entityType: 'material_request',
+        entityId: lineas[0].requestId,
+        action: 'update',
+        newData: {
+          accion: 'reserva_automatica',
+          pedidoId: orderId,
+          reservadas,
+        },
+      });
+    }
   }
 
   /* ───────────────────────── consumo a obra ───────────────────────── */

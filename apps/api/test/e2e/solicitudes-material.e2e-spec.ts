@@ -229,6 +229,58 @@ describe('Solicitudes de material (integración)', () => {
     });
   });
 
+  it('al recibir el pedido del faltante (entrada con su albarán) se reserva solo para la solicitud', async () => {
+    const b = await base();
+    const proveedor = await createContact(app, token, {
+      kind: 'proveedor',
+      legalName: `Áridos ${u()} SL`,
+    });
+    const s = (await solicitar(b, 15).expect(201)).body;
+    const p = await api()
+      .post(`/almacen/solicitudes/${s.id}/pedido`)
+      .send({
+        contactId: proveedor.id,
+        fecha: '2026-03-02',
+        lineas: [{ lineaId: s.lineas[0].id, costeUnitario: 10 }],
+      })
+      .expect(201);
+    const alb = await api()
+      .post('/delivery-notes')
+      .send({
+        contactId: proveedor.id,
+        orderId: p.body.pedido.id,
+        noteNumber: `ALB-${u()}`,
+        noteDate: '2026-03-04',
+        amount: 50,
+      })
+      .expect(201);
+    await api().post(`/delivery-notes/${alb.body.id}/validar`).expect(201);
+    await api()
+      .post('/almacen/entradas')
+      .send({
+        almacenId: b.almacenId,
+        fecha: '2026-03-04',
+        albaranId: alb.body.id,
+        lineas: [{ articuloId: b.articuloId, cantidad: 5, costeUnitario: 10 }],
+      })
+      .expect(201);
+    const tras = await api().get(`/almacen/solicitudes/${s.id}`).expect(200);
+    expect(tras.body.lineas[0]).toMatchObject({
+      solicitada: 15,
+      reservada: 15,
+      faltante: 0,
+    });
+    expect(await existencia(b.almacenId)).toMatchObject({
+      cantidad: 15,
+      reservada: 15,
+      disponible: 0,
+    });
+    const audit = await api()
+      .get(`/audit?entityType=material_request&entityId=${s.id}`)
+      .expect(200);
+    expect(JSON.stringify(audit.body)).toContain('reserva_automatica');
+  });
+
   it('pedido del faltante: importe exacto, una sola vez y con el control presupuestario de la obra', async () => {
     const b = await base();
     const proveedor = await createContact(app, token, {
