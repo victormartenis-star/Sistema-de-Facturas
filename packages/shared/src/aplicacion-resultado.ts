@@ -12,7 +12,12 @@
  */
 
 import { z } from 'zod';
-import type { CuentasAnualesCalculo } from './calculo';
+import type {
+  CuentasAnualesCalculo,
+  EstadoFlujosEfectivo,
+  FilaEcpn,
+  PartidaConciliacion,
+} from './calculo';
 import type { Transiciones } from './maquina-estados';
 
 export const ESTADOS_APLICACION_RESULTADO = ['aplicado', 'anulado'] as const;
@@ -50,6 +55,11 @@ export const aplicacionResultadoSchema = z.object({
     .max(6),
   /** Referencia del acuerdo de la junta (acta). */
   acuerdo: z.string().trim().min(3).max(240),
+  /**
+   * Confirmación expresa para contabilizar un acuerdo posterior al plazo de
+   * seis meses (art. 164 LSC); sin ella, RESULT_APPLICATION_DEADLINE_EXCEEDED.
+   */
+  aceptarFueraDePlazo: z.boolean().optional(),
 });
 export type AplicacionResultadoInput = z.input<
   typeof aplicacionResultadoSchema
@@ -89,6 +99,18 @@ export interface PropuestaAplicacionResultadoDto {
   /** Saldo deudor de 1210 (pérdidas pendientes de compensar). */
   negativosAnteriores: number;
   reservaLegalMinima: number;
+  /** Fecha límite de la junta ordinaria (30-06 del ejercicio siguiente). */
+  fechaLimite: string;
+  /** Patrimonio neto tras la apertura, con el resultado pendiente en 129. */
+  patrimonioNeto: number;
+  /** Arts. 273.2 y 363.1.e LSC. */
+  situacionPatrimonial: {
+    bajoCapital: boolean;
+    desequilibrio: boolean;
+    margen: number;
+  };
+  /** Dividendo máximo que no deja el PN por debajo del capital. */
+  dividendoMaximo: number;
   /** Destinos admitidos según el signo del resultado. */
   destinos: { cuenta: string; nombre: string }[];
   aplicacionVigente: AplicacionResultadoDto | null;
@@ -102,4 +124,26 @@ export interface CuentasAnualesDto extends CuentasAnualesCalculo {
   cerrado: boolean;
   /** Aplicación vigente del resultado de este ejercicio (estado de distribución). */
   aplicacion: AplicacionResultadoDto | null;
+  /** Estado de cambios en el patrimonio neto. */
+  ecpn: { filas: FilaEcpn[]; saldoFinal: FilaEcpn; cuadraConBalance: boolean };
+  /** Estado de flujos de efectivo (método indirecto). */
+  efe: EstadoFlujosEfectivo;
+}
+
+/* ───────────────────── conciliación de cierre (auxiliar ↔ mayor) ───────────────────── */
+
+/**
+ * Conciliación del estado actual: los auxiliares (devengos, amortización,
+ * obra en curso, provisión) no guardan saldo histórico, así que se compara
+ * con el mayor completo a la fecha de la consulta.
+ */
+export interface ConciliacionCierreDto {
+  /** Id del registro guardado (null en la consulta en vivo). */
+  id: string | null;
+  /** Fecha de corte: la de la consulta o el registro. */
+  fecha: string;
+  partidas: PartidaConciliacion[];
+  cuadra: boolean;
+  descuadres: number;
+  ejecutadoEn: string | null;
 }

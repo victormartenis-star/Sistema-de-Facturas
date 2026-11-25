@@ -5214,6 +5214,8 @@ export const resultApplications = pgTable(
     result: numeric('result', { precision: 14, scale: 2 }).notNull(),
     applicationDate: date('application_date').notNull(),
     agreement: varchar('agreement', { length: 240 }).notNull(),
+    /** Acuerdo posterior al plazo de seis meses, confirmado expresamente. */
+    outOfTerm: boolean('out_of_term').notNull().default(false),
     /** `[{ cuenta, importe }]` del reparto. */
     allocation: jsonb('allocation').notNull(),
     journalEntryId: uuid('journal_entry_id').references(
@@ -5269,6 +5271,8 @@ export const bankGuaranteeAccruals = pgTable(
     days: smallint('days').notNull(),
     baseAmount: numeric('base_amount', { precision: 14, scale: 2 }).notNull(),
     ratePct: numeric('rate_pct', { precision: 7, scale: 4 }).notNull(),
+    /** Tramos de saldo constante del mes: `[{ desde, hasta, dias, saldo, importe }]`. */
+    segments: jsonb('segments').notNull().default([]),
     amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
     status: wipStatusEnum('status').notNull().default('contabilizado'),
     journalEntryId: uuid('journal_entry_id').references(
@@ -5309,3 +5313,82 @@ export const bankGuaranteeAccruals = pgTable(
 );
 
 export type BankGuaranteeAccrual = typeof bankGuaranteeAccruals.$inferSelect;
+
+/**
+ * Ejecuciones del devengo mensual (manuales o de la tarea programada): qué
+ * mes, cuántos avales se devengaron, importe y omitidos. Registro de control
+ * del cierre (SAP Financial Close / Oracle Close Manager).
+ */
+export const bankGuaranteeAccrualRuns = pgTable(
+  'bank_guarantee_accrual_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    year: smallint('year').notNull(),
+    month: smallint('month').notNull(),
+    trigger: varchar('trigger', { length: 20 }).notNull(),
+    postedCount: integer('posted_count').notNull().default(0),
+    amount: numeric('amount', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    skippedCount: integer('skipped_count').notNull().default(0),
+    skipped: jsonb('skipped').notNull().default([]),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('bank_guarantee_accrual_runs_company_period_idx').on(
+      t.companyId,
+      t.year,
+      t.month,
+    ),
+    check(
+      'bank_guarantee_accrual_runs_valores',
+      sql`${t.month} BETWEEN 1 AND 12 AND ${t.trigger} IN ('manual', 'automatico')
+        AND ${t.postedCount} >= 0 AND ${t.skippedCount} >= 0`,
+    ),
+  ],
+);
+
+export type BankGuaranteeAccrualRun =
+  typeof bankGuaranteeAccrualRuns.$inferSelect;
+
+/**
+ * Conciliaciones de cierre auxiliar ↔ mayor guardadas (evidencia del cierre):
+ * fecha de corte, partidas con auxiliar, mayor y diferencia, y resultado.
+ */
+export const closeReconciliations = pgTable(
+  'close_reconciliations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    cutOffDate: date('cut_off_date').notNull(),
+    balanced: boolean('balanced').notNull(),
+    mismatches: integer('mismatches').notNull(),
+    items: jsonb('items').notNull(),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('close_reconciliations_company_date_idx').on(
+      t.companyId,
+      t.cutOffDate,
+    ),
+    check(
+      'close_reconciliations_coherencia',
+      sql`${t.mismatches} >= 0 AND (${t.balanced} = (${t.mismatches} = 0))`,
+    ),
+  ],
+);
+
+export type CloseReconciliation = typeof closeReconciliations.$inferSelect;

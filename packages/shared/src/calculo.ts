@@ -2821,7 +2821,36 @@ export type CodigoRechazoAplicacion =
   | 'RESULT_APPLICATION_LEGAL_RESERVE'
   | 'RESULT_APPLICATION_COMPENSATION_EXCEEDS'
   | 'RESULT_APPLICATION_DIVIDEND_BLOCKED'
-  | 'RESULT_APPLICATION_RESERVES_INSUFFICIENT';
+  | 'RESULT_APPLICATION_RESERVES_INSUFFICIENT'
+  | 'RESULT_APPLICATION_DEADLINE_EXCEEDED'
+  | 'RESULT_APPLICATION_EQUITY_BELOW_CAPITAL';
+
+/**
+ * Plazo de la junta ordinaria (art. 164 LSC): dentro de los seis primeros
+ * meses del ejercicio siguiente. Devuelve la fecha límite (AAAA-MM-DD).
+ */
+export function fechaLimiteAplicacion(ejercicio: number): string {
+  return `${ejercicio + 1}-06-30`;
+}
+
+/**
+ * Situación patrimonial (arts. 273.2 y 363.1.e LSC): patrimonio neto frente
+ * al capital. `bajoCapital`: no se reparten dividendos que lo dejen por
+ * debajo; `desequilibrio`: PN inferior a la mitad del capital (causa de
+ * disolución salvo que se reequilibre).
+ */
+export function situacionPatrimonial(p: {
+  patrimonioNeto: Importe;
+  capital: Importe;
+}): { bajoCapital: boolean; desequilibrio: boolean; margen: number } {
+  const pn = toCents(p.patrimonioNeto);
+  const capital = toCents(p.capital);
+  return {
+    bajoCapital: pn < capital,
+    desequilibrio: capital > 0n && pn * 2n < capital,
+    margen: fromCents(pn - capital),
+  };
+}
 
 export interface SaldosPatrimonioNeto {
   /** Capital social (saldo acreedor de 100x). */
@@ -2834,6 +2863,11 @@ export interface SaldosPatrimonioNeto {
   remanente: Importe;
   /** Saldo DEUDOR de resultados negativos de ejercicios anteriores (1210). */
   negativosAnteriores: Importe;
+  /**
+   * Patrimonio neto total antes de aplicar (incluye el resultado en 129).
+   * Si se informa, se aplica el art. 273.2 LSC a los dividendos.
+   */
+  patrimonioNeto?: Importe;
 }
 
 export type ResultadoAplicacion =
@@ -2870,6 +2904,8 @@ export function aplicacionResultado(p: {
   reparto: readonly { cuenta: string; importe: Importe }[];
   saldos: SaldosPatrimonioNeto;
   cuentaResultado?: string;
+  /** Si se informa, se valida el plazo de seis meses (art. 164 LSC). */
+  plazo?: { ejercicio: number; fecha: string; aceptarFueraDePlazo?: boolean };
 }): ResultadoAplicacion {
   const r = toCents(p.resultado);
   const cuentaResultado = p.cuentaResultado ?? '1290';
@@ -2884,6 +2920,16 @@ export function aplicacionResultado(p: {
     return fallo(
       'RESULT_APPLICATION_ZERO',
       'El resultado es cero: no hay nada que aplicar',
+    );
+  }
+  if (
+    p.plazo &&
+    !p.plazo.aceptarFueraDePlazo &&
+    p.plazo.fecha > fechaLimiteAplicacion(p.plazo.ejercicio)
+  ) {
+    return fallo(
+      'RESULT_APPLICATION_DEADLINE_EXCEEDED',
+      `La junta ordinaria debió aprobar la aplicación antes del ${fechaLimiteAplicacion(p.plazo.ejercicio)} (art. 164 LSC); confírmalo expresamente para contabilizarla fuera de plazo`,
     );
   }
   const beneficio = r > 0n;
@@ -2929,6 +2975,15 @@ export function aplicacionResultado(p: {
         'RESULT_APPLICATION_DIVIDEND_BLOCKED',
         'No se reparten dividendos con pérdidas de ejercicios anteriores sin compensar',
       );
+    }
+    if (de('5260') > 0n && p.saldos.patrimonioNeto !== undefined) {
+      const tras = toCents(p.saldos.patrimonioNeto) - de('5260');
+      if (tras < toCents(p.saldos.capital)) {
+        return fallo(
+          'RESULT_APPLICATION_EQUITY_BELOW_CAPITAL',
+          `El dividendo dejaría el patrimonio neto (${centsToNumeric(tras)}) por debajo del capital social (${centsToNumeric(toCents(p.saldos.capital))}) (art. 273.2 LSC)`,
+        );
+      }
     }
   } else {
     for (const [c, saldo] of [
@@ -3259,4 +3314,358 @@ export function asientoDevengoComision(importe: Importe): LineaAsientoWip[] {
     { cuenta: '6260', debe: imp, haber: '0.00', imputaObra: true },
     { cuenta: '4100', debe: '0.00', haber: imp, imputaObra: false },
   ];
+}
+
+/* ───────────────────── devengo prorrateado por tramos de saldo ─────────────────────
+ * El mes se parte en tramos en los que el saldo vivo es constante (cada
+ * liberación, ejecución o vencimiento abre uno nuevo desde su fecha). El
+ * total es Σ saldo × días × tasa / 365 redondeado una sola vez, y se reparte
+ * entre tramos por resto mayor: con saldo constante coincide al céntimo con
+ * `devengoComisionAval`.
+ */
+
+export interface TramoDevengo {
+  desde: string;
+  hasta: string;
+  dias: number;
+  saldo: number;
+  importe: number;
+}
+
+const masDias = (fecha: string, n: number) => {
+  const d = new Date(`${fecha}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+const diasEntre = (desde: string, hasta: string) =>
+  Math.round(
+    (Date.parse(`${hasta}T00:00:00Z`) - Date.parse(`${desde}T00:00:00Z`)) /
+      86_400_000,
+  ) + 1;
+
+export function devengoPorTramos(p: {
+  periodo: string;
+  emision: string;
+  vencimiento: string | null;
+  tasaAnualPct: Importe;
+  /** Historial de saldo vivo: el de cada fecha rige desde ese día. */
+  saldos: readonly { fecha: string; saldo: Importe }[];
+  baseDias?: number;
+}): { tramos: TramoDevengo[]; dias: number; importe: number } {
+  const base = p.baseDias ?? 365;
+  const mes = tramoDevengoMes({
+    periodo: p.periodo,
+    emision: p.emision,
+    vencimiento: p.vencimiento,
+  });
+  if (!mes) return { tramos: [], dias: 0, importe: 0 };
+  const hist = [...p.saldos]
+    .map((s) => ({ fecha: s.fecha, saldo: toCents(s.saldo) }))
+    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const saldoEn = (fecha: string) => {
+    let s = 0n;
+    for (const h of hist) if (h.fecha <= fecha) s = h.saldo;
+    return s;
+  };
+  const cortes = [
+    mes.desde,
+    ...hist.map((h) => h.fecha).filter((f) => f > mes.desde && f <= mes.hasta),
+  ].filter((f, i, a) => a.indexOf(f) === i);
+  const brutos: {
+    desde: string;
+    hasta: string;
+    dias: number;
+    saldo: bigint;
+  }[] = [];
+  cortes.forEach((desde, i) => {
+    const hasta =
+      i + 1 < cortes.length ? masDias(cortes[i + 1], -1) : mes.hasta;
+    const saldo = saldoEn(desde);
+    if (saldo > 0n) {
+      brutos.push({ desde, hasta, dias: diasEntre(desde, hasta), saldo });
+    }
+  });
+  const tasa = toScaled(p.tasaAnualPct, 4);
+  const pesos = brutos.map((t) => t.saldo * BigInt(t.dias));
+  const total = mulDivRound(
+    sumCents(pesos) * tasa,
+    1n,
+    10_000n * 100n * BigInt(base),
+  );
+  const importes = brutos.length === 0 ? [] : repartirCents(total, pesos);
+  return {
+    tramos: brutos.map((t, i) => ({
+      desde: t.desde,
+      hasta: t.hasta,
+      dias: t.dias,
+      saldo: fromCents(t.saldo),
+      importe: fromCents(importes[i]),
+    })),
+    dias: brutos.reduce((s, t) => s + t.dias, 0),
+    importe: fromCents(total),
+  };
+}
+
+/** Meses AAAA-MM de `desde` a `hasta` (ambos incluidos). */
+export function mesesEntre(desde: string, hasta: string): string[] {
+  const out: string[] = [];
+  let [y, m] = desde.split('-').map(Number);
+  const [yh, mh] = hasta.split('-').map(Number);
+  while (y < yh || (y === yh && m <= mh)) {
+    out.push(`${y}-${String(m).padStart(2, '0')}`);
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+  }
+  return out;
+}
+
+/* ───────────────────── estado de cambios en el patrimonio neto (ECPN) ─────────────────────
+ * Columnas por masa de PN y filas por naturaleza del movimiento del ejercicio:
+ *   saldo inicial (apertura) · total de ingresos y gastos reconocidos (el
+ *   resultado de la PyG) · operaciones con socios (dividendos y variaciones
+ *   de capital) · distribución del resultado anterior (traspaso a reservas,
+ *   remanente o compensación) · otras variaciones · saldo final.
+ * El saldo final cuadra con el patrimonio neto del balance.
+ */
+
+export const COLUMNAS_ECPN = [
+  'capital',
+  'reservas',
+  'resultadosAnteriores',
+  'resultadoEjercicio',
+  'otros',
+] as const;
+export type ColumnaEcpn = (typeof COLUMNAS_ECPN)[number];
+
+export function columnaEcpn(cuenta: string): ColumnaEcpn {
+  if (cuenta.startsWith('10')) return 'capital';
+  if (cuenta.startsWith('11')) return 'reservas';
+  if (cuenta.startsWith('129')) return 'resultadoEjercicio';
+  if (cuenta.startsWith('12')) return 'resultadosAnteriores';
+  return 'otros';
+}
+
+export type OrigenMovimientoPn = 'apertura' | 'aplicacion' | 'otro';
+
+export interface FilaEcpn {
+  clave:
+    | 'saldoInicial'
+    | 'ingresosGastosReconocidos'
+    | 'operacionesSocios'
+    | 'distribucionResultado'
+    | 'otrasVariaciones'
+    | 'saldoFinal';
+  etiqueta: string;
+  importes: Record<ColumnaEcpn, number>;
+  total: number;
+}
+
+export function estadoCambiosPatrimonioNeto(p: {
+  /** Movimientos de las cuentas de PN del ejercicio, sin regularización ni cierre. */
+  movimientos: readonly {
+    cuenta: string;
+    origen: OrigenMovimientoPn;
+    debe: Importe;
+    haber: Importe;
+  }[];
+  /** Resultado del ejercicio (PyG). */
+  resultadoEjercicio: Importe;
+  /** Dividendos acordados en el ejercicio (a 5260, aplicación del resultado). */
+  dividendos: Importe;
+}): { filas: FilaEcpn[]; saldoFinal: FilaEcpn } {
+  const cero = () =>
+    Object.fromEntries(COLUMNAS_ECPN.map((c) => [c, 0n])) as Record<
+      ColumnaEcpn,
+      bigint
+    >;
+  const ini = cero();
+  const igr = cero();
+  const socios = cero();
+  const distribucion = cero();
+  const otras = cero();
+  for (const m of p.movimientos) {
+    const col = columnaEcpn(m.cuenta);
+    const neto = toCents(m.haber) - toCents(m.debe);
+    if (m.origen === 'apertura') ini[col] += neto;
+    else if (m.origen === 'aplicacion') distribucion[col] += neto;
+    else if (col === 'capital') socios[col] += neto;
+    else otras[col] += neto;
+  }
+  igr.resultadoEjercicio = toCents(p.resultadoEjercicio);
+  // Los dividendos salen de la columna del resultado como operación con
+  // socios; el resto de la aplicación es distribución entre columnas de PN.
+  const div = toCents(p.dividendos);
+  socios.resultadoEjercicio -= div;
+  distribucion.resultadoEjercicio += div;
+  const fin = cero();
+  for (const f of [ini, igr, socios, distribucion, otras]) {
+    for (const c of COLUMNAS_ECPN) fin[c] += f[c];
+  }
+  const fila = (
+    clave: FilaEcpn['clave'],
+    etiqueta: string,
+    v: Record<ColumnaEcpn, bigint>,
+  ): FilaEcpn => ({
+    clave,
+    etiqueta,
+    importes: Object.fromEntries(
+      COLUMNAS_ECPN.map((c) => [c, fromCents(v[c])]),
+    ) as Record<ColumnaEcpn, number>,
+    total: fromCents(sumCents(COLUMNAS_ECPN.map((c) => v[c]))),
+  });
+  const saldoFinal = fila('saldoFinal', 'Saldo final del ejercicio', fin);
+  return {
+    filas: [
+      fila('saldoInicial', 'Saldo inicial', ini),
+      fila(
+        'ingresosGastosReconocidos',
+        'Total ingresos y gastos reconocidos',
+        igr,
+      ),
+      fila(
+        'operacionesSocios',
+        'Operaciones con socios (dividendos y capital)',
+        socios,
+      ),
+      fila(
+        'distribucionResultado',
+        'Distribución del resultado anterior',
+        distribucion,
+      ),
+      fila('otrasVariaciones', 'Otras variaciones del patrimonio neto', otras),
+      saldoFinal,
+    ],
+    saldoFinal,
+  };
+}
+
+/* ───────────────────── estado de flujos de efectivo (EFE, indirecto) ─────────────────────
+ * Con los movimientos del ejercicio (sin apertura, regularización ni cierre)
+ * cada cuenta no de tesorería aporta −(debe − haber) a su actividad:
+ *   explotación = resultado (6/7) + ajustes (28x, 29x, 39x, 49x, 14x) +
+ *                 cambios en el capital corriente (3x, 4x);
+ *   inversión   = inmovilizado (2x salvo 28x y 29x);
+ *   financiación = patrimonio y deudas (1x salvo 14x, 5x salvo 57x).
+ * Por partida doble, la suma es exactamente la variación de 57x.
+ */
+
+export type ActividadEfe =
+  | 'resultado'
+  | 'ajustes'
+  | 'capitalCorriente'
+  | 'inversion'
+  | 'financiacion'
+  | 'efectivo';
+
+export function actividadEfe(cuenta: string): ActividadEfe {
+  const g = cuenta.charAt(0);
+  const g2 = cuenta.slice(0, 2);
+  if (g2 === '57') return 'efectivo';
+  if (g === '6' || g === '7') return 'resultado';
+  if (['28', '29', '39', '49', '14'].includes(g2)) return 'ajustes';
+  if (g === '3' || g === '4') return 'capitalCorriente';
+  if (g === '2') return 'inversion';
+  if (g === '1' || g === '5') return 'financiacion';
+  return 'capitalCorriente';
+}
+
+export interface EstadoFlujosEfectivo {
+  explotacion: {
+    resultado: number;
+    ajustes: number;
+    capitalCorriente: number;
+    total: number;
+  };
+  inversion: number;
+  financiacion: number;
+  /** Explotación + inversión + financiación. */
+  flujoNeto: number;
+  efectivoInicial: number;
+  variacionEfectivo: number;
+  efectivoFinal: number;
+  /** flujoNeto = variación de 57x (debe cumplirse siempre). */
+  cuadra: boolean;
+}
+
+export function estadoFlujosEfectivo(p: {
+  movimientos: readonly { cuenta: string; debe: Importe; haber: Importe }[];
+  efectivoInicial: Importe;
+}): EstadoFlujosEfectivo {
+  const acc: Record<ActividadEfe, bigint> = {
+    resultado: 0n,
+    ajustes: 0n,
+    capitalCorriente: 0n,
+    inversion: 0n,
+    financiacion: 0n,
+    efectivo: 0n,
+  };
+  for (const m of p.movimientos) {
+    const deudor = toCents(m.debe) - toCents(m.haber);
+    const a = actividadEfe(m.cuenta);
+    acc[a] += a === 'efectivo' ? deudor : -deudor;
+  }
+  const explotacion = acc.resultado + acc.ajustes + acc.capitalCorriente;
+  const neto = explotacion + acc.inversion + acc.financiacion;
+  const inicial = toCents(p.efectivoInicial);
+  return {
+    explotacion: {
+      resultado: fromCents(acc.resultado),
+      ajustes: fromCents(acc.ajustes),
+      capitalCorriente: fromCents(acc.capitalCorriente),
+      total: fromCents(explotacion),
+    },
+    inversion: fromCents(acc.inversion),
+    financiacion: fromCents(acc.financiacion),
+    flujoNeto: fromCents(neto),
+    efectivoInicial: fromCents(inicial),
+    variacionEfectivo: fromCents(acc.efectivo),
+    efectivoFinal: fromCents(inicial + acc.efectivo),
+    cuadra: neto === acc.efectivo,
+  };
+}
+
+/* ───────────────────── conciliación auxiliar ↔ mayor (cierre) ─────────────────────
+ * Al estilo de SAP Financial Close / Oracle Close Manager: cada partida
+ * compara el saldo de un auxiliar (devengos de avales, amortización de
+ * activos, obra en curso, provisión por pérdidas) con el de su cuenta del
+ * mayor. Una diferencia distinta de cero es un descuadre a investigar.
+ */
+
+export interface PartidaConciliacion {
+  clave: string;
+  etiqueta: string;
+  cuentas: string;
+  auxiliar: number;
+  mayor: number;
+  diferencia: number;
+  cuadra: boolean;
+}
+
+export function conciliar(
+  partidas: readonly {
+    clave: string;
+    etiqueta: string;
+    cuentas: string;
+    auxiliar: Importe;
+    mayor: Importe;
+  }[],
+): { partidas: PartidaConciliacion[]; cuadra: boolean; descuadres: number } {
+  const out = partidas.map((x) => {
+    const a = toCents(x.auxiliar);
+    const m = toCents(x.mayor);
+    return {
+      clave: x.clave,
+      etiqueta: x.etiqueta,
+      cuentas: x.cuentas,
+      auxiliar: fromCents(a),
+      mayor: fromCents(m),
+      diferencia: fromCents(m - a),
+      cuadra: a === m,
+    };
+  });
+  const descuadres = out.filter((x) => !x.cuadra).length;
+  return { partidas: out, cuadra: descuadres === 0, descuadres };
 }

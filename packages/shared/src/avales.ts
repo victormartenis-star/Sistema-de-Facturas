@@ -22,6 +22,7 @@ import type {
   EstadoAval,
   ResumenAvalesCalculo,
   SaldoAval,
+  TramoDevengo,
 } from './calculo';
 import type { Transiciones } from './maquina-estados';
 
@@ -306,7 +307,40 @@ export interface DevengoAvalDto {
   asientoId: string | null;
   contraAsientoId: string | null;
   motivoAnulacion: string | null;
+  /** Tramos de saldo constante del mes (vacío en devengos anteriores a la 0063). */
+  tramos: TramoDevengo[];
   version: number;
+}
+
+/**
+ * Devengo automático: todos los meses cerrados (anteriores al actual) hasta
+ * `hasta` que falten, para cada aval. Idempotente: un mes ya devengado se
+ * omite. Lo ejecuta también la tarea programada del día 1.
+ */
+export const devengoAutomaticoSchema = z.object({
+  hasta: periodo.optional(),
+});
+export type DevengoAutomaticoInput = z.input<typeof devengoAutomaticoSchema>;
+
+export const DISPAROS_DEVENGO = ['manual', 'automatico'] as const;
+export type DisparoDevengo = (typeof DISPAROS_DEVENGO)[number];
+
+export interface EjecucionDevengoDto {
+  id: string;
+  periodo: string;
+  disparo: DisparoDevengo;
+  contabilizados: number;
+  importe: number;
+  omitidos: number;
+  ejecutadoEn: string;
+}
+
+export interface ResultadoDevengoAutomaticoDto {
+  desde: string | null;
+  hasta: string;
+  periodos: ResultadoDevengoAvalesDto[];
+  contabilizados: number;
+  importe: number;
 }
 
 export interface ResultadoDevengoAvalesDto {

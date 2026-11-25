@@ -7,7 +7,13 @@ import {
   type VatBreakdown,
   type VatGroup,
 } from './calculo';
-import { fromCents, repartirCents, sumCents, toCents } from './dinero';
+import {
+  fromCents,
+  mulDivRound,
+  repartirCents,
+  sumCents,
+  toCents,
+} from './dinero';
 
 /**
  * Control de desviaciones y analítica de costes en tiempo real (Fase 10).
@@ -28,9 +34,12 @@ import { fromCents, repartirCents, sumCents, toCents } from './dinero';
  */
 
 export interface CostControlInputs {
-  bac: number;
-  ac: number;
-  ev: number;
+  /** Importes en euros (`number` o `numeric` de Postgres); se pasan a céntimos. */
+  bac: number | string;
+  ac: number | string;
+  ev: number | string;
+  /** Valor planificado (PV) acumulado a la fecha; null/ausente sin cronograma. */
+  pv?: number | string | null;
 }
 
 export interface CostControlResult {
@@ -55,6 +64,14 @@ export interface CostControlResult {
   eac: number;
   /** BAC − EAC: sobrecoste (negativo) o ahorro (positivo) previsto a fin de obra. */
   varianceAtCompletion: number;
+  /** CV = EV − AC. */
+  costVariance: number;
+  /** Valor planificado acumulado a la fecha (null sin cronograma). */
+  pv: number | null;
+  /** Schedule Performance Index = EV / PV (null sin PV). */
+  spi: number | null;
+  /** SV = EV − PV (null sin PV). */
+  scheduleVariance: number | null;
 }
 
 /** Desglose del Coste Real Imputado por origen. */
@@ -97,31 +114,45 @@ export interface CostControlDto extends CostControlResult {
   tcpi: number | null;
 }
 
+/**
+ * Núcleo EVM en céntimos `BigInt`. Importes: céntimos exactos. Índices (CPI,
+ * SPI) y porcentajes: cociente exacto redondeado half-up a 2 decimales con
+ * `mulDivRound` (escala entera ×100), sin pasar por coma flotante.
+ * EAC = BAC × AC / EV (BAC / CPI con el CPI exacto, no el redondeado); sin
+ * coste o sin producción, AC + (BAC − EV). Con PV (valor planificado a la
+ * fecha) se añaden SPI = EV / PV y SV = EV − PV.
+ */
 export function computeCostControl(
   inputs: CostControlInputs,
 ): CostControlResult {
-  const bac = round2(inputs.bac);
-  const ac = round2(inputs.ac);
-  const ev = round2(inputs.ev);
+  const bac = toCents(inputs.bac);
+  const ac = toCents(inputs.ac);
+  const ev = toCents(inputs.ev);
+  const pv =
+    inputs.pv === undefined || inputs.pv === null ? null : toCents(inputs.pv);
+  /** a / b con 2 decimales (half-up); null si b ≤ 0. */
+  const indice = (a: bigint, b: bigint) =>
+    b > 0n ? Number(mulDivRound(a, 100n, b)) / 100 : null;
+  const pct = (a: bigint, b: bigint) =>
+    b > 0n ? Number(mulDivRound(a, 10_000n, b)) / 100 : null;
 
-  const currentMargin = round2(ev - ac);
-  const currentMarginPct = ev > 0 ? round2((currentMargin / ev) * 100) : null;
-  const cpi = ac > 0 ? round2(ev / ac) : null;
-  const percentComplete = bac > 0 ? round2((ev / bac) * 100) : null;
-  const eac =
-    cpi !== null && cpi > 0 ? round2(bac / cpi) : round2(ac + (bac - ev));
-  const varianceAtCompletion = round2(bac - eac);
+  const margen = ev - ac;
+  const eac = ac > 0n && ev > 0n ? mulDivRound(bac, ac, ev) : ac + (bac - ev);
 
   return {
-    bac,
-    ac,
-    ev,
-    currentMargin,
-    currentMarginPct,
-    cpi,
-    percentComplete,
-    eac,
-    varianceAtCompletion,
+    bac: fromCents(bac),
+    ac: fromCents(ac),
+    ev: fromCents(ev),
+    currentMargin: fromCents(margen),
+    currentMarginPct: pct(margen, ev),
+    cpi: indice(ev, ac),
+    percentComplete: pct(ev, bac),
+    eac: fromCents(eac),
+    varianceAtCompletion: fromCents(bac - eac),
+    costVariance: fromCents(margen),
+    pv: pv === null ? null : fromCents(pv),
+    spi: pv === null ? null : indice(ev, pv),
+    scheduleVariance: pv === null ? null : fromCents(ev - pv),
   };
 }
 
@@ -213,10 +244,20 @@ export interface CurvaSPuntoDto {
  * sido inventar un dato en vez de calcularlo. Ver [[Control de Costes y
  * Partes Diarios]] para el porqué de esa decisión original.
  */
+/** Importe de un mapa por periodo: euros (`number`/`string`) o céntimos (`bigint`). */
+type ImportePeriodo = number | string | bigint;
+const centsDe = (v: ImportePeriodo | undefined): bigint =>
+  v === undefined ? 0n : typeof v === 'bigint' ? v : toCents(v);
+
+/**
+ * Serie acumulada de la curva S en céntimos `BigInt` (acepta euros o
+ * céntimos por periodo): el acumulado de cada mes es exacto y el último punto
+ * coincide al céntimo con el AC / EV / BAC del EVM.
+ */
 export function buildCurvaS(
-  actualByPeriod: Map<string, number>,
-  earnedByPeriod: Map<string, number>,
-  plannedByPeriod: Map<string, number> = new Map(),
+  actualByPeriod: Map<string, ImportePeriodo>,
+  earnedByPeriod: Map<string, ImportePeriodo>,
+  plannedByPeriod: Map<string, ImportePeriodo> = new Map(),
 ): CurvaSPuntoDto[] {
   const periods = Array.from(
     new Set([
@@ -227,20 +268,31 @@ export function buildCurvaS(
   ).sort();
   const hasPlanned = plannedByPeriod.size > 0;
 
-  let actualAcc = 0;
-  let earnedAcc = 0;
-  let plannedAcc = 0;
+  let actualAcc = 0n;
+  let earnedAcc = 0n;
+  let plannedAcc = 0n;
   return periods.map((period) => {
-    actualAcc = round2(actualAcc + (actualByPeriod.get(period) ?? 0));
-    earnedAcc = round2(earnedAcc + (earnedByPeriod.get(period) ?? 0));
-    plannedAcc = round2(plannedAcc + (plannedByPeriod.get(period) ?? 0));
+    actualAcc += centsDe(actualByPeriod.get(period));
+    earnedAcc += centsDe(earnedByPeriod.get(period));
+    plannedAcc += centsDe(plannedByPeriod.get(period));
     return {
       period,
-      actualCumulative: actualAcc,
-      earnedCumulative: earnedAcc,
-      plannedCumulative: hasPlanned ? plannedAcc : null,
+      actualCumulative: fromCents(actualAcc),
+      earnedCumulative: fromCents(earnedAcc),
+      plannedCumulative: hasPlanned ? fromCents(plannedAcc) : null,
     };
   });
+}
+
+/** PV acumulado hasta `periodo` (AAAA-MM) inclusive; null sin cronograma. */
+export function pvAcumuladoHasta(
+  plannedByPeriod: Map<string, ImportePeriodo>,
+  periodo: string,
+): number | null {
+  if (plannedByPeriod.size === 0) return null;
+  let acc = 0n;
+  for (const [p, v] of plannedByPeriod) if (p <= periodo) acc += centsDe(v);
+  return fromCents(acc);
 }
 
 /* ────────────────────── curva planificada (Valor Planificado / PV) ────────────────────── */
@@ -265,9 +317,22 @@ export interface FasePlanificadaInput {
 export function buildPlannedByPeriod(
   phases: FasePlanificadaInput[],
 ): Map<string, number> {
-  const result = new Map<string, number>();
+  const cents = buildPlannedByPeriodCents(phases);
+  return new Map([...cents].map(([k, v]) => [k, fromCents(v)]));
+}
+
+/**
+ * Lo mismo en céntimos `BigInt`: el presupuesto de cada partida se reparte
+ * entre sus meses con `repartirCents` (resto mayor), así la suma de los meses
+ * es exactamente el presupuesto de la partida.
+ */
+export function buildPlannedByPeriodCents(
+  phases: FasePlanificadaInput[],
+): Map<string, bigint> {
+  const result = new Map<string, bigint>();
   for (const phase of phases) {
-    if (phase.budgetAmount <= 0) continue;
+    const budget = toCents(phase.budgetAmount);
+    if (budget <= 0n) continue;
     if (phase.plannedEndDate < phase.plannedStartDate) continue;
 
     const months: string[] = [];
@@ -278,20 +343,23 @@ export function buildPlannedByPeriod(
       cursor = addMonths(`${cursor}-01`, 1).slice(0, 7);
     }
 
-    const perMonth = phase.budgetAmount / months.length;
-    for (const month of months) {
-      result.set(month, round2((result.get(month) ?? 0) + perMonth));
-    }
+    const partes = repartirCents(
+      budget,
+      months.map(() => 1n),
+    );
+    months.forEach((month, i) => {
+      result.set(month, (result.get(month) ?? 0n) + partes[i]);
+    });
   }
   return result;
 }
 
 /* ────────────────────── analítica de obra (Fase 3) ────────────────────── */
 
-/** Porcentaje a 2 decimales; `null` si el divisor es 0. */
+/** Porcentaje a 2 decimales (half-up, sin coma flotante); `null` si el divisor es 0. */
 function pctOf(parte: bigint, total: bigint): number | null {
   if (total === 0n) return null;
-  return round2((Number(parte) / Number(total)) * 100);
+  return Number(mulDivRound(parte, 10_000n, total)) / 100;
 }
 
 export interface CosteRealDesglose {

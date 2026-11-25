@@ -95,6 +95,11 @@ export const TITULO_POR_CODIGO: Readonly<Record<string, string>> = {
     'La compensación supera las pérdidas pendientes',
   RESULT_APPLICATION_DIVIDEND_BLOCKED:
     'Dividendos con pérdidas anteriores sin compensar',
+  RESULT_APPLICATION_DEADLINE_EXCEEDED:
+    'Aplicación del resultado fuera del plazo de seis meses',
+  RESULT_APPLICATION_EQUITY_BELOW_CAPITAL:
+    'El dividendo dejaría el patrimonio neto por debajo del capital',
+  BANK_GUARANTEE_ACCRUAL_PERIOD_OPEN: 'El mes del devengo aún no ha terminado',
   RESULT_APPLICATION_RESERVES_INSUFFICIENT:
     'Reservas insuficientes para compensar la pérdida',
   BANK_GUARANTEE_ACCRUAL_ALREADY_POSTED:

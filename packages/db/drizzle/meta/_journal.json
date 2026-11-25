@@ -442,6 +442,13 @@
       "when": 1795609245281,
       "tag": "0062_aplicacion_resultado_devengos",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1795629470312,
+      "tag": "0063_ecpn_efe_devengo_tramos",
+      "breakpoints": true
     }
   ]
 }
