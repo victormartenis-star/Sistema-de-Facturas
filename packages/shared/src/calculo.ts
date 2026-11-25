@@ -1089,11 +1089,63 @@ export interface EntradaCuadroMargenes {
     partesMaquinaria: Importe;
     almacen: Importe;
     amortizacion: Importe;
+    /** Comisiones y ejecuciones de avales contabilizadas a la obra. */
+    avales?: Importe;
   };
   certificado: Importe;
   facturado: Importe;
   /** Cobrado en base imponible (ver `cobradoEnBase`). */
   cobrado: Importe;
+  /**
+   * Estimación al cierre manual vigente (EAC fijada por el jefe de obra o
+   * control de gestión); null o ausente = cálculo automático.
+   */
+  estimacionCierre?: Importe | null;
+}
+
+export type OrigenEstimacionCierre = 'manual' | 'automatica';
+
+export interface EstimacionCierreEfectiva {
+  /** Automática: el mayor de presupuestado y consumido. */
+  automatica: number;
+  /** La que se usa en márgenes y en la provisión por pérdidas. */
+  efectiva: number;
+  origen: OrigenEstimacionCierre;
+  /** La manual quedó por debajo del coste real y se eleva a él. */
+  ajustadaAlReal: boolean;
+}
+
+/**
+ * Coste estimado al cierre efectivo (EAC, SAP PS / Oracle PPM): la estimación
+ * manual vigente si la hay —nunca por debajo del coste real ya incurrido— o,
+ * si no, la automática (el mayor de presupuestado y consumido).
+ */
+export function costeEstimadoCierreEfectivo(p: {
+  presupuestado: Importe;
+  consumido: Importe;
+  costeReal: Importe;
+  manual: Importe | null | undefined;
+}): EstimacionCierreEfectiva {
+  const pres = toCents(p.presupuestado);
+  const cons = toCents(p.consumido);
+  const real = toCents(p.costeReal);
+  const auto = cons > pres ? cons : pres;
+  if (p.manual === null || p.manual === undefined) {
+    return {
+      automatica: fromCents(auto),
+      efectiva: fromCents(auto),
+      origen: 'automatica',
+      ajustadaAlReal: false,
+    };
+  }
+  const manual = toCents(p.manual);
+  const ajustada = manual < real;
+  return {
+    automatica: fromCents(auto),
+    efectiva: fromCents(ajustada ? real : manual),
+    origen: 'manual',
+    ajustadaAlReal: ajustada,
+  };
 }
 
 export interface CuadroMargenesCalculo {
@@ -1108,6 +1160,7 @@ export interface CuadroMargenesCalculo {
     partesMaquinaria: number;
     almacen: number;
     amortizacion: number;
+    avales: number;
   };
   /** Real + comprometido: lo que ya está gastado o atado. */
   consumido: number;
@@ -1116,8 +1169,16 @@ export interface CuadroMargenesCalculo {
   /** Presupuestado − consumido (negativo = sobrecoste). */
   desviacion: number;
   desviacionPct: number | null;
-  /** Coste estimado al cierre: el mayor de presupuestado y consumido. */
+  /**
+   * Coste estimado al cierre efectivo: la estimación manual vigente (nunca
+   * por debajo del coste real) o, sin ella, el mayor de presupuestado y
+   * consumido.
+   */
   costeEstimadoCierre: number;
+  /** El automático (mayor de presupuestado y consumido), como referencia. */
+  costeEstimadoCierreAutomatico: number;
+  origenEstimacion: OrigenEstimacionCierre;
+  estimacionAjustadaAlReal: boolean;
   /** Contrato − presupuestado. */
   margenPrevisto: number | null;
   margenPrevistoPct: number | null;
@@ -1142,6 +1203,11 @@ export function sumarEntradasCuadro(
   const s = (f: (e: EntradaCuadroMargenes) => Importe) =>
     centsToNumeric(sumCents(entradas.map((e) => toCents(f(e)))));
   const conContrato = entradas.filter((e) => e.contrato !== null);
+  // Con alguna estimación manual, el total es la suma de las efectivas de
+  // cada obra (no se puede reconstruir desde los totales).
+  const conManual = entradas.some(
+    (e) => e.estimacionCierre !== null && e.estimacionCierre !== undefined,
+  );
   return {
     contrato:
       conContrato.length === 0
@@ -1160,10 +1226,20 @@ export function sumarEntradasCuadro(
       partesMaquinaria: s((e) => e.costeReal.partesMaquinaria),
       almacen: s((e) => e.costeReal.almacen),
       amortizacion: s((e) => e.costeReal.amortizacion),
+      avales: s((e) => e.costeReal.avales ?? 0),
     },
     certificado: s((e) => e.certificado),
     facturado: s((e) => e.facturado),
     cobrado: s((e) => e.cobrado),
+    estimacionCierre: conManual
+      ? centsToNumeric(
+          sumCents(
+            entradas.map((e) =>
+              toCents(cuadroMargenesObra(e).costeEstimadoCierre),
+            ),
+          ),
+        )
+      : null,
   };
 }
 
@@ -1182,11 +1258,18 @@ export function cuadroMargenesObra(
     partesMaquinaria: toCents(e.costeReal.partesMaquinaria),
     almacen: toCents(e.costeReal.almacen),
     amortizacion: toCents(e.costeReal.amortizacion),
+    avales: toCents(e.costeReal.avales ?? 0),
   };
   const costeReal = sumCents(Object.values(r));
   const consumido = costeReal + comprometido;
   const desviacion = presupuestado - consumido;
-  const cierre = consumido > presupuestado ? consumido : presupuestado;
+  const eac = costeEstimadoCierreEfectivo({
+    presupuestado: centsToNumeric(presupuestado),
+    consumido: centsToNumeric(consumido),
+    costeReal: centsToNumeric(costeReal),
+    manual: e.estimacionCierre,
+  });
+  const cierre = toCents(eac.efectiva);
   const certificado = toCents(e.certificado);
   const facturado = toCents(e.facturado);
   const cobrado = toCents(e.cobrado);
@@ -1206,12 +1289,16 @@ export function cuadroMargenesObra(
       partesMaquinaria: fromCents(r.partesMaquinaria),
       almacen: fromCents(r.almacen),
       amortizacion: fromCents(r.amortizacion),
+      avales: fromCents(r.avales),
     },
     consumido: fromCents(consumido),
     consumoPct: pct(consumido, presupuestado),
     desviacion: fromCents(desviacion),
     desviacionPct: pct(desviacion, presupuestado),
     costeEstimadoCierre: fromCents(cierre),
+    costeEstimadoCierreAutomatico: eac.automatica,
+    origenEstimacion: eac.origen,
+    estimacionAjustadaAlReal: eac.ajustadaAlReal,
     margenPrevisto:
       contrato === null ? null : fromCents(contrato - presupuestado),
     margenPrevistoPct:
@@ -2465,23 +2552,192 @@ export function asientoComisionAval(importe: Importe): LineaAsientoWip[] {
 
 /**
  * Ejecución del aval. Emitido (el banco paga al beneficiario y nos lo carga):
- * 6780 gasto excepcional (obra) a 5720. Recibido (cobramos la garantía del
- * tercero): 5720 a 7780 ingreso excepcional (obra).
+ * 6780 gasto excepcional (obra) a 5720, o a 5200 (préstamo a corto plazo) si
+ * el banco la financia. Recibido (cobramos la garantía del tercero): 5720 a
+ * 7780 ingreso excepcional (obra); no admite financiación.
  */
 export function asientoEjecucionAval(
   importe: Importe,
   direccion: DireccionAval,
+  financiada = false,
 ): LineaAsientoWip[] {
   const c = toCents(importe);
   if (c <= 0n) return [];
+  if (financiada && direccion !== 'emitido') {
+    throw new RangeError('Solo la ejecución de un aval emitido se financia');
+  }
   const imp = centsToNumeric(c);
   return direccion === 'emitido'
     ? [
         { cuenta: '6780', debe: imp, haber: '0.00', imputaObra: true },
-        { cuenta: '5720', debe: '0.00', haber: imp, imputaObra: false },
+        {
+          cuenta: financiada ? '5200' : '5720',
+          debe: '0.00',
+          haber: imp,
+          imputaObra: false,
+        },
       ]
     : [
         { cuenta: '5720', debe: imp, haber: '0.00', imputaObra: false },
         { cuenta: '7780', debe: '0.00', haber: imp, imputaObra: true },
       ];
+}
+
+/* ───────────────────── líneas de avales por entidad ─────────────────────
+ * Límite de riesgo que una entidad nos concede para emitir avales (SAP
+ * Treasury: línea de crédito de avales). Dispuesto = saldo vivo de los avales
+ * emitidos de esa entidad. Un alta que lo supere se rechaza.
+ */
+
+export interface ValidacionLineaAval {
+  ok: boolean;
+  limite: number;
+  dispuesto: number;
+  /** Disponible antes del alta. */
+  disponible: number;
+  /** Dispuesto si se admite el alta. */
+  dispuestoTras: number;
+}
+
+export function validarLineaAval(p: {
+  limite: Importe;
+  dispuesto: Importe;
+  importe: Importe;
+}): ValidacionLineaAval {
+  const limite = toCents(p.limite);
+  const dispuesto = toCents(p.dispuesto);
+  const tras = dispuesto + toCents(p.importe);
+  return {
+    ok: tras <= limite,
+    limite: fromCents(limite),
+    dispuesto: fromCents(dispuesto),
+    disponible: fromCents(limite - dispuesto),
+    dispuestoTras: fromCents(tras),
+  };
+}
+
+/* ───────────────────── cierre y apertura del ejercicio (PGC) ─────────────────────
+ * Al estilo de SAP FI-GL (traspaso de saldos) y Oracle GL (cierre de año):
+ *  1. Regularización (31-12): salda las cuentas de gastos (6) e ingresos (7)
+ *     contra 129 «Resultado del ejercicio» (beneficio al haber, pérdida al debe).
+ *  2. Cierre (31-12): salda todas las cuentas de balance, 129 incluida.
+ *  3. Apertura (01-01 del siguiente): el cierre con debe y haber invertidos.
+ * Los saldos van por cuenta y obra, así la analítica también queda a cero.
+ * Todo en céntimos `BigInt`; cada asiento cuadra al céntimo o se lanza error.
+ */
+
+export interface SaldoCuentaCierre {
+  cuenta: string;
+  projectId: string | null;
+  debe: Importe;
+  haber: Importe;
+}
+
+export interface LineaCierre {
+  cuenta: string;
+  projectId: string | null;
+  debe: string;
+  haber: string;
+}
+
+export interface AsientosCierreEjercicio {
+  regularizacion: LineaCierre[];
+  cierre: LineaCierre[];
+  apertura: LineaCierre[];
+  /** Ingresos − gastos (beneficio > 0, pérdida < 0). */
+  resultado: number;
+  ingresos: number;
+  gastos: number;
+  /** Suma del debe (= haber) de cada asiento. */
+  totalRegularizacion: number;
+  totalCierre: number;
+}
+
+/** Grupos 6 y 7 del PGC: cuentas de gestión que se regularizan contra 129. */
+export function esCuentaDeResultados(codigo: string): boolean {
+  return codigo.startsWith('6') || codigo.startsWith('7');
+}
+
+export function asientosCierreEjercicio(
+  saldos: readonly SaldoCuentaCierre[],
+  cuentaResultado = '1290',
+): AsientosCierreEjercicio {
+  const clave = (c: string, p: string | null) => `${c}|${p ?? ''}`;
+  const netos = new Map<
+    string,
+    { cuenta: string; projectId: string | null; neto: bigint }
+  >();
+  const acumular = (cuenta: string, projectId: string | null, neto: bigint) => {
+    const k = clave(cuenta, projectId);
+    const a = netos.get(k) ?? { cuenta, projectId, neto: 0n };
+    a.neto += neto;
+    netos.set(k, a);
+  };
+  for (const s of saldos) {
+    acumular(s.cuenta, s.projectId, toCents(s.debe) - toCents(s.haber));
+  }
+  const orden = (a: LineaCierre, b: LineaCierre) =>
+    a.cuenta === b.cuenta
+      ? (a.projectId ?? '').localeCompare(b.projectId ?? '')
+      : a.cuenta.localeCompare(b.cuenta);
+  /** Línea que salda un neto deudor (>0) o acreedor (<0). */
+  const saldar = (cuenta: string, projectId: string | null, neto: bigint) => ({
+    cuenta,
+    projectId,
+    debe: centsToNumeric(neto < 0n ? -neto : 0n),
+    haber: centsToNumeric(neto > 0n ? neto : 0n),
+  });
+
+  let gastos = 0n;
+  let ingresos = 0n;
+  const regularizacion: LineaCierre[] = [];
+  for (const n of netos.values()) {
+    if (!esCuentaDeResultados(n.cuenta) || n.neto === 0n) continue;
+    if (n.cuenta.startsWith('6')) gastos += n.neto;
+    else ingresos -= n.neto;
+    regularizacion.push(saldar(n.cuenta, n.projectId, n.neto));
+  }
+  regularizacion.sort(orden);
+  // Neto deudor de los grupos 6 y 7 = gastos − ingresos = −resultado.
+  const s = gastos - ingresos;
+  if (s !== 0n) {
+    // 129 recibe el neto: pérdida al debe, beneficio al haber.
+    regularizacion.push({
+      cuenta: cuentaResultado,
+      projectId: null,
+      debe: centsToNumeric(s > 0n ? s : 0n),
+      haber: centsToNumeric(s < 0n ? -s : 0n),
+    });
+    acumular(cuentaResultado, null, s);
+  }
+
+  const cierre: LineaCierre[] = [];
+  for (const n of netos.values()) {
+    if (esCuentaDeResultados(n.cuenta) || n.neto === 0n) continue;
+    cierre.push(saldar(n.cuenta, n.projectId, n.neto));
+  }
+  cierre.sort(orden);
+  const suma = (l: LineaCierre[], lado: 'debe' | 'haber') =>
+    sumCents(l.map((x) => toCents(x[lado])));
+  for (const [nombre, l] of [
+    ['regularización', regularizacion],
+    ['cierre', cierre],
+  ] as const) {
+    if (suma(l, 'debe') !== suma(l, 'haber')) {
+      throw new RangeError(
+        `El asiento de ${nombre} no cuadra: el libro tiene un descuadre`,
+      );
+    }
+  }
+  const apertura = cierre.map((l) => ({ ...l, debe: l.haber, haber: l.debe }));
+  return {
+    regularizacion,
+    cierre,
+    apertura,
+    resultado: fromCents(ingresos - gastos),
+    ingresos: fromCents(ingresos),
+    gastos: fromCents(gastos),
+    totalRegularizacion: fromCents(suma(regularizacion, 'debe')),
+    totalCierre: fromCents(suma(cierre, 'debe')),
+  };
 }

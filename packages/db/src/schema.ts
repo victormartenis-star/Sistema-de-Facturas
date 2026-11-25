@@ -3632,6 +3632,9 @@ export const journalEntrySourceEnum = pgEnum('journal_entry_source', [
   'obra_en_curso',
   'provision_perdidas',
   'aval',
+  'regularizacion_ejercicio',
+  'cierre_ejercicio',
+  'apertura_ejercicio',
 ]);
 
 export const journalEntryStatusEnum = pgEnum('journal_entry_status', [
@@ -5007,6 +5010,8 @@ export const bankGuaranteeMovements = pgTable(
     journalEntryId: uuid('journal_entry_id').references(
       () => journalEntries.id,
     ),
+    /** Ejecución financiada por el banco (5200) en vez de cargo en cuenta. */
+    financed: boolean('financed').notNull().default(false),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -5026,3 +5031,148 @@ export const bankGuaranteeMovements = pgTable(
 );
 
 export type BankGuaranteeMovement = typeof bankGuaranteeMovements.$inferSelect;
+
+/**
+ * Línea de avales que una entidad nos concede (límite de riesgo). La consumen
+ * los avales emitidos vivos de la misma entidad (`bank_guarantees.issuer`).
+ */
+export const bankGuaranteeLines = pgTable(
+  'bank_guarantee_lines',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    issuer: varchar('issuer', { length: 120 }).notNull(),
+    limitAmount: numeric('limit_amount', { precision: 14, scale: 2 }).notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    expiryDate: date('expiry_date'),
+    notes: text('notes'),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('bank_guarantee_lines_issuer_unique').on(t.companyId, t.issuer),
+    check('bank_guarantee_lines_limite', sql`${t.limitAmount} >= 0`),
+  ],
+);
+
+export type BankGuaranteeLine = typeof bankGuaranteeLines.$inferSelect;
+
+/* ─────────────────────── Cierre y apertura del ejercicio ───────────────────────
+ * Un cierre vigente por empresa y ejercicio: los tres asientos (regularización,
+ * cierre y apertura del siguiente), el resultado y los meses que cerró. Se
+ * revierte por contra-asientos (estado `revertido`). Reglas puras en
+ * `calculo.ts` (`asientosCierreEjercicio`).
+ */
+
+export const fiscalYearClosingStatusEnum = pgEnum(
+  'fiscal_year_closing_status',
+  ['cerrado', 'revertido'],
+);
+
+export const fiscalYearClosings = pgTable(
+  'fiscal_year_closings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    year: smallint('year').notNull(),
+    status: fiscalYearClosingStatusEnum('status').notNull().default('cerrado'),
+    income: numeric('income', { precision: 14, scale: 2 }).notNull(),
+    expenses: numeric('expenses', { precision: 14, scale: 2 }).notNull(),
+    /** Ingresos − gastos (beneficio > 0). */
+    result: numeric('result', { precision: 14, scale: 2 }).notNull(),
+    regularizationEntryId: uuid('regularization_entry_id').references(
+      () => journalEntries.id,
+    ),
+    closingEntryId: uuid('closing_entry_id').references(
+      () => journalEntries.id,
+    ),
+    openingEntryId: uuid('opening_entry_id').references(
+      () => journalEntries.id,
+    ),
+    /** Meses que este cierre pasó a «cerrado» (se reabren al revertir). */
+    closedMonths: jsonb('closed_months').notNull().default([]),
+    closedBy: uuid('closed_by').references(() => users.id),
+    closedAt: timestamp('closed_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    reversalReason: varchar('reversal_reason', { length: 240 }),
+    reversedBy: uuid('reversed_by').references(() => users.id),
+    reversedAt: timestamp('reversed_at', { withTimezone: true }),
+    version: integer('version').notNull().default(1),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('fiscal_year_closings_vigente_unique')
+      .on(t.companyId, t.year)
+      .where(sql`status = 'cerrado'`),
+    index('fiscal_year_closings_company_year_idx').on(t.companyId, t.year),
+    check(
+      'fiscal_year_closings_cuadre',
+      sql`${t.year} BETWEEN 2000 AND 2100 AND ${t.result} = ${t.income} - ${t.expenses}`,
+    ),
+    check(
+      'fiscal_year_closings_reversion',
+      sql`(${t.status} = 'revertido') = (${t.reversalReason} IS NOT NULL AND ${t.reversedAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export type FiscalYearClosing = typeof fiscalYearClosings.$inferSelect;
+
+/* ─────────────────────── Estimación al cierre (EAC) por obra ───────────────────────
+ * Historial inmutable: cada versión fija (o retira, con importe null) el
+ * coste estimado al cierre con fecha de efecto, motivo y usuario. La vigente
+ * a una fecha es la de mayor versión con efecto ≤ esa fecha.
+ */
+
+export const projectCostEstimates = pgTable(
+  'project_cost_estimates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    /** Secuencia por obra (1, 2, 3…): la versión de If-Match. */
+    version: integer('version').notNull(),
+    effectiveDate: date('effective_date').notNull(),
+    /** Null: vuelta al cálculo automático. */
+    estimatedCost: numeric('estimated_cost', { precision: 14, scale: 2 }),
+    reason: varchar('reason', { length: 240 }).notNull(),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('project_cost_estimates_version_unique').on(
+      t.companyId,
+      t.projectId,
+      t.version,
+    ),
+    index('project_cost_estimates_project_date_idx').on(
+      t.companyId,
+      t.projectId,
+      t.effectiveDate,
+    ),
+    check(
+      'project_cost_estimates_importe',
+      sql`${t.version} >= 1 AND (${t.estimatedCost} IS NULL OR ${t.estimatedCost} >= 0)`,
+    ),
+  ],
+);
+
+export type ProjectCostEstimate = typeof projectCostEstimates.$inferSelect;

@@ -67,6 +67,9 @@ export const AUDIT_ENTITY_TYPES = [
   'work_in_progress',
   'loss_provision',
   'bank_guarantee',
+  'bank_guarantee_line',
+  'fiscal_year_closing',
+  'project_cost_estimate',
   'iot_lectura_telemetria',
   'mantenimiento_equipo',
   'parte_maquinaria',
@@ -177,4 +180,31 @@ export interface AuditIntegrityReportDto {
   /** Última ancla cuya firma HMAC es válida (null si ninguna). */
   ultimaAnclaValidada: { fecha: string; entryHash: string } | null;
   estadoSincronizacion: AuditSincronizacion;
+}
+
+/** Un campo que cambió en una operación crítica (rastro antes/después). */
+export interface CambioAuditoria {
+  campo: string;
+  antes: unknown;
+  despues: unknown;
+}
+
+/**
+ * Rastro estructurado antes/después: los campos de `campos` (o la unión de
+ * claves de ambos objetos) cuyo valor cambió, comparando por JSON. Puro; se
+ * guarda en `newData.cambios` del `audit_log`.
+ */
+export function diferenciasAuditoria(
+  antes: Record<string, unknown> | null | undefined,
+  despues: Record<string, unknown> | null | undefined,
+  campos?: readonly string[],
+): CambioAuditoria[] {
+  const a = antes ?? {};
+  const d = despues ?? {};
+  const claves = campos ?? [...new Set([...Object.keys(a), ...Object.keys(d)])];
+  const norm = (v: unknown) =>
+    JSON.stringify(v instanceof Date ? v.toISOString() : (v ?? null));
+  return claves
+    .filter((k) => norm(a[k]) !== norm(d[k]))
+    .map((k) => ({ campo: k, antes: a[k] ?? null, despues: d[k] ?? null }));
 }

@@ -63,4 +63,6 @@ export * from './solicitudes-material';
 export * from './wip';
 export * from './provision-perdidas';
 export * from './avales';
+export * from './cierre-ejercicio';
+export * from './estimacion-cierre';
 export * from './consolidacion';

@@ -26,10 +26,17 @@ describe('can', () => {
     }
   });
 
-  it('admin, gerente y administracion pueden todo', () => {
+  it('admin, gerente y administracion pueden todo (salvo cerrar el ejercicio)', () => {
     for (const rol of ['admin', 'gerente', 'administracion'] as UserRole[]) {
       for (const a of ACCIONES_UI) {
-        for (const r of RECURSOS_UI) expect(can(rol, a, r)).toBe(true);
+        for (const r of RECURSOS_UI) {
+          // Segregación: el cierre del ejercicio es de admin y gerente, como
+          // el cierre de períodos en la API (`@Roles('admin', 'gerente')`).
+          const esperado =
+            !(rol === 'administracion' && r === 'cierre_ejercicio') ||
+            a === 'exportar';
+          expect(can(rol, a, r)).toBe(esperado);
+        }
       }
     }
   });

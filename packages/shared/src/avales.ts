@@ -217,11 +217,31 @@ export const avalLiberarSchema = z.object({
 });
 export type AvalLiberarInput = z.input<typeof avalLiberarSchema>;
 
-/** Ejecución o incautación. Sin importe: total. Se contabiliza en `fecha`. */
+export const LIQUIDACIONES_EJECUCION_AVAL = [
+  'tesoreria',
+  'financiacion',
+] as const;
+export type LiquidacionEjecucionAval =
+  (typeof LIQUIDACIONES_EJECUCION_AVAL)[number];
+
+export const LIQUIDACION_EJECUCION_AVAL_LABELS: Record<
+  LiquidacionEjecucionAval,
+  string
+> = {
+  tesoreria: 'Cargo en cuenta (5720)',
+  financiacion: 'Financiada por el banco (5200)',
+};
+
+/**
+ * Ejecución o incautación. Sin importe: total. Se contabiliza en `fecha`.
+ * Un aval emitido puede liquidarse con cargo en cuenta (5720) o financiado
+ * por el banco como préstamo a corto plazo (5200).
+ */
 export const avalEjecutarSchema = z.object({
   fecha,
   importe: importePositivo.nullish(),
   motivo,
+  liquidacion: z.enum(LIQUIDACIONES_EJECUCION_AVAL).default('tesoreria'),
 });
 export type AvalEjecutarInput = z.input<typeof avalEjecutarSchema>;
 
@@ -310,11 +330,52 @@ export interface AvalDto extends SaldoAval {
   version: number;
 }
 
+/* ─────────────────────── líneas de avales por entidad ─────────────────────── */
+
+const limite = importe.refine((n) => n >= 0, 'El límite no puede ser negativo');
+
+export const lineaAvalCreateSchema = z.object({
+  /** Debe coincidir con la `entidad` de los avales que consumen la línea. */
+  entidad: z.string().trim().min(1).max(120),
+  limite,
+  fechaVencimiento: fecha.nullish(),
+  notas: z.string().trim().max(1000).nullish(),
+});
+export type LineaAvalCreateInput = z.input<typeof lineaAvalCreateSchema>;
+
+export const lineaAvalUpdateSchema = z
+  .object({
+    limite: limite.optional(),
+    activa: z.boolean().optional(),
+    fechaVencimiento: fecha.nullish(),
+    notas: z.string().trim().max(1000).nullish(),
+  })
+  .refine((v) => Object.keys(v).length > 0, {
+    message: 'Indica al menos un campo a modificar',
+  });
+export type LineaAvalUpdateInput = z.input<typeof lineaAvalUpdateSchema>;
+
+export interface LineaAvalDto {
+  id: string;
+  entidad: string;
+  limite: number;
+  /** Saldo vivo de los avales emitidos de la entidad. */
+  dispuesto: number;
+  disponible: number;
+  usoPct: number | null;
+  activa: boolean;
+  fechaVencimiento: string | null;
+  notas: string | null;
+  version: number;
+}
+
 export interface MovimientoAvalDto {
   id: string;
   tipo: TipoMovimientoAval;
   fecha: string;
   importe: number;
+  /** Ejecución financiada por el banco (5200) en lugar de cargo en cuenta. */
+  financiada: boolean;
   /** Saldo vivo tras el movimiento. */
   saldoVivo: number;
   fechaVencimiento: string | null;

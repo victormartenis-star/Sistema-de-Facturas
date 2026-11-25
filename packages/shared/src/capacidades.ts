@@ -32,6 +32,10 @@ export const RECURSOS_UI = [
   'contabilidad',
   /** Avales bancarios: tesorería; solo admin, gerente y administración los mutan. */
   'aval',
+  /** Cierre y reversión del ejercicio: solo admin y gerente (segregación). */
+  'cierre_ejercicio',
+  /** Estimación al cierre por obra: también el jefe de obra (en sus obras). */
+  'estimacion_cierre',
 ] as const;
 export type RecursoUi = (typeof RECURSOS_UI)[number];
 
@@ -51,6 +55,8 @@ export function can(
   if (isPortalRole(rol)) return false;
   if (accion === 'exportar') return true;
   if (isReadOnlyRole(rol)) return false;
+  if (recurso === 'cierre_ejercicio')
+    return rol === 'admin' || rol === 'gerente';
   const restringida =
     (accion === 'rectificar' &&
       (recurso === 'factura' || recurso === 'certificacion')) ||

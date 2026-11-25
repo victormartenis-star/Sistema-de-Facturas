@@ -55,6 +55,9 @@ export const ORIGENES_ASIENTO = [
   'obra_en_curso',
   'provision_perdidas',
   'aval',
+  'regularizacion_ejercicio',
+  'cierre_ejercicio',
+  'apertura_ejercicio',
 ] as const;
 export type OrigenAsiento = (typeof ORIGENES_ASIENTO)[number];
 
@@ -74,6 +77,9 @@ export const ORIGEN_ASIENTO_LABELS: Record<OrigenAsiento, string> = {
   obra_en_curso: 'Obra en curso (cierre)',
   provision_perdidas: 'Provisión por pérdidas previstas',
   aval: 'Aval bancario (comisión o ejecución)',
+  regularizacion_ejercicio: 'Regularización del ejercicio',
+  cierre_ejercicio: 'Cierre del ejercicio',
+  apertura_ejercicio: 'Apertura del ejercicio',
 };
 
 export const ESTADOS_ASIENTO = ['contabilizado', 'anulado'] as const;
@@ -130,6 +136,8 @@ export function planContableBase(): CuentaPlan[] {
     c('1290', 'Resultado del ejercicio', 'patrimonio'),
     c('170', 'Deudas a largo plazo con entidades de crédito', 'pasivo'),
     c('1700', 'Préstamos a largo plazo', 'pasivo'),
+    c('520', 'Deudas a corto plazo con entidades de crédito', 'pasivo'),
+    c('5200', 'Préstamos a corto plazo de entidades de crédito', 'pasivo'),
     c('212', 'Instalaciones técnicas', 'activo'),
     c('2120', 'Instalaciones técnicas', 'activo'),
     c('213', 'Maquinaria', 'activo'),
