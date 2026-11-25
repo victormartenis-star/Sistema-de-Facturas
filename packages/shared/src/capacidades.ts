@@ -36,6 +36,10 @@ export const RECURSOS_UI = [
   'cierre_ejercicio',
   /** Estimación al cierre por obra: también el jefe de obra (en sus obras). */
   'estimacion_cierre',
+  /** Cartera AR/AP (anticipos, compensaciones): admin, gerente y administración. */
+  'cartera',
+  /** Artículos con lote o serie y su trazabilidad (almacén). */
+  'lote',
 ] as const;
 export type RecursoUi = (typeof RECURSOS_UI)[number];
 
@@ -62,7 +66,8 @@ export function can(
       (recurso === 'factura' || recurso === 'certificacion')) ||
     (accion === 'devolver' && recurso === 'albaran') ||
     recurso === 'contabilidad' ||
-    recurso === 'aval';
+    recurso === 'aval' ||
+    recurso === 'cartera';
   if (restringida) return ROLES_RECTIFICAR.includes(rol);
   return true;
 }

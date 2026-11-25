@@ -206,6 +206,8 @@ describe('Retenciones en la conciliación a fecha, avisos de devengo y exportaci
       'clientes_retenciones',
       'proveedores',
       'proveedores_retenciones',
+      'anticipos_clientes',
+      'anticipos_proveedores',
       'almacen',
     ]);
 
@@ -432,7 +434,7 @@ describe('Retenciones en la conciliación a fecha, avisos de devengo y exportaci
       resultadoAplicado: false,
       conciliacion: { fecha: '2025-12-31', cuadra: true, descuadres: 0 },
     });
-    expect(ca.cierre.conciliacion.partidas).toHaveLength(9);
+    expect(ca.cierre.conciliacion.partidas).toHaveLength(11);
     // El ejercicio en curso se concilia a hoy; uno futuro, sin conciliación.
     const futuro = (
       await api()

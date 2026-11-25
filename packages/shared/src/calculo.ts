@@ -3630,6 +3630,17 @@ export function partidaCapitalCorriente(
 }
 
 export interface EstadoFlujosEfectivo {
+  /**
+   * Detalle de cobros a clientes y pagos a proveedores según el origen de los
+   * apuntes de 57x (lo añade el servicio; suma exactamente la variación).
+   */
+  cobrosPagos?: {
+    cobrosClientes: number;
+    pagosProveedores: number;
+    otros: number;
+    total: number;
+    cuadra: boolean;
+  };
   explotacion: {
     resultado: number;
     ajustes: number;

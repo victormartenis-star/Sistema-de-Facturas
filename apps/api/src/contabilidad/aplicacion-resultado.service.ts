@@ -24,6 +24,7 @@ import {
   cuentasAnuales,
   cuentasAnualesACsv,
   cuentasAnualesAJson,
+  cobrosPagosEfe,
   identificacionCuentas,
   memoriaAbreviada,
   movimientoMasa,
@@ -516,7 +517,13 @@ export class AplicacionResultadoService {
           toCents(ecpn.saldoFinal.total) ===
           toCents(anuales.balance.patrimonioNeto.total),
       },
-      efe,
+      efe: {
+        ...efe,
+        cobrosPagos: cobrosPagosEfe(
+          await this.tesoreriaPorOrigen(companyId, ejercicio),
+          efe.variacionEfectivo,
+        ),
+      },
       memoria,
       identificacion: identificacionCuentas({
         empresa: empresa.nombre,
@@ -555,6 +562,36 @@ export class AplicacionResultadoService {
         })),
       },
     };
+  }
+
+  /**
+   * Variación de 57x del ejercicio por origen del asiento (un contra-asiento
+   * cuenta como el que anula), sin apertura, regularización ni cierre: base
+   * del detalle de cobros a clientes y pagos a proveedores del EFE.
+   */
+  private async tesoreriaPorOrigen(companyId: string, ejercicio: number) {
+    const r = await this.dbs.db.execute(sql`
+      select coalesce(o.source, je.source)::text as origen,
+        max(a.direction::text) as tipo,
+        sum(l.debit - l.credit)::text as importe
+      from journal_entry_lines l
+      join journal_entries je on je.id = l.entry_id
+      join ledger_accounts la on la.id = l.account_id
+      left join journal_entries o on o.id = je.reverses_id
+      left join third_party_advances a on a.id = coalesce(o.source_id, je.source_id)
+        and coalesce(o.source, je.source) = 'anticipo'
+      where l.company_id = ${companyId} and je.fiscal_year = ${ejercicio}
+        and la.code like '57%'
+        and coalesce(o.source, je.source) not in
+          ('apertura_ejercicio', 'regularizacion_ejercicio', 'cierre_ejercicio')
+      group by coalesce(o.source, je.source), a.direction`);
+    return (
+      r.rows as {
+        origen: string;
+        tipo: 'cobro' | 'pago' | null;
+        importe: string;
+      }[]
+    ).map((f) => ({ origen: f.origen, tipo: f.tipo, importe: f.importe }));
   }
 
   private async datosEmpresa(

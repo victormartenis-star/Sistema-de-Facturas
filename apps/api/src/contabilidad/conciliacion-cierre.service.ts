@@ -28,6 +28,20 @@ function dto(r: CloseReconciliation): ConciliacionCierreDto {
   };
 }
 
+/**
+ * Liquidación en vigor a la fecha de corte: vigente, o anulada después de esa
+ * fecha (la interfaz fecha su contra-asiento el día de la anulación).
+ */
+export const liquidacionEnVigorA = (fecha: string) =>
+  sql`(ps.status = 'vigente' or (ps.reversed_at at time zone 'UTC')::date > ${fecha})`;
+
+/**
+ * Anticipo en vigor a la fecha de corte: vigente, o anulado con contra-asiento
+ * posterior a esa fecha (se anula a la fecha de la anulación).
+ */
+export const anticipoEnVigorA = (fecha: string) =>
+  sql`(a.status = 'vigente' or (select r.entry_date from journal_entries r where r.id = a.reversal_entry_id) > ${fecha})`;
+
 /** Facturas de venta y compra que la interfaz contabiliza (igual criterio). */
 const FACTURAS_CONTABLES = `('aprobada', 'pagada', 'rectificada')`;
 
@@ -100,6 +114,10 @@ export class ConciliacionCierreService {
       proveedoresAux,
       proveedoresMayor,
       proveedoresRetMayor,
+      anticiposCliAux,
+      anticiposCliMayor,
+      anticiposProvAux,
+      anticiposProvMayor,
       almacenAux,
       almacenMayor,
     ] = await Promise.all([
@@ -136,6 +154,10 @@ export class ConciliacionCierreService {
       this.terceros(ex, companyId, fecha, 'compra', 'pago'),
       mayor((c) => sql`${c} like '4000%'`, true),
       mayor((c) => sql`${c} like '4001%'`, true),
+      this.anticipos(ex, companyId, fecha, 'cobro'),
+      mayor((c) => sql`${c} like '438%' and ${c} not like '4389%'`, true),
+      this.anticipos(ex, companyId, fecha, 'pago'),
+      mayor((c) => sql`${c} like '407%'`, false),
       uno(sql`select coalesce(sum(total_value), 0)::text as v from stock_movements
         where company_id = ${companyId} and type <> 'traspaso'
           and movement_date <= ${fecha}`),
@@ -205,6 +227,20 @@ export class ConciliacionCierreService {
           detalle: detalleRetencion(proveedoresAux),
         },
         {
+          clave: 'anticipos_clientes',
+          etiqueta: 'Anticipos de clientes pendientes de aplicar',
+          cuentas: '4380',
+          auxiliar: anticiposCliAux,
+          mayor: anticiposCliMayor,
+        },
+        {
+          clave: 'anticipos_proveedores',
+          etiqueta: 'Anticipos a proveedores pendientes de aplicar',
+          cuentas: '4070',
+          auxiliar: anticiposProvAux,
+          mayor: anticiposProvMayor,
+        },
+        {
           clave: 'almacen',
           etiqueta: 'Almacén: valor del kárdex (PMP)',
           cuentas: 'grupo 3',
@@ -244,12 +280,12 @@ export class ConciliacionCierreService {
         join payment_milestones pm on pm.id = ps.milestone_id
         where pm.invoice_id in (select id from fac)
           and pm.direction = ${direccion}
-          and ps.status = 'vigente' and ps.settled_on <= ${fecha}`),
+          and ${liquidacionEnVigorA(fecha)} and ps.settled_on <= ${fecha}`),
       ex.execute(sql`
         with fac as (${fac})
         select pm.amount::text as importe, pm.due_date::text as vencimiento,
           coalesce((select sum(ps.amount) from payment_settlements ps
-            where ps.milestone_id = pm.id and ps.status = 'vigente'
+            where ps.milestone_id = pm.id and ${liquidacionEnVigorA(fecha)}
               and ps.settled_on <= ${fecha}), 0)::text as liquidado
         from payment_milestones pm
         where pm.invoice_id in (select id from fac)
@@ -274,6 +310,28 @@ export class ConciliacionCierreService {
         liquidado: string;
       }[],
     });
+  }
+
+  /**
+   * Anticipos vigentes recibidos (cobro) o entregados (pago) hasta la fecha,
+   * menos lo aplicado a vencimientos hasta la fecha (cartera, 0066).
+   */
+  private async anticipos(
+    ex: DbOrTx,
+    companyId: string,
+    fecha: string,
+    direccion: 'cobro' | 'pago',
+  ): Promise<string> {
+    const r = await ex.execute(sql`
+      select ((select coalesce(sum(a.amount), 0) from third_party_advances a
+          where a.company_id = ${companyId} and ${anticipoEnVigorA(fecha)}
+            and a.direction = ${direccion} and a.received_on <= ${fecha})
+        - (select coalesce(sum(ps.amount), 0) from payment_settlements ps
+          join third_party_advances a on a.id = ps.advance_id
+          where a.company_id = ${companyId} and ${anticipoEnVigorA(fecha)}
+            and a.direction = ${direccion}
+            and ${liquidacionEnVigorA(fecha)} and ps.settled_on <= ${fecha}))::text as v`);
+    return String((r.rows[0] as { v: string | null }).v ?? '0');
   }
 
   /** Conciliación a una fecha (por defecto, hoy), sin guardar. */

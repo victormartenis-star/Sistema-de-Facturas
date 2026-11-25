@@ -125,6 +125,7 @@ function settlementToDto(
     reversedAt: s.reversedAt?.toISOString() ?? null,
     createdAt: s.createdAt.toISOString(),
     version: s.version,
+    origen: s.source as 'tesoreria' | 'anticipo' | 'compensacion',
   };
 }
 

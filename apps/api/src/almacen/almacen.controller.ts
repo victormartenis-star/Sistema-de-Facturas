@@ -9,6 +9,8 @@ import {
   Query,
 } from '@nestjs/common';
 import {
+  lotesQuerySchema,
+  type LotesQuery,
   almacenCreateSchema,
   almacenUpdateSchema,
   articuloCreateSchema,
@@ -39,6 +41,7 @@ import { Idempotente } from '../common/idempotencia/idempotente.decorator';
 import { VersionEsperada } from '../common/version';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { AlmacenService } from './almacen.service';
+import { LotesService } from './lotes.service';
 
 function booleano(v?: string): boolean | undefined {
   return v === 'true' ? true : v === 'false' ? false : undefined;
@@ -53,7 +56,10 @@ function booleano(v?: string): boolean | undefined {
 @Controller('almacen')
 @Roles('admin', 'gerente', 'administracion', 'obra', 'lector')
 export class AlmacenController {
-  constructor(private readonly service: AlmacenService) {}
+  constructor(
+    private readonly service: AlmacenService,
+    private readonly lotesService: LotesService,
+  ) {}
 
   @Get('resumen')
   resumen() {
@@ -202,5 +208,17 @@ export class AlmacenController {
   @Get('obras/:projectId/consumos')
   consumosObra(@Param('projectId', ParseUUIDPipe) projectId: string) {
     return this.service.consumosObra(projectId);
+  }
+
+  /** Lotes y números de serie con su existencia por almacén visible. */
+  @Get('lotes')
+  lotes(@Query(new ZodValidationPipe(lotesQuerySchema)) q: LotesQuery) {
+    return this.lotesService.listar(q);
+  }
+
+  /** Trazabilidad de un lote o serie: entradas, traspasos, consumos y obras. */
+  @Get('lotes/:id')
+  traza(@Param('id', ParseUUIDPipe) id: string) {
+    return this.lotesService.traza(id);
   }
 }

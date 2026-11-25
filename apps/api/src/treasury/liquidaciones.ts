@@ -53,6 +53,24 @@ export interface DatosLiquidacion {
   referencia?: string | null;
   notas?: string | null;
   bankTransactionId?: string | null;
+  /**
+   * Liquidación no monetaria (cartera): aplicación de un anticipo o
+   * compensación, con su contrapartida (4380 / 4070 / 5550) y documento.
+   */
+  noMonetaria?: {
+    origen: 'anticipo' | 'compensacion';
+    contrapartida: string;
+    anticipoId?: string;
+    compensacionId?: string;
+  };
+}
+
+function liquidacionBloqueada(): ConflictException {
+  return new ConflictException({
+    code: 'AR_AP_CLEARING_SETTLEMENT_LOCKED',
+    message:
+      'La liquidación viene de una compensación o de la aplicación de un anticipo: anúlala desde su documento en la cartera',
+  });
 }
 
 const FACTURA_LIQUIDABLE: readonly InvoiceStatus[] = [
@@ -252,6 +270,10 @@ export async function registrarLiquidacion(
         (vencimiento.paymentInstrument as PaymentInstrument),
       reference: datos.referencia ?? null,
       notes: datos.notas ?? null,
+      source: datos.noMonetaria?.origen ?? 'tesoreria',
+      offsetAccount: datos.noMonetaria?.contrapartida ?? null,
+      advanceId: datos.noMonetaria?.anticipoId ?? null,
+      nettingId: datos.noMonetaria?.compensacionId ?? null,
       createdBy: ctx.userId,
     })
     .returning();
@@ -320,6 +342,8 @@ export async function anularLiquidacion(
   settlementId: string,
   motivo: string,
   versionEsperada?: number,
+  /** Solo la cartera, al anular el anticipo o la compensación de origen. */
+  desdeDocumento = false,
 ): Promise<PaymentSettlement> {
   const { tx, companyId } = ctx;
   const [actual] = await tx
@@ -337,6 +361,9 @@ export async function anularLiquidacion(
       code: 'SETTLEMENT_NOT_FOUND',
       message: 'Liquidación no encontrada',
     });
+  }
+  if (actual.source !== 'tesoreria' && !desdeDocumento) {
+    throw liquidacionBloqueada();
   }
   const { factura, vencimiento } = await bloquearVencimiento(
     ctx,

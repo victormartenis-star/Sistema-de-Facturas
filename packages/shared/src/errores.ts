@@ -103,6 +103,34 @@ export const TITULO_POR_CODIGO: Readonly<Record<string, string>> = {
   BANK_GUARANTEE_REFERENCE_DATE_INVALID: 'Fecha de referencia futura',
   BANK_GUARANTEE_RATE_DATE_INVALID: 'Fecha de efecto de la tasa no válida',
   CLOSE_RECONCILIATION_DATE_INVALID: 'Fecha de corte de la conciliación futura',
+  AR_AP_DATE_INVALID: 'Fecha de corte o de la operación futura',
+  AR_AP_ITEM_NOT_OPEN: 'La partida no está abierta',
+  AR_AP_ITEM_NOT_FOUND: 'Partida no encontrada',
+  AR_AP_CONTACT_MISMATCH: 'La partida es de otro tercero',
+  AR_AP_ALLOCATION_INVALID: 'Imputación no válida',
+  AR_AP_ALLOCATION_EXCEEDS_ITEM:
+    'La imputación supera el pendiente de la partida',
+  AR_AP_ALLOCATION_EXCEEDS_AVAILABLE:
+    'La imputación supera el importe disponible',
+  AR_AP_NETTING_UNBALANCED: 'La compensación no cuadra entre cobros y pagos',
+  AR_AP_ADVANCE_NOT_FOUND: 'Anticipo no encontrado',
+  AR_AP_ADVANCE_APPLIED: 'El anticipo ya se ha aplicado',
+  AR_AP_ALREADY_CANCELLED: 'El documento ya está anulado',
+  AR_AP_NETTING_NOT_FOUND: 'Compensación no encontrada',
+  AR_AP_CLEARING_SETTLEMENT_LOCKED:
+    'La liquidación es de una compensación o un anticipo: se anula desde su documento',
+  BATCH_SERIAL_REQUIRED: 'El artículo exige lote o número de serie',
+  BATCH_SERIAL_NOT_TRACKED: 'El artículo no se gestiona por lote ni serie',
+  BATCH_SERIAL_QUANTITY_MISMATCH:
+    'Las cantidades por lote no suman la del movimiento',
+  BATCH_SERIAL_INVALID: 'Lote o número de serie no válido',
+  BATCH_SERIAL_DUPLICATE: 'El número de serie ya está en stock',
+  BATCH_SERIAL_INSUFFICIENT: 'No hay cantidad suficiente del lote o serie',
+  BATCH_SERIAL_NOT_FOUND: 'Lote o número de serie no encontrado',
+  BATCH_SERIAL_RETURN_EXCEEDS:
+    'Se devuelve más de lo consumido del lote o serie',
+  BATCH_SERIAL_TRACKING_LOCKED:
+    'No se cambia el seguimiento de un artículo con existencias',
   RESULT_APPLICATION_RESERVES_INSUFFICIENT:
     'Reservas insuficientes para compensar la pérdida',
   BANK_GUARANTEE_ACCRUAL_ALREADY_POSTED:

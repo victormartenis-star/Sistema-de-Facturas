@@ -27,6 +27,10 @@ import { SOLICITUD_MATERIAL_TRANSITIONS } from './solicitudes-material';
 import type { EstadoWip } from './calculo';
 import { WIP_TRANSITIONS } from './wip';
 import type { EstadoAval } from './calculo';
+import {
+  DOCUMENTO_CARTERA_TRANSITIONS,
+  type EstadoDocumentoCartera,
+} from './cartera';
 import { AVAL_TRANSITIONS } from './avales';
 import type { EstadoCierreEjercicio } from './cierre-ejercicio';
 import { CIERRE_EJERCICIO_TRANSITIONS } from './cierre-ejercicio';
@@ -91,6 +95,9 @@ export interface EstadoPorEntidad {
   result_application: EstadoAplicacionResultado;
   /** Mismo ciclo que la obra en curso: contabilizado → anulado. */
   bank_guarantee_accrual: EstadoWip;
+  /** Anticipos y compensaciones de la cartera: vigente → anulado. */
+  third_party_advance: EstadoDocumentoCartera;
+  third_party_netting: EstadoDocumentoCartera;
 }
 
 export type EntidadConEstado = keyof EstadoPorEntidad;
@@ -157,6 +164,9 @@ function tablaDe(entidad: EntidadConEstado): Record<string, readonly string[]> {
       return APLICACION_RESULTADO_TRANSITIONS;
     case 'bank_guarantee_accrual':
       return WIP_TRANSITIONS;
+    case 'third_party_advance':
+    case 'third_party_netting':
+      return DOCUMENTO_CARTERA_TRANSITIONS;
   }
 }
 

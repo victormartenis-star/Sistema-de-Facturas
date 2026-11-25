@@ -67,4 +67,6 @@ export * from './cierre-ejercicio';
 export * from './estimacion-cierre';
 export * from './aplicacion-resultado';
 export * from './memoria-abreviada';
+export * from './cartera';
+export * from './lotes';
 export * from './consolidacion';

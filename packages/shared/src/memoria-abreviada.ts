@@ -457,6 +457,21 @@ export function cuentasAnualesACsv(ca: {
   filas.push(['efe', 'efectivo', 'inicial', e.efectivoInicial]);
   filas.push(['efe', 'efectivo', 'variacion', e.variacionEfectivo]);
   filas.push(['efe', 'efectivo', 'final', e.efectivoFinal]);
+  if (e.cobrosPagos) {
+    filas.push([
+      'efe',
+      'cobros_pagos',
+      'cobros_clientes',
+      e.cobrosPagos.cobrosClientes,
+    ]);
+    filas.push([
+      'efe',
+      'cobros_pagos',
+      'pagos_proveedores',
+      e.cobrosPagos.pagosProveedores,
+    ]);
+    filas.push(['efe', 'cobros_pagos', 'otros', e.cobrosPagos.otros]);
+  }
   for (const [k, v] of Object.entries(ca.memoria.indicadores)) {
     filas.push(['memoria', 'indicadores', k, v === null ? null : String(v)]);
   }

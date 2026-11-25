@@ -5,6 +5,7 @@ import { CostControlModule } from '../cost-control/cost-control.module';
 import { PurchaseOrdersModule } from '../purchase-orders/purchase-orders.module';
 import { AlmacenController } from './almacen.controller';
 import { AlmacenService } from './almacen.service';
+import { LotesService } from './lotes.service';
 import { SolicitudesMaterialController } from './solicitudes-material.controller';
 import { SolicitudesMaterialService } from './solicitudes-material.service';
 
@@ -18,6 +19,6 @@ import { SolicitudesMaterialService } from './solicitudes-material.service';
   ],
   // Las solicitudes van antes: `almacen/solicitudes` no debe caer en otra ruta.
   controllers: [SolicitudesMaterialController, AlmacenController],
-  providers: [AlmacenService, SolicitudesMaterialService],
+  providers: [AlmacenService, SolicitudesMaterialService, LotesService],
 })
 export class AlmacenModule {}

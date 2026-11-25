@@ -18,6 +18,11 @@
 
 import { z } from 'zod';
 import { ESCALA_CANTIDAD_STOCK, ESCALA_PMP } from './calculo';
+import {
+  lotesIndicadosSchema,
+  SEGUIMIENTOS_STOCK,
+  type SeguimientoStock,
+} from './lotes';
 import { paginacionQuerySchema } from './paginacion';
 
 export const TIPOS_ALMACEN = ['central', 'obra'] as const;
@@ -141,6 +146,8 @@ export const articuloCreateSchema = z.object({
     .string()
     .regex(REGEX_CUENTA_VARIACION, 'Cuenta de variación del subgrupo 61')
     .default(CUENTAS_STOCK.variacion),
+  /** Lote / número de serie (la serie exige la unidad `ud`). */
+  seguimiento: z.enum(SEGUIMIENTOS_STOCK).default('ninguno'),
   notas,
 });
 export type ArticuloCreateInput = z.input<typeof articuloCreateSchema>;
@@ -152,6 +159,8 @@ export const articuloUpdateSchema = z
     cuentaExistencias: z.string().regex(REGEX_CUENTA_EXISTENCIAS).optional(),
     cuentaVariacion: z.string().regex(REGEX_CUENTA_VARIACION).optional(),
     activo: z.boolean().optional(),
+    /** Solo sin existencias en ningún almacén (BATCH_SERIAL_TRACKING_LOCKED). */
+    seguimiento: z.enum(SEGUIMIENTOS_STOCK).optional(),
     notas,
   })
   .refine((v) => Object.keys(v).length > 0, {
@@ -198,6 +207,8 @@ export const entradaStockSchema = z.object({
       articuloId: z.string().uuid(),
       cantidad: cantidadStockSchema,
       costeUnitario: costeUnitarioSchema,
+      /** Obligatorio en artículos con lote o serie. */
+      lotes: lotesIndicadosSchema.optional(),
     }),
   ),
 });
@@ -212,6 +223,8 @@ export const consumoObraSchema = z.object({
     z.object({
       articuloId: z.string().uuid(),
       cantidad: cantidadStockSchema,
+      /** Opcional: sin lotes se asignan por FEFO (o, al devolver, de lo consumido). */
+      lotes: lotesIndicadosSchema.optional(),
     }),
   ),
 });
@@ -229,6 +242,7 @@ export const traspasoStockBaseSchema = z.object({
   cantidad: cantidadStockSchema,
   fecha,
   notas,
+  lotes: lotesIndicadosSchema.optional(),
 });
 
 export const traspasoStockSchema = traspasoStockBaseSchema.refine(
@@ -254,6 +268,8 @@ export const regularizacionStockSchema = z.object({
   /** Coste del sobrante; por defecto el PMP vigente o el último conocido. */
   costeUnitario: costeUnitarioSchema.nullish(),
   motivo: z.string().trim().min(3).max(240),
+  /** Lotes del sobrante (obligatorio) o del faltante (opcional: FEFO). */
+  lotes: lotesIndicadosSchema.optional(),
 });
 export type RegularizacionStockInput = z.input<
   typeof regularizacionStockSchema
@@ -308,6 +324,7 @@ export interface ArticuloDto {
   codigo: string;
   nombre: string;
   unidad: UnidadStock;
+  seguimiento: SeguimientoStock;
   cuentaExistencias: string;
   cuentaVariacion: string;
   activo: boolean;
@@ -366,6 +383,8 @@ export interface MovimientoStockDto {
   notas: string | null;
   usuarioId: string | null;
   creadoEn: string;
+  /** Reparto por lote o serie (artículos con seguimiento). */
+  lotes?: { codigo: string; cantidad: number; almacenId: string }[];
 }
 
 export interface ResumenAlmacenDto {

@@ -56,6 +56,7 @@ import {
   cuentaCreateSchema,
   cuentaUpdateSchema,
   errorCuadre,
+  esCuentaTercero,
   filasSumasSaldos,
   fromCents,
   lineasContraAsiento,
@@ -88,7 +89,12 @@ export interface NuevoAsiento {
   origen: OrigenAsiento;
   origenId: string | null;
   reversesId?: string | null;
-  lineas: LineaPropuesta[];
+  lineas: (LineaPropuesta & { contactId?: string | null })[];
+  /**
+   * Tercero del asiento: se anota en las líneas de cuentas de tercero
+   * (430/400/438/407) que no traigan el suyo, para conciliar por tercero.
+   */
+  contactId?: string | null;
   /**
    * Solo el cierre del ejercicio (y su reversión): no comprueba el bloqueo
    * del ejercicio ni el del mes, porque los toma el propio cierre.
@@ -411,6 +417,9 @@ export class ContabilidadService {
         credit: centsToNumeric(toCents(l.haber)),
         projectId: l.projectId ?? null,
         description: l.concepto ? l.concepto.slice(0, 240) : null,
+        contactId: esCuentaTercero(l.cuenta)
+          ? (l.contactId ?? a.contactId ?? null)
+          : null,
       })),
     );
     await this.audit.registrar(tx, {
@@ -526,6 +535,7 @@ export class ContabilidadService {
         haber: journalEntryLines.credit,
         projectId: journalEntryLines.projectId,
         concepto: journalEntryLines.description,
+        contactId: journalEntryLines.contactId,
       })
       .from(journalEntryLines)
       .innerJoin(
@@ -551,6 +561,8 @@ export class ContabilidadService {
           haber: l.haber,
           projectId: l.projectId,
           concepto: l.concepto ?? '',
+          // El contra-asiento conserva el tercero de cada línea.
+          contactId: l.contactId,
         })),
       ),
     });
@@ -1284,6 +1296,8 @@ export class ContabilidadService {
         id: journalEntries.id,
         origenId: journalEntries.sourceId,
         origen: journalEntries.source,
+        anuladaEn: paymentSettlements.reversedAt,
+        liquidadaEl: paymentSettlements.settledOn,
       })
       .from(journalEntries)
       .leftJoin(
@@ -1306,12 +1320,19 @@ export class ContabilidadService {
         e.origen as OrigenAsiento,
         e.origenId!,
         async (tx) => {
+          // El contra-asiento va a la fecha en que se anuló la liquidación
+          // (nunca antes de la propia liquidación): así el mayor a una fecha
+          // de corte coincide con el auxiliar, que cuenta la liquidación hasta
+          // el día de su anulación. Sin liquidación (vencimiento borrado), hoy.
+          const anulada = e.anuladaEn
+            ? e.anuladaEn.toISOString().slice(0, 10)
+            : todayIso();
           await this.anularEnTx(
             tx,
             companyId,
             e.id,
             'cobro o pago anulado',
-            todayIso(),
+            e.liquidadaEl && anulada < e.liquidadaEl ? e.liquidadaEl : anulada,
           );
           res.anulados++;
         },
@@ -1353,6 +1374,7 @@ export class ContabilidadService {
         totalAmount: invoices.totalAmount,
         retentionAmount: invoices.retentionAmount,
         certSubcontrataId: invoices.certSubcontrataId,
+        contactId: invoices.contactId,
         contactName: contacts.legalName,
       })
       .from(invoices)
@@ -1374,6 +1396,7 @@ export class ContabilidadService {
       concepto: `${f.kind === 'venta' ? 'Factura emitida' : 'Factura recibida'} ${f.invoiceNumber} · ${f.contactName}`,
       origen: f.kind === 'venta' ? 'factura_venta' : 'factura_compra',
       origenId: f.id,
+      contactId: f.contactId,
       lineas: asientoDesdeFactura({
         kind: f.kind,
         invoiceNumber: f.invoiceNumber,
@@ -1398,7 +1421,10 @@ export class ContabilidadService {
         direction: paymentMilestones.direction,
         kind: paymentMilestones.kind,
         invoiceNumber: invoices.invoiceNumber,
+        contactId: invoices.contactId,
         contactName: contacts.legalName,
+        source: paymentSettlements.source,
+        offsetAccount: paymentSettlements.offsetAccount,
       })
       .from(paymentSettlements)
       .innerJoin(
@@ -1421,6 +1447,14 @@ export class ContabilidadService {
       amount: l.amount,
       invoiceNumber: l.invoiceNumber,
       contactName: l.contactName,
+      // Liquidación no monetaria: aplicación de anticipo o compensación.
+      contrapartida: l.offsetAccount ?? undefined,
+      detalle:
+        l.source === 'anticipo'
+          ? 'aplicación de anticipo'
+          : l.source === 'compensacion'
+            ? 'compensación'
+            : undefined,
     });
     if (lineas.length < 2) return;
     await this.contabilizar(tx, {
@@ -1429,6 +1463,7 @@ export class ContabilidadService {
       concepto: lineas[0].concepto,
       origen: l.direction,
       origenId: l.id,
+      contactId: l.contactId,
       lineas,
     });
   }

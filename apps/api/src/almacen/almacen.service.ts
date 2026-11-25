@@ -84,9 +84,12 @@ import {
   type TipoAlmacen,
   type TipoMovimientoStock,
   type TraspasoStockInput,
+  type LoteIndicado,
+  type SeguimientoStock,
   type UnidadStock,
 } from '@erp/shared';
 import { AuditService } from '../audit/audit.service';
+import { LotesService } from './lotes.service';
 import { getRequestContext } from '../common/request-context';
 import { verificarVersion } from '../common/version';
 import { ContabilidadService } from '../contabilidad/contabilidad.service';
@@ -259,6 +262,7 @@ export class AlmacenService {
     private readonly audit: AuditService,
     private readonly contabilidad: ContabilidadService,
     private readonly control: ControlPresupuestarioService,
+    private readonly lotes: LotesService,
   ) {}
 
   /* ─────────────────────────── acceso ─────────────────────────── */
@@ -653,6 +657,7 @@ export class AlmacenService {
       codigo: a.code,
       nombre: a.name,
       unidad: a.unit as UnidadStock,
+      seguimiento: a.tracking as SeguimientoStock,
       cuentaExistencias: a.inventoryAccount,
       cuentaVariacion: a.variationAccount,
       activo: a.isActive,
@@ -672,6 +677,7 @@ export class AlmacenService {
   async crearArticulo(input: ArticuloCreateInput): Promise<ArticuloDto> {
     const companyId = this.dbs.getCompanyId();
     const d = articuloCreateSchema.parse(input);
+    this.lotes.exigirUnidadSerie(d.seguimiento, d.unidad);
     const id = await this.dbs.db.transaction(async (tx) => {
       const [dup] = await tx
         .select({ id: stockArticles.id })
@@ -698,6 +704,7 @@ export class AlmacenService {
           unit: d.unidad,
           inventoryAccount: d.cuentaExistencias,
           variationAccount: d.cuentaVariacion,
+          tracking: d.seguimiento,
           notes: d.notas ?? null,
         })
         .returning();
@@ -729,9 +736,13 @@ export class AlmacenService {
         .for('update');
       if (!a) throw articuloNoEncontrado();
       verificarVersion(a.version, versionEsperada);
+      if (d.seguimiento !== undefined && d.seguimiento !== a.tracking) {
+        await this.lotes.exigirCambioSeguimiento(tx, a, d.seguimiento);
+      }
       const [nuevo] = await tx
         .update(stockArticles)
         .set({
+          ...(d.seguimiento !== undefined && { tracking: d.seguimiento }),
           ...(d.nombre !== undefined && { name: d.nombre }),
           ...(d.cuentaExistencias !== undefined && {
             inventoryAccount: d.cuentaExistencias,
@@ -912,8 +923,10 @@ export class AlmacenService {
       inArray(stockMovements.id, ids),
     );
     const orden = new Map(ids.map((id, i) => [id, i]));
+    const lotes = await this.lotes.porMovimientos(ids);
     return filas
       .map(movimientoDto)
+      .map((m) => (lotes.has(m.id) ? { ...m, lotes: lotes.get(m.id) } : m))
       .sort((a, b) => orden.get(a.id)! - orden.get(b.id)!);
   }
 
@@ -1088,6 +1101,14 @@ export class AlmacenService {
             asientoId,
           }),
         );
+        await this.lotes.entrar(tx, {
+          companyId,
+          movimientoId: id,
+          articulo: art,
+          cantidad,
+          almacenId: w.id,
+          lotes: l.lotes,
+        });
         await this.guardarSaldo(tx, item, saldo);
       }
       // Lo recibido por el pedido del faltante de una solicitud de material
@@ -1206,6 +1227,7 @@ export class AlmacenService {
         lineas: d.lineas.map((l) => ({
           articuloId: l.articuloId,
           cantidad: l.cantidad.toFixed(3),
+          lotes: l.lotes,
         })),
       }),
     );
@@ -1230,7 +1252,12 @@ export class AlmacenService {
       projectId: string;
       fecha: string;
       notas: string | null;
-      lineas: { articuloId: string; cantidad: string }[];
+      lineas: {
+        articuloId: string;
+        cantidad: string;
+        /** Lotes o series; sin ellos, FEFO. */
+        lotes?: LoteIndicado[];
+      }[];
       liberar?: Map<string, string>;
     },
   ): Promise<string[]> {
@@ -1260,7 +1287,14 @@ export class AlmacenService {
             reservadaTras,
           ),
         );
-        valoradas.push({ art, item, cantidad, sal, reservadaTras });
+        valoradas.push({
+          art,
+          item,
+          cantidad,
+          sal,
+          reservadaTras,
+          lotes: l.lotes,
+        });
       }
       // 2) Control presupuestario activo con el coste total imputado (antes
       //    de cualquier escritura en audit_log de esta transacción).
@@ -1274,7 +1308,14 @@ export class AlmacenService {
       });
       // 3) Asientos, kárdex y saldos.
       const creados: string[] = [];
-      for (const { art, item, cantidad, sal, reservadaTras } of valoradas) {
+      for (const {
+        art,
+        item,
+        cantidad,
+        sal,
+        reservadaTras,
+        lotes,
+      } of valoradas) {
         const id = randomUUID();
         const concepto = `Consumo ${art.code} de ${w.code} a obra ${obra.code}`;
         const asientoId = await this.asiento(tx, {
@@ -1304,6 +1345,14 @@ export class AlmacenService {
             asientoId,
           }),
         );
+        await this.lotes.salir(tx, {
+          companyId,
+          movimientoId: id,
+          articulo: art,
+          cantidad,
+          almacenId: w.id,
+          lotes,
+        });
         await this.guardarSaldo(
           tx,
           item,
@@ -1413,6 +1462,15 @@ export class AlmacenService {
             asientoId,
           }),
         );
+        await this.lotes.devolver(tx, {
+          companyId,
+          movimientoId: id,
+          articulo: art,
+          cantidad,
+          almacenId: w.id,
+          projectId: obra.id,
+          lotes: l.lotes,
+        });
         await this.guardarSaldo(tx, item, saldo);
       }
       return creados;
@@ -1474,6 +1532,15 @@ export class AlmacenService {
         ultimoPmp: io.averageCost,
         notas: d.notas,
         asientoId: null,
+      });
+      await this.lotes.traspasar(tx, {
+        companyId,
+        movimientoId: movId,
+        articulo: art,
+        cantidad,
+        origenId: origen.id,
+        destinoId: dest.id,
+        lotes: d.lotes,
       });
       await this.guardarSaldo(tx, io, r.origen);
       await this.guardarSaldo(tx, id_, r.destino);
@@ -1552,6 +1619,14 @@ export class AlmacenService {
         ultimoPmp: item.averageCost,
         motivo: d.motivo,
         asientoId,
+      });
+      await this.lotes.regularizar(tx, {
+        companyId,
+        movimientoId: movId,
+        articulo: art,
+        almacenId: w.id,
+        diferencia: r.diferencia,
+        lotes: d.lotes,
       });
       await this.guardarSaldo(tx, item, r.saldo);
       return movId;

@@ -42,6 +42,7 @@ import { AprobacionesModule } from '../../src/aprobaciones/aprobaciones.module';
 import { HoldingModule } from '../../src/holding/holding.module';
 import { WipModule } from '../../src/wip/wip.module';
 import { AvalesModule } from '../../src/avales/avales.module';
+import { CarteraModule } from '../../src/cartera/cartera.module';
 import { UsersModule } from '../../src/users/users.module';
 import { SubcontratasModule } from '../../src/modules/subcontratas/subcontratas.module';
 
@@ -114,6 +115,7 @@ import { SubcontratasModule } from '../../src/modules/subcontratas/subcontratas.
     HoldingModule,
     WipModule,
     AvalesModule,
+    CarteraModule,
     DashboardModule,
     CopilotoModule,
     UsersModule,

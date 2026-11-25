@@ -3636,6 +3636,7 @@ export const journalEntrySourceEnum = pgEnum('journal_entry_source', [
   'cierre_ejercicio',
   'apertura_ejercicio',
   'aplicacion_resultado',
+  'anticipo',
 ]);
 
 export const journalEntryStatusEnum = pgEnum('journal_entry_status', [
@@ -3725,9 +3726,17 @@ export const journalEntryLines = pgTable(
     /** Imputación analítica por obra (centro de coste). */
     projectId: uuid('project_id').references(() => projects.id),
     description: varchar('description', { length: 240 }),
+    /**
+     * Tercero (cliente o proveedor) de las líneas de 430/400/438/407: el
+     * partner de la línea en SAP. Permite conciliar el mayor por tercero.
+     */
+    contactId: uuid('contact_id').references(() => contacts.id),
   },
   (t) => [
     index('journal_entry_lines_entry_idx').on(t.entryId),
+    index('journal_entry_lines_company_contact_idx')
+      .on(t.companyId, t.contactId)
+      .where(sql`contact_id IS NOT NULL`),
     index('journal_entry_lines_company_account_idx').on(
       t.companyId,
       t.accountId,
@@ -3782,6 +3791,14 @@ export const paymentSettlements = pgTable(
       .default('transferencia'),
     reference: varchar('reference', { length: 80 }),
     notes: text('notes'),
+    /**
+     * Origen: `tesoreria` (caja, contrapartida 5720) o no monetario —
+     * aplicación de un anticipo (4380 / 4070) o compensación (5550)—.
+     */
+    source: varchar('source', { length: 20 }).notNull().default('tesoreria'),
+    offsetAccount: varchar('offset_account', { length: 10 }),
+    advanceId: uuid('advance_id').references(() => thirdPartyAdvances.id),
+    nettingId: uuid('netting_id').references(() => thirdPartyNettings.id),
     reversalReason: varchar('reversal_reason', { length: 240 }),
     reversedAt: timestamp('reversed_at', { withTimezone: true }),
     reversedBy: uuid('reversed_by').references(() => users.id),
@@ -3808,15 +3825,131 @@ export const paymentSettlements = pgTable(
     index('payment_settlements_bank_transaction_idx')
       .on(t.bankTransactionId)
       .where(sql`bank_transaction_id IS NOT NULL`),
+    index('payment_settlements_advance_idx')
+      .on(t.advanceId)
+      .where(sql`advance_id IS NOT NULL`),
+    index('payment_settlements_netting_idx')
+      .on(t.nettingId)
+      .where(sql`netting_id IS NOT NULL`),
     check('payment_settlements_amount_not_zero', sql`${t.amount} <> 0`),
     check(
       'payment_settlements_reversal_coherence',
       sql`(${t.status} = 'anulada') = (${t.reversedAt} IS NOT NULL AND ${t.reversalReason} IS NOT NULL)`,
     ),
+    check(
+      'payment_settlements_origen',
+      sql`${t.source} IN ('tesoreria', 'anticipo', 'compensacion')
+        AND (${t.source} = 'tesoreria') = (${t.offsetAccount} IS NULL)
+        AND (${t.source} <> 'anticipo' OR ${t.advanceId} IS NOT NULL)
+        AND (${t.source} <> 'compensacion' OR ${t.nettingId} IS NOT NULL)`,
+    ),
   ],
 );
 
 export type PaymentSettlement = typeof paymentSettlements.$inferSelect;
+
+/**
+ * Anticipos de clientes (438) y a proveedores (407): cobro o pago a cuenta
+ * antes de la factura, que se aplica después contra sus vencimientos (cada
+ * aplicación es una liquidación no monetaria con contrapartida 4380 / 4070).
+ */
+export const thirdPartyAdvances = pgTable(
+  'third_party_advances',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id),
+    projectId: uuid('project_id').references(() => projects.id),
+    direction: milestoneDirectionEnum('direction').notNull(),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    appliedAmount: numeric('applied_amount', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    receivedOn: date('received_on').notNull(),
+    bankAccountId: uuid('bank_account_id').references(() => bankAccounts.id),
+    reference: varchar('reference', { length: 80 }),
+    notes: text('notes'),
+    status: varchar('status', { length: 10 }).notNull().default('vigente'),
+    journalEntryId: uuid('journal_entry_id').references(
+      () => journalEntries.id,
+    ),
+    reversalEntryId: uuid('reversal_entry_id').references(
+      () => journalEntries.id,
+    ),
+    cancelReason: varchar('cancel_reason', { length: 240 }),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('third_party_advances_company_contact_idx').on(
+      t.companyId,
+      t.contactId,
+      t.direction,
+    ),
+    check(
+      'third_party_advances_valores',
+      sql`${t.amount} > 0 AND ${t.appliedAmount} >= 0 AND ${t.appliedAmount} <= ${t.amount}
+        AND ${t.status} IN ('vigente', 'anulado')
+        AND (${t.status} = 'anulado') = (${t.cancelReason} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export type ThirdPartyAdvance = typeof thirdPartyAdvances.$inferSelect;
+
+/**
+ * Compensaciones cobro ↔ pago de un mismo tercero (cliente y proveedor): un
+ * documento con sus liquidaciones no monetarias (contrapartida 5550) en los
+ * dos lados, por el mismo importe.
+ */
+export const thirdPartyNettings = pgTable(
+  'third_party_nettings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id),
+    nettingDate: date('netting_date').notNull(),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    status: varchar('status', { length: 10 }).notNull().default('vigente'),
+    notes: text('notes'),
+    cancelReason: varchar('cancel_reason', { length: 240 }),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('third_party_nettings_company_contact_idx').on(
+      t.companyId,
+      t.contactId,
+    ),
+    check(
+      'third_party_nettings_valores',
+      sql`${t.amount} > 0 AND ${t.status} IN ('vigente', 'anulado')
+        AND (${t.status} = 'anulado') = (${t.cancelReason} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export type ThirdPartyNetting = typeof thirdPartyNettings.$inferSelect;
 
 /* ───────────────── Activos fijos (inmovilizado material) ─────────────────
  * Ficha del activo (opcionalmente ligada a una máquina de `equipos`) y sus
@@ -4008,6 +4141,8 @@ export const stockArticles = pgTable(
     variationAccount: varchar('variation_account', { length: 10 })
       .notNull()
       .default('6100'),
+    /** Seguimiento: `ninguno`, `lote` o `serie` (ver `@erp/shared/lotes`). */
+    tracking: varchar('tracking', { length: 10 }).notNull().default('ninguno'),
     isActive: boolean('is_active').notNull().default(true),
     notes: text('notes'),
     version: integer('version').notNull().default(1),
@@ -4023,6 +4158,10 @@ export const stockArticles = pgTable(
     check(
       'stock_articles_cuentas_pgc',
       sql`${t.inventoryAccount} ~ '^3[0-9]{3,7}$' AND ${t.variationAccount} ~ '^61[0-9]{2,6}$'`,
+    ),
+    check(
+      'stock_articles_tracking',
+      sql`${t.tracking} IN ('ninguno', 'lote', 'serie')`,
     ),
   ],
 );
@@ -4178,6 +4317,83 @@ export const stockMovements = pgTable(
 );
 
 export type StockMovement = typeof stockMovements.$inferSelect;
+
+/**
+ * Lotes y números de serie de un artículo (SAP batch / serial number). La
+ * existencia por lote y almacén es la suma de `stock_movement_lots`, que se
+ * calcula bajo el bloqueo del saldo del artículo en ese almacén.
+ */
+export const stockLots = pgTable(
+  'stock_lots',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    articleId: uuid('article_id')
+      .notNull()
+      .references(() => stockArticles.id),
+    kind: varchar('kind', { length: 10 }).notNull(),
+    code: varchar('code', { length: 60 }).notNull(),
+    /** Caducidad (lote) o fin de garantía (serie). */
+    expiryDate: date('expiry_date'),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('stock_lots_company_article_code_unique').on(
+      t.companyId,
+      t.articleId,
+      t.code,
+    ),
+    check('stock_lots_kind', sql`${t.kind} IN ('lote', 'serie')`),
+  ],
+);
+
+export type StockLot = typeof stockLots.$inferSelect;
+
+/**
+ * Reparto por lote / serie de cada movimiento de stock, con signo y almacén
+ * (un traspaso deja una fila negativa en el origen y una positiva en el
+ * destino por lote). Trazabilidad: dónde entró, dónde está y qué obra lo
+ * consumió.
+ */
+export const stockMovementLots = pgTable(
+  'stock_movement_lots',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    movementId: uuid('movement_id')
+      .notNull()
+      .references(() => stockMovements.id),
+    lotId: uuid('lot_id')
+      .notNull()
+      .references(() => stockLots.id),
+    warehouseId: uuid('warehouse_id')
+      .notNull()
+      .references(() => warehouses.id),
+    quantity: numeric('quantity', { precision: 14, scale: 3 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('stock_movement_lots_movement_idx').on(t.movementId),
+    index('stock_movement_lots_lot_idx').on(t.lotId),
+    index('stock_movement_lots_company_warehouse_lot_idx').on(
+      t.companyId,
+      t.warehouseId,
+      t.lotId,
+    ),
+    check('stock_movement_lots_cantidad', sql`${t.quantity} <> 0`),
+  ],
+);
+
+export type StockMovementLot = typeof stockMovementLots.$inferSelect;
 
 /* ──────────────────── Control presupuestario por obra ────────────────────
  * Configuración del control de disponibilidad (SAP PS/CO): sin fila, la obra

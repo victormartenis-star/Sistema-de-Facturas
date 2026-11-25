@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   ConflictException,
   HttpException,
@@ -50,6 +50,7 @@ import {
   type ResultadoDevengoAvalesDto,
   type TramoDevengo,
 } from '@erp/shared';
+import { NotificacionesService } from '../alerts/notificaciones.service';
 import { AuditService } from '../audit/audit.service';
 import { cambiarEstado } from '../common/cambiar-estado';
 import { usuarioPersistible } from '../common/request-context';
@@ -138,6 +139,7 @@ export class DevengoAvalesService {
     private readonly dbs: DbService,
     private readonly audit: AuditService,
     private readonly contabilidad: ContabilidadService,
+    private readonly notificaciones: NotificacionesService,
   ) {}
 
   /** Filtro de obras accesibles (los avales sin obra, solo con acceso total). */
@@ -599,6 +601,28 @@ export class DevengoAvalesService {
         newData: lote,
         meta: { ejecuciones: ejecuciones.length, alertas: res.alertas },
       });
+      // Notificación en la campana si hay alertas. La clave es la huella del
+      // conjunto de alertas: si la siguiente ejecución repite las mismas, no
+      // se vuelve a notificar; si cambian, sí.
+      const alertas = res.avisos.filter((a) => a.nivel === 'alerta');
+      if (alertas.length > 0) {
+        const huella = createHash('sha256')
+          .update(
+            alertas
+              .map((a) => `${a.motivo}:${a.desde}:${a.hasta}:${a.casos}`)
+              .join('|'),
+          )
+          .digest('hex')
+          .slice(0, 32);
+        await this.notificaciones.notificar(tx, {
+          companyId: this.dbs.getCompanyId(),
+          tipo: 'aval',
+          titulo: `Devengo de avales: ${alertas.length} aviso(s) que requieren acción`,
+          cuerpo: alertas.map((a) => a.detalle).join('\n'),
+          enlace: '/avales',
+          clave: `devengo-avales:alertas:${huella}`,
+        });
+      }
       return lote.id;
     });
   }

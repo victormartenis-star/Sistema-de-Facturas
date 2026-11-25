@@ -157,6 +157,11 @@ export interface SettlementDto {
   reversedAt: string | null;
   createdAt: string;
   version: number;
+  /**
+   * `tesoreria` (caja) o no monetaria: aplicación de anticipo o
+   * compensación (se anulan desde su documento en la cartera).
+   */
+  origen?: 'tesoreria' | 'anticipo' | 'compensacion';
 }
 
 export interface MilestoneDetailDto extends MilestoneDto {

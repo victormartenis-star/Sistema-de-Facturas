@@ -59,6 +59,7 @@ export const ORIGENES_ASIENTO = [
   'cierre_ejercicio',
   'apertura_ejercicio',
   'aplicacion_resultado',
+  'anticipo',
 ] as const;
 export type OrigenAsiento = (typeof ORIGENES_ASIENTO)[number];
 
@@ -82,6 +83,7 @@ export const ORIGEN_ASIENTO_LABELS: Record<OrigenAsiento, string> = {
   cierre_ejercicio: 'Cierre del ejercicio',
   apertura_ejercicio: 'Apertura del ejercicio',
   aplicacion_resultado: 'Aplicación del resultado',
+  anticipo: 'Anticipo de cliente o a proveedor',
 };
 
 export const ESTADOS_ASIENTO = ['contabilizado', 'anulado'] as const;
@@ -111,7 +113,18 @@ export const CUENTAS_INTERFAZ = {
   comprasMateriales: '6000',
   trabajosSubcontratas: '6070',
   bancos: '5720',
+  anticiposClientes: '4380',
+  anticiposProveedores: '4070',
+  /** Puente de las compensaciones cobro ↔ pago (se netea el mismo día). */
+  partidasPendientes: '5550',
 } as const;
+
+/** Cuentas de terceros que llevan el cliente o proveedor en la línea del asiento. */
+export const PREFIJOS_CUENTAS_TERCERO = ['430', '400', '438', '407'] as const;
+
+export function esCuentaTercero(cuenta: string): boolean {
+  return PREFIJOS_CUENTAS_TERCERO.some((p) => cuenta.startsWith(p));
+}
 
 export interface CuentaPlan {
   codigo: string;
@@ -178,11 +191,14 @@ export function planContableBase(): CuentaPlan[] {
     c('400', 'Proveedores', 'pasivo'),
     c('4000', 'Proveedores', 'pasivo'),
     c('4001', 'Proveedores, retenciones de garantía', 'pasivo'),
+    c('407', 'Anticipos a proveedores', 'activo'),
+    c('4070', 'Anticipos a proveedores', 'activo'),
     c('430', 'Clientes', 'activo'),
     c('4300', 'Clientes', 'activo'),
     c('4301', 'Clientes, retenciones de garantía', 'activo'),
     c('4309', 'Clientes, producción ejecutada pendiente de facturar', 'activo'),
     c('438', 'Anticipos de clientes', 'pasivo'),
+    c('4380', 'Anticipos de clientes', 'pasivo'),
     c('4389', 'Clientes, producción facturada por anticipado', 'pasivo'),
     c('499', 'Provisiones por operaciones comerciales', 'pasivo'),
     c('4994', 'Provisión por contratos onerosos', 'pasivo'),
@@ -204,6 +220,8 @@ export function planContableBase(): CuentaPlan[] {
     c('5700', 'Caja, euros', 'activo'),
     c('572', 'Bancos e instituciones de crédito c/c', 'activo'),
     c('5720', 'Bancos c/c', 'activo'),
+    c('555', 'Partidas pendientes de aplicación', 'activo'),
+    c('5550', 'Partidas pendientes de aplicación', 'activo'),
     c('600', 'Compras de materiales', 'gasto'),
     c('6000', 'Compras de materiales', 'gasto'),
     c('607', 'Trabajos realizados por otras empresas', 'gasto'),
@@ -529,19 +547,31 @@ export interface VencimientoContable {
   amount: string;
   invoiceNumber: string;
   contactName: string;
+  /**
+   * Contrapartida de la liquidación: 5720 (bancos, por defecto); 4380 / 4070
+   * al aplicar un anticipo; 5550 en una compensación cobro ↔ pago.
+   */
+  contrapartida?: string;
+  /** Texto del origen no monetario (p. ej. «aplicación de anticipo»). */
+  detalle?: string;
 }
 
-/** Asiento de un cobro (5720 a 4300|4301) o de un pago (4000|4001 a 5720). */
+/**
+ * Asiento de un cobro (5720 a 4300|4301) o de un pago (4000|4001 a 5720). Con
+ * `contrapartida`, la liquidación no es de caja: aplicación de anticipo (4380
+ * a 4300 / 4000 a 4070) o compensación (5550 a 4300 / 4000 a 5550).
+ */
 export function asientoDesdeVencimiento(
   v: VencimientoContable,
 ): LineaPropuesta[] {
   const C = CUENTAS_INTERFAZ;
   const cents = toCents(v.amount);
   const retencion = v.kind === 'retencion';
-  const concepto = `${v.direction === 'cobro' ? 'Cobro' : 'Pago'} fra. ${v.invoiceNumber} · ${v.contactName}${retencion ? ' (retención)' : ''}`;
+  const contra = v.contrapartida ?? C.bancos;
+  const concepto = `${v.direction === 'cobro' ? 'Cobro' : 'Pago'} fra. ${v.invoiceNumber} · ${v.contactName}${retencion ? ' (retención)' : ''}${v.detalle ? ` · ${v.detalle}` : ''}`;
   const out: LineaPropuesta[] = [];
   if (v.direction === 'cobro') {
-    apunte(out, 'debe', C.bancos, cents, concepto);
+    apunte(out, 'debe', contra, cents, concepto);
     apunte(
       out,
       'haber',
@@ -557,6 +587,30 @@ export function asientoDesdeVencimiento(
       cents,
       concepto,
     );
+    apunte(out, 'haber', contra, cents, concepto);
+  }
+  return out;
+}
+
+/**
+ * Asiento del cobro de un anticipo de cliente (5720 a 4380) o del pago de un
+ * anticipo a proveedor (4070 a 5720). Importe positivo en céntimos exactos.
+ */
+export function asientoAnticipo(a: {
+  direccion: 'cobro' | 'pago';
+  importe: string;
+  contactName: string;
+  referencia?: string | null;
+}): LineaPropuesta[] {
+  const C = CUENTAS_INTERFAZ;
+  const cents = toCents(a.importe);
+  const concepto = `Anticipo ${a.direccion === 'cobro' ? 'de cliente' : 'a proveedor'} · ${a.contactName}${a.referencia ? ` · ${a.referencia}` : ''}`;
+  const out: LineaPropuesta[] = [];
+  if (a.direccion === 'cobro') {
+    apunte(out, 'debe', C.bancos, cents, concepto);
+    apunte(out, 'haber', C.anticiposClientes, cents, concepto);
+  } else {
+    apunte(out, 'debe', C.anticiposProveedores, cents, concepto);
     apunte(out, 'haber', C.bancos, cents, concepto);
   }
   return out;

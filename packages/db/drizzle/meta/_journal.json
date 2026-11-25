@@ -463,6 +463,13 @@
       "when": 1795644345281,
       "tag": "0065_avisos_devengo_retenciones",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1795647078194,
+      "tag": "0066_cartera_lotes_series",
+      "breakpoints": true
     }
   ]
 }
