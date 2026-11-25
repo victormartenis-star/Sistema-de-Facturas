@@ -58,6 +58,7 @@ export const ORIGENES_ASIENTO = [
   'regularizacion_ejercicio',
   'cierre_ejercicio',
   'apertura_ejercicio',
+  'aplicacion_resultado',
 ] as const;
 export type OrigenAsiento = (typeof ORIGENES_ASIENTO)[number];
 
@@ -80,6 +81,7 @@ export const ORIGEN_ASIENTO_LABELS: Record<OrigenAsiento, string> = {
   regularizacion_ejercicio: 'Regularización del ejercicio',
   cierre_ejercicio: 'Cierre del ejercicio',
   apertura_ejercicio: 'Apertura del ejercicio',
+  aplicacion_resultado: 'Aplicación del resultado',
 };
 
 export const ESTADOS_ASIENTO = ['contabilizado', 'anulado'] as const;
@@ -132,12 +134,26 @@ export function planContableBase(): CuentaPlan[] {
   return [
     c('100', 'Capital social', 'patrimonio'),
     c('1000', 'Capital social', 'patrimonio'),
+    c('112', 'Reserva legal', 'patrimonio'),
+    c('1120', 'Reserva legal', 'patrimonio'),
+    c('113', 'Reservas voluntarias', 'patrimonio'),
+    c('1130', 'Reservas voluntarias', 'patrimonio'),
+    c('114', 'Reservas especiales', 'patrimonio'),
+    c('1140', 'Reservas estatutarias', 'patrimonio'),
+    c('120', 'Remanente', 'patrimonio'),
+    c('1200', 'Remanente', 'patrimonio'),
+    c('121', 'Resultados negativos de ejercicios anteriores', 'patrimonio'),
+    c('1210', 'Resultados negativos de ejercicios anteriores', 'patrimonio'),
     c('129', 'Resultado del ejercicio', 'patrimonio'),
     c('1290', 'Resultado del ejercicio', 'patrimonio'),
     c('170', 'Deudas a largo plazo con entidades de crédito', 'pasivo'),
     c('1700', 'Préstamos a largo plazo', 'pasivo'),
     c('520', 'Deudas a corto plazo con entidades de crédito', 'pasivo'),
     c('5200', 'Préstamos a corto plazo de entidades de crédito', 'pasivo'),
+    c('526', 'Dividendo activo a pagar', 'pasivo'),
+    c('5260', 'Dividendo activo a pagar', 'pasivo'),
+    c('410', 'Acreedores por prestaciones de servicios', 'pasivo'),
+    c('4100', 'Acreedores por prestaciones de servicios', 'pasivo'),
     c('212', 'Instalaciones técnicas', 'activo'),
     c('2120', 'Instalaciones técnicas', 'activo'),
     c('213', 'Maquinaria', 'activo'),

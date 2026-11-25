@@ -73,6 +73,7 @@ describe('computeDesviacionPorPartida', () => {
       partesMaquinaria: 0,
       almacen: 0,
       amortizacion: 0,
+      avales: 0,
     });
     expect(a.deviation).toBe(100);
     expect(a.deviationPct).toBe(10);

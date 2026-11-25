@@ -65,4 +65,5 @@ export * from './provision-perdidas';
 export * from './avales';
 export * from './cierre-ejercicio';
 export * from './estimacion-cierre';
+export * from './aplicacion-resultado';
 export * from './consolidacion';

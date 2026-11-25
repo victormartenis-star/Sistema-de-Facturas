@@ -435,6 +435,13 @@
       "when": 1795607624884,
       "tag": "0061_cierre_ejercicio_eac",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1795609245281,
+      "tag": "0062_aplicacion_resultado_devengos",
+      "breakpoints": true
     }
   ]
 }

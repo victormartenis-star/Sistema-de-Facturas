@@ -3635,6 +3635,7 @@ export const journalEntrySourceEnum = pgEnum('journal_entry_source', [
   'regularizacion_ejercicio',
   'cierre_ejercicio',
   'apertura_ejercicio',
+  'aplicacion_resultado',
 ]);
 
 export const journalEntryStatusEnum = pgEnum('journal_entry_status', [
@@ -4924,6 +4925,17 @@ export const bankGuarantees = pgTable(
     })
       .notNull()
       .default('0'),
+    /** Comisión devengada mes a mes (6260 a 4100), vigente. */
+    accruedCommission: numeric('accrued_commission', {
+      precision: 14,
+      scale: 2,
+    })
+      .notNull()
+      .default('0'),
+    /** De lo devengado, lo que ya liquidó el banco (4100 a 5720). */
+    accrualSettled: numeric('accrual_settled', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
     issueDate: date('issue_date').notNull(),
     /** Null: indefinido, hasta su cancelación. */
     expiryDate: date('expiry_date'),
@@ -5176,3 +5188,124 @@ export const projectCostEstimates = pgTable(
 );
 
 export type ProjectCostEstimate = typeof projectCostEstimates.$inferSelect;
+
+/* ─────────────────── Aplicación del resultado del ejercicio (129) ───────────────────
+ * Una aplicación vigente por empresa y ejercicio cerrado: el reparto acordado
+ * (reservas, remanente, compensación, dividendos) y su asiento en el
+ * ejercicio siguiente. Se anula por contra-asiento.
+ */
+
+export const resultApplicationStatusEnum = pgEnum('result_application_status', [
+  'aplicado',
+  'anulado',
+]);
+
+export const resultApplications = pgTable(
+  'result_applications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    /** Ejercicio cuyo resultado se aplica (ya cerrado). */
+    year: smallint('year').notNull(),
+    status: resultApplicationStatusEnum('status').notNull().default('aplicado'),
+    /** Beneficio > 0, pérdida < 0 (sin CHECK de signo). */
+    result: numeric('result', { precision: 14, scale: 2 }).notNull(),
+    applicationDate: date('application_date').notNull(),
+    agreement: varchar('agreement', { length: 240 }).notNull(),
+    /** `[{ cuenta, importe }]` del reparto. */
+    allocation: jsonb('allocation').notNull(),
+    journalEntryId: uuid('journal_entry_id').references(
+      () => journalEntries.id,
+    ),
+    reversalEntryId: uuid('reversal_entry_id').references(
+      () => journalEntries.id,
+    ),
+    cancelReason: varchar('cancel_reason', { length: 240 }),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('result_applications_vigente_unique')
+      .on(t.companyId, t.year)
+      .where(sql`status = 'aplicado'`),
+    index('result_applications_company_year_idx').on(t.companyId, t.year),
+    check(
+      'result_applications_anulacion',
+      sql`(${t.status} = 'anulado') = (${t.cancelReason} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export type ResultApplication = typeof resultApplications.$inferSelect;
+
+/* ─────────────────── Devengo mensual de comisiones de aval ───────────────────
+ * Un devengo vigente por aval y mes: días del mes en que estuvo vivo, saldo
+ * y tasa de cálculo, importe y asiento (6260 obra a 4100). Mismo ciclo que
+ * la obra en curso: contabilizado → anulado (contra-asiento).
+ */
+
+export const bankGuaranteeAccruals = pgTable(
+  'bank_guarantee_accruals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    guaranteeId: uuid('guarantee_id')
+      .notNull()
+      .references(() => bankGuarantees.id),
+    year: smallint('year').notNull(),
+    month: smallint('month').notNull(),
+    periodFrom: date('period_from').notNull(),
+    periodTo: date('period_to').notNull(),
+    days: smallint('days').notNull(),
+    baseAmount: numeric('base_amount', { precision: 14, scale: 2 }).notNull(),
+    ratePct: numeric('rate_pct', { precision: 7, scale: 4 }).notNull(),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    status: wipStatusEnum('status').notNull().default('contabilizado'),
+    journalEntryId: uuid('journal_entry_id').references(
+      () => journalEntries.id,
+    ),
+    reversalEntryId: uuid('reversal_entry_id').references(
+      () => journalEntries.id,
+    ),
+    cancelReason: varchar('cancel_reason', { length: 240 }),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('bank_guarantee_accruals_vigente_unique')
+      .on(t.companyId, t.guaranteeId, t.year, t.month)
+      .where(sql`status = 'contabilizado'`),
+    index('bank_guarantee_accruals_company_period_idx').on(
+      t.companyId,
+      t.year,
+      t.month,
+    ),
+    check(
+      'bank_guarantee_accruals_importes',
+      sql`${t.month} BETWEEN 1 AND 12 AND ${t.days} BETWEEN 0 AND 31
+        AND ${t.amount} >= 0 AND ${t.baseAmount} >= 0 AND ${t.periodTo} >= ${t.periodFrom}`,
+    ),
+    check(
+      'bank_guarantee_accruals_anulacion',
+      sql`(${t.status} = 'anulado') = (${t.cancelReason} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export type BankGuaranteeAccrual = typeof bankGuaranteeAccruals.$inferSelect;

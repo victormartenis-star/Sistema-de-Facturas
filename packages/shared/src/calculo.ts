@@ -2741,3 +2741,522 @@ export function asientosCierreEjercicio(
     totalCierre: fromCents(suma(cierre, 'debe')),
   };
 }
+
+/* ───────────────────── EVM con estimación al cierre manual ─────────────────────
+ * La EAC del EVM es BAC / CPI (o AC + BAC − EV sin coste real). Si la obra
+ * tiene EAC manual vigente (SAP PS / Oracle PPM), esa manda, nunca por debajo
+ * del AC. ETC = EAC − AC; TCPI = (BAC − EV) / (EAC − AC); VAC = BAC − EAC.
+ */
+
+export interface EvmConEstimacion {
+  eac: number;
+  eacCalculada: number;
+  origenEac: OrigenEstimacionCierre;
+  eacAjustadaAlReal: boolean;
+  varianceAtCompletion: number;
+  etc: number;
+  tcpi: number | null;
+}
+
+export function evmConEstimacion(p: {
+  bac: Importe;
+  ac: Importe;
+  ev: Importe;
+  eacCalculada: Importe;
+  eacManual: Importe | null;
+}): EvmConEstimacion {
+  const bac = toCents(p.bac);
+  const ac = toCents(p.ac);
+  const ev = toCents(p.ev);
+  const calculada = toCents(p.eacCalculada);
+  const manual = p.eacManual === null ? null : toCents(p.eacManual);
+  const ajustada = manual !== null && manual < ac;
+  const eac = manual === null ? calculada : ajustada ? ac : manual;
+  const etc = eac - ac;
+  return {
+    eac: fromCents(eac),
+    eacCalculada: fromCents(calculada),
+    origenEac: manual === null ? 'automatica' : 'manual',
+    eacAjustadaAlReal: ajustada,
+    varianceAtCompletion: fromCents(bac - eac),
+    etc: fromCents(etc),
+    tcpi: etc === 0n ? null : Number(mulDivRound(bac - ev, 100n, etc)) / 100,
+  };
+}
+
+/* ───────────────────── aplicación del resultado (cuenta 129) ─────────────────────
+ * Al estilo del acuerdo de la junta (LSC arts. 273-274 y PGC):
+ *  - Beneficio: 1290 al debe contra reserva legal (1120), voluntarias (1130),
+ *    estatutarias (1140), remanente (1200), compensación de resultados
+ *    negativos anteriores (1210) y dividendo a pagar (5260).
+ *    · Reserva legal mínima: 10 % del beneficio mientras no alcance el 20 %
+ *      del capital (art. 274).
+ *    · La compensación no supera las pérdidas pendientes (saldo de 1210).
+ *    · Con pérdidas anteriores sin compensar no se reparten dividendos.
+ *  - Pérdida: 1290 al haber contra resultados negativos (1210) o su
+ *    compensación con reservas voluntarias (1130) o remanente (1200), sin
+ *    superar el saldo de la reserva.
+ * El reparto cuadra al céntimo con el resultado.
+ */
+
+export const CUENTAS_APLICACION_BENEFICIO = {
+  '1120': 'Reserva legal',
+  '1130': 'Reservas voluntarias',
+  '1140': 'Reservas estatutarias',
+  '1200': 'Remanente',
+  '1210': 'Compensación de resultados negativos de ejercicios anteriores',
+  '5260': 'Dividendo activo a pagar',
+} as const;
+
+export const CUENTAS_APLICACION_PERDIDA = {
+  '1210': 'Resultados negativos de ejercicios anteriores',
+  '1130': 'Compensación con reservas voluntarias',
+  '1200': 'Compensación con remanente',
+} as const;
+
+export type CodigoRechazoAplicacion =
+  | 'RESULT_APPLICATION_ZERO'
+  | 'RESULT_APPLICATION_INVALID_ACCOUNT'
+  | 'RESULT_APPLICATION_UNBALANCED'
+  | 'RESULT_APPLICATION_LEGAL_RESERVE'
+  | 'RESULT_APPLICATION_COMPENSATION_EXCEEDS'
+  | 'RESULT_APPLICATION_DIVIDEND_BLOCKED'
+  | 'RESULT_APPLICATION_RESERVES_INSUFFICIENT';
+
+export interface SaldosPatrimonioNeto {
+  /** Capital social (saldo acreedor de 100x). */
+  capital: Importe;
+  /** Saldo acreedor de la reserva legal (1120). */
+  reservaLegal: Importe;
+  /** Saldo acreedor de reservas voluntarias (1130). */
+  reservasVoluntarias: Importe;
+  /** Saldo acreedor del remanente (1200). */
+  remanente: Importe;
+  /** Saldo DEUDOR de resultados negativos de ejercicios anteriores (1210). */
+  negativosAnteriores: Importe;
+}
+
+export type ResultadoAplicacion =
+  | {
+      ok: true;
+      lineas: { cuenta: string; debe: string; haber: string }[];
+      reservaLegalMinima: number;
+      total: number;
+    }
+  | {
+      ok: false;
+      codigo: CodigoRechazoAplicacion;
+      mensaje: string;
+      reservaLegalMinima: number;
+    };
+
+/** Reserva legal mínima (art. 274 LSC): 10 % del beneficio hasta el 20 % del capital. */
+export function reservaLegalMinima(p: {
+  beneficio: Importe;
+  capital: Importe;
+  reservaLegal: Importe;
+}): number {
+  const b = toCents(p.beneficio);
+  if (b <= 0n) return 0;
+  const tope =
+    mulDivRound(toCents(p.capital), 20n, 100n) - toCents(p.reservaLegal);
+  if (tope <= 0n) return 0;
+  const diez = mulDivRound(b, 10n, 100n);
+  return fromCents(diez < tope ? diez : tope);
+}
+
+export function aplicacionResultado(p: {
+  resultado: Importe;
+  reparto: readonly { cuenta: string; importe: Importe }[];
+  saldos: SaldosPatrimonioNeto;
+  cuentaResultado?: string;
+}): ResultadoAplicacion {
+  const r = toCents(p.resultado);
+  const cuentaResultado = p.cuentaResultado ?? '1290';
+  const minima = reservaLegalMinima({
+    beneficio: p.resultado,
+    capital: p.saldos.capital,
+    reservaLegal: p.saldos.reservaLegal,
+  });
+  const fallo = (codigo: CodigoRechazoAplicacion, mensaje: string) =>
+    ({ ok: false, codigo, mensaje, reservaLegalMinima: minima }) as const;
+  if (r === 0n) {
+    return fallo(
+      'RESULT_APPLICATION_ZERO',
+      'El resultado es cero: no hay nada que aplicar',
+    );
+  }
+  const beneficio = r > 0n;
+  const permitidas: Record<string, string> = beneficio
+    ? CUENTAS_APLICACION_BENEFICIO
+    : CUENTAS_APLICACION_PERDIDA;
+  const porCuenta = new Map<string, bigint>();
+  for (const l of p.reparto) {
+    const imp = toCents(l.importe);
+    if (!(l.cuenta in permitidas) || imp <= 0n || porCuenta.has(l.cuenta)) {
+      return fallo(
+        'RESULT_APPLICATION_INVALID_ACCOUNT',
+        `Destino no válido para ${beneficio ? 'un beneficio' : 'una pérdida'}: ${l.cuenta} (importe positivo y sin repetir; permitidas ${Object.keys(permitidas).join(', ')})`,
+      );
+    }
+    porCuenta.set(l.cuenta, imp);
+  }
+  const total = sumCents([...porCuenta.values()]);
+  const abs = beneficio ? r : -r;
+  if (total !== abs) {
+    return fallo(
+      'RESULT_APPLICATION_UNBALANCED',
+      `El reparto (${centsToNumeric(total)}) no coincide con el resultado a aplicar (${centsToNumeric(abs)})`,
+    );
+  }
+  const de = (c: string) => porCuenta.get(c) ?? 0n;
+  if (beneficio) {
+    if (de('1120') < toCents(minima)) {
+      return fallo(
+        'RESULT_APPLICATION_LEGAL_RESERVE',
+        `La reserva legal debe recibir al menos ${minima.toFixed(2)} (10 % del beneficio hasta el 20 % del capital)`,
+      );
+    }
+    const negativos = toCents(p.saldos.negativosAnteriores);
+    if (de('1210') > (negativos > 0n ? negativos : 0n)) {
+      return fallo(
+        'RESULT_APPLICATION_COMPENSATION_EXCEEDS',
+        `La compensación (${centsToNumeric(de('1210'))}) supera las pérdidas pendientes (${centsToNumeric(negativos > 0n ? negativos : 0n)})`,
+      );
+    }
+    if (de('5260') > 0n && negativos - de('1210') > 0n) {
+      return fallo(
+        'RESULT_APPLICATION_DIVIDEND_BLOCKED',
+        'No se reparten dividendos con pérdidas de ejercicios anteriores sin compensar',
+      );
+    }
+  } else {
+    for (const [c, saldo] of [
+      ['1130', p.saldos.reservasVoluntarias],
+      ['1200', p.saldos.remanente],
+    ] as const) {
+      if (de(c) > toCents(saldo)) {
+        return fallo(
+          'RESULT_APPLICATION_RESERVES_INSUFFICIENT',
+          `La compensación con ${c} (${centsToNumeric(de(c))}) supera su saldo (${centsToNumeric(toCents(saldo))})`,
+        );
+      }
+    }
+  }
+  const lineas = [...porCuenta.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([cuenta, imp]) => ({
+      cuenta,
+      debe: beneficio ? '0.00' : centsToNumeric(imp),
+      haber: beneficio ? centsToNumeric(imp) : '0.00',
+    }));
+  lineas.unshift({
+    cuenta: cuentaResultado,
+    debe: beneficio ? centsToNumeric(abs) : '0.00',
+    haber: beneficio ? '0.00' : centsToNumeric(abs),
+  });
+  return {
+    ok: true,
+    lineas,
+    reservaLegalMinima: minima,
+    total: fromCents(abs),
+  };
+}
+
+/* ───────────────────── cuentas anuales: balance y PyG (PGC) ─────────────────────
+ * Balance por masas a partir del tipo de cada cuenta: activo no corriente
+ * (grupo 2) y corriente; patrimonio neto (con el resultado del ejercicio de
+ * la PyG); pasivo no corriente (grupo 1) y corriente. La PyG agrupa los
+ * grupos 6 y 7 en las partidas del modelo abreviado. Cuentas con saldo de
+ * signo contrario se dejan en su masa con ese signo (sin reclasificar).
+ */
+
+export interface SaldoCuentaAnual {
+  cuenta: string;
+  nombre: string;
+  tipo: TipoCuenta;
+  debe: Importe;
+  haber: Importe;
+}
+
+export interface LineaCuentaAnual {
+  cuenta: string;
+  nombre: string;
+  importe: number;
+}
+
+export interface MasaCuentaAnual {
+  total: number;
+  cuentas: LineaCuentaAnual[];
+}
+
+export const PARTIDAS_PYG = [
+  ['cifraNegocios', 'Importe neto de la cifra de negocios'],
+  ['aprovisionamientos', 'Aprovisionamientos'],
+  ['otrosIngresosExplotacion', 'Otros ingresos de explotación'],
+  ['gastosPersonal', 'Gastos de personal'],
+  ['otrosGastosExplotacion', 'Otros gastos de explotación'],
+  ['amortizacion', 'Amortización del inmovilizado'],
+  ['excesoProvisiones', 'Excesos de provisiones'],
+  [
+    'resultadoInmovilizado',
+    'Deterioro y resultado por enajenaciones del inmovilizado',
+  ],
+  ['otrosResultados', 'Otros resultados (excepcionales)'],
+  ['ingresosFinancieros', 'Ingresos financieros'],
+  ['gastosFinancieros', 'Gastos financieros'],
+  ['impuesto', 'Impuesto sobre beneficios'],
+] as const;
+export type PartidaPyg = (typeof PARTIDAS_PYG)[number][0];
+
+const FINANCIERAS: readonly PartidaPyg[] = [
+  'ingresosFinancieros',
+  'gastosFinancieros',
+];
+
+/** Partida de la PyG de una cuenta de los grupos 6 o 7. */
+export function partidaPyg(codigo: string): PartidaPyg {
+  const g2 = codigo.slice(0, 2);
+  const g3 = codigo.slice(0, 3);
+  if (g3 === '630') return 'impuesto';
+  if (g3 === '678' || g3 === '778') return 'otrosResultados';
+  switch (g2) {
+    case '70':
+      return 'cifraNegocios';
+    case '60':
+    case '61':
+    case '71':
+      return 'aprovisionamientos';
+    case '64':
+      return 'gastosPersonal';
+    case '68':
+      return 'amortizacion';
+    case '79':
+      return 'excesoProvisiones';
+    case '67':
+    case '77':
+      return 'resultadoInmovilizado';
+    case '66':
+      return 'gastosFinancieros';
+    case '76':
+      return 'ingresosFinancieros';
+    default:
+      return codigo.startsWith('7')
+        ? 'otrosIngresosExplotacion'
+        : 'otrosGastosExplotacion';
+  }
+}
+
+export interface CuentasAnualesCalculo {
+  balance: {
+    activoNoCorriente: MasaCuentaAnual;
+    activoCorriente: MasaCuentaAnual;
+    totalActivo: number;
+    patrimonioNeto: MasaCuentaAnual;
+    /** Incluido en el patrimonio neto. */
+    resultadoEjercicio: number;
+    pasivoNoCorriente: MasaCuentaAnual;
+    pasivoCorriente: MasaCuentaAnual;
+    totalPatrimonioNetoYPasivo: number;
+    cuadra: boolean;
+  };
+  pyg: {
+    partidas: { clave: PartidaPyg; etiqueta: string; importe: number }[];
+    resultadoExplotacion: number;
+    resultadoFinanciero: number;
+    resultadoAntesImpuestos: number;
+    resultado: number;
+  };
+}
+
+export function cuentasAnuales(
+  saldos: readonly SaldoCuentaAnual[],
+): CuentasAnualesCalculo {
+  const masa = () => ({ total: 0n, cuentas: [] as LineaCuentaAnual[] });
+  const anc = masa();
+  const ac = masa();
+  const pn = masa();
+  const pnc = masa();
+  const pc = masa();
+  const pyg = new Map<PartidaPyg, bigint>(PARTIDAS_PYG.map(([k]) => [k, 0n]));
+  const ordenados = [...saldos].sort((a, b) =>
+    a.cuenta.localeCompare(b.cuenta),
+  );
+  for (const s of ordenados) {
+    const deudor = toCents(s.debe) - toCents(s.haber);
+    if (deudor === 0n) continue;
+    if (esCuentaDeResultados(s.cuenta)) {
+      const k = partidaPyg(s.cuenta);
+      pyg.set(k, pyg.get(k)! - deudor);
+      continue;
+    }
+    const activo = s.tipo === 'activo';
+    const importe = activo ? deudor : -deudor;
+    const destino = activo
+      ? s.cuenta.startsWith('2')
+        ? anc
+        : ac
+      : s.tipo === 'patrimonio'
+        ? pn
+        : s.cuenta.startsWith('1')
+          ? pnc
+          : pc;
+    destino.total += importe;
+    destino.cuentas.push({
+      cuenta: s.cuenta,
+      nombre: s.nombre,
+      importe: fromCents(importe),
+    });
+  }
+  const total = (k: readonly PartidaPyg[]) =>
+    sumCents(k.map((x) => pyg.get(x)!));
+  const explotacion = total(
+    PARTIDAS_PYG.map(([k]) => k).filter(
+      (k) => !FINANCIERAS.includes(k) && k !== 'impuesto',
+    ),
+  );
+  const financiero = total(FINANCIERAS);
+  const antes = explotacion + financiero;
+  const resultado = antes + pyg.get('impuesto')!;
+  pn.total += resultado;
+  const fmt = (m: { total: bigint; cuentas: LineaCuentaAnual[] }) => ({
+    total: fromCents(m.total),
+    cuentas: m.cuentas,
+  });
+  const totalActivo = anc.total + ac.total;
+  const totalPnP = pn.total + pnc.total + pc.total;
+  return {
+    balance: {
+      activoNoCorriente: fmt(anc),
+      activoCorriente: fmt(ac),
+      totalActivo: fromCents(totalActivo),
+      patrimonioNeto: fmt(pn),
+      resultadoEjercicio: fromCents(resultado),
+      pasivoNoCorriente: fmt(pnc),
+      pasivoCorriente: fmt(pc),
+      totalPatrimonioNetoYPasivo: fromCents(totalPnP),
+      cuadra: totalActivo === totalPnP,
+    },
+    pyg: {
+      partidas: PARTIDAS_PYG.map(([clave, etiqueta]) => ({
+        clave,
+        etiqueta,
+        importe: fromCents(pyg.get(clave)!),
+      })),
+      resultadoExplotacion: fromCents(explotacion),
+      resultadoFinanciero: fromCents(financiero),
+      resultadoAntesImpuestos: fromCents(antes),
+      resultado: fromCents(resultado),
+    },
+  };
+}
+
+/* ───────────────────── devengo periódico de comisiones de aval ─────────────────────
+ * Devengo (SAP Accruals / Oracle Subledger) mes a mes de la comisión de
+ * riesgo de un aval emitido: saldo vivo × tasa anual × días del mes en que el
+ * aval estuvo vigente / 365, half-up al céntimo. Se contabiliza 6260 (obra)
+ * a 4100 (acreedor: el banco); cuando el banco la liquida, la comisión salda
+ * primero lo devengado pendiente (4100) y solo el exceso va a gasto, así el
+ * coste no se duplica.
+ */
+
+/** Días del mes `periodo` (AAAA-MM) dentro de [emisión, vencimiento]; null si ninguno. */
+export function tramoDevengoMes(p: {
+  periodo: string;
+  emision: string;
+  vencimiento: string | null;
+}): { desde: string; hasta: string; dias: number } | null {
+  const [y, m] = p.periodo.split('-').map(Number);
+  const inicio = `${p.periodo}-01`;
+  const fin = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+  const desde = p.emision > inicio ? p.emision : inicio;
+  const hasta = p.vencimiento && p.vencimiento < fin ? p.vencimiento : fin;
+  if (desde > hasta) return null;
+  const dias =
+    Math.round(
+      (Date.parse(`${hasta}T00:00:00Z`) - Date.parse(`${desde}T00:00:00Z`)) /
+        86_400_000,
+    ) + 1;
+  return { desde, hasta, dias };
+}
+
+/** Comisión devengada por `dias` días: saldo × tasa (%) × días / base (365). */
+export function devengoComisionAval(p: {
+  saldoVivo: Importe;
+  tasaAnualPct: Importe;
+  dias: number;
+  baseDias?: number;
+}): number {
+  const base = p.baseDias ?? 365;
+  if (!Number.isInteger(p.dias) || p.dias < 0 || p.dias > 366) {
+    throw new RangeError(`Días no válidos: ${p.dias}`);
+  }
+  const saldo = toCents(p.saldoVivo);
+  const tasa = toScaled(p.tasaAnualPct, 4);
+  return fromCents(
+    mulDivRound(saldo * tasa, BigInt(p.dias), 10_000n * 100n * BigInt(base)),
+  );
+}
+
+/**
+ * Reparto de una liquidación de comisión: primero salda lo devengado
+ * pendiente (4100); el exceso es gasto nuevo (6260). Nunca negativo.
+ */
+export function liquidacionComisionContraDevengo(p: {
+  importe: Importe;
+  devengado: Importe;
+  liquidadoContraDevengo: Importe;
+}): { contraDevengo: number; aGasto: number } {
+  const imp = toCents(p.importe);
+  const pendienteBruto =
+    toCents(p.devengado) - toCents(p.liquidadoContraDevengo);
+  const pendiente = pendienteBruto > 0n ? pendienteBruto : 0n;
+  const contra = imp < pendiente ? imp : pendiente;
+  return { contraDevengo: fromCents(contra), aGasto: fromCents(imp - contra) };
+}
+
+/** Asiento de una liquidación de comisión con parte devengada: 4100 / 6260 (obra) a 5720. */
+export function asientoLiquidacionComision(p: {
+  contraDevengo: Importe;
+  aGasto: Importe;
+}): LineaAsientoWip[] {
+  const contra = toCents(p.contraDevengo);
+  const gasto = toCents(p.aGasto);
+  const total = contra + gasto;
+  if (total <= 0n) return [];
+  const lineas: LineaAsientoWip[] = [];
+  if (contra > 0n) {
+    lineas.push({
+      cuenta: '4100',
+      debe: centsToNumeric(contra),
+      haber: '0.00',
+      imputaObra: false,
+    });
+  }
+  if (gasto > 0n) {
+    lineas.push({
+      cuenta: '6260',
+      debe: centsToNumeric(gasto),
+      haber: '0.00',
+      imputaObra: true,
+    });
+  }
+  lineas.push({
+    cuenta: '5720',
+    debe: '0.00',
+    haber: centsToNumeric(total),
+    imputaObra: false,
+  });
+  return lineas;
+}
+
+/** Asiento del devengo mensual: 6260 (obra) a 4100. */
+export function asientoDevengoComision(importe: Importe): LineaAsientoWip[] {
+  const c = toCents(importe);
+  if (c <= 0n) return [];
+  const imp = centsToNumeric(c);
+  return [
+    { cuenta: '6260', debe: imp, haber: '0.00', imputaObra: true },
+    { cuenta: '4100', debe: '0.00', haber: imp, imputaObra: false },
+  ];
+}

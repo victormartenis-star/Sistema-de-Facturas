@@ -69,6 +69,8 @@ export const AUDIT_ENTITY_TYPES = [
   'bank_guarantee',
   'bank_guarantee_line',
   'fiscal_year_closing',
+  'result_application',
+  'bank_guarantee_accrual',
   'project_cost_estimate',
   'iot_lectura_telemetria',
   'mantenimiento_equipo',

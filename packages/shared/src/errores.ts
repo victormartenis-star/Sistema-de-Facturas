@@ -81,6 +81,29 @@ export const TITULO_POR_CODIGO: Readonly<Record<string, string>> = {
   FISCAL_YEAR_NOT_CLOSED: 'El ejercicio no está cerrado',
   FISCAL_YEAR_NOT_LATEST: 'Solo se revierte el último ejercicio cerrado',
   FISCAL_YEAR_UNBALANCED: 'El libro del ejercicio no cuadra',
+  FISCAL_YEAR_RESULT_APPLIED:
+    'El resultado del ejercicio está aplicado: anula antes la aplicación',
+  RESULT_ALREADY_APPLIED: 'El resultado del ejercicio ya está aplicado',
+  RESULT_APPLICATION_NOT_FOUND: 'Aplicación del resultado no encontrada',
+  RESULT_APPLICATION_DATE_INVALID:
+    'Fecha de aplicación del resultado no válida',
+  RESULT_APPLICATION_ZERO: 'El resultado del ejercicio es cero',
+  RESULT_APPLICATION_INVALID_ACCOUNT: 'Destino del resultado no válido',
+  RESULT_APPLICATION_UNBALANCED: 'El reparto no cuadra con el resultado',
+  RESULT_APPLICATION_LEGAL_RESERVE: 'Reserva legal insuficiente',
+  RESULT_APPLICATION_COMPENSATION_EXCEEDS:
+    'La compensación supera las pérdidas pendientes',
+  RESULT_APPLICATION_DIVIDEND_BLOCKED:
+    'Dividendos con pérdidas anteriores sin compensar',
+  RESULT_APPLICATION_RESERVES_INSUFFICIENT:
+    'Reservas insuficientes para compensar la pérdida',
+  BANK_GUARANTEE_ACCRUAL_ALREADY_POSTED:
+    'Devengo del aval ya contabilizado en el periodo',
+  BANK_GUARANTEE_ACCRUAL_NOT_FOUND: 'Devengo del aval no encontrado',
+  BANK_GUARANTEE_ACCRUAL_SETTLED:
+    'El devengo ya está liquidado por el banco y no se puede anular',
+  BANK_GUARANTEE_ACCRUAL_NOT_APPLICABLE:
+    'El aval no devenga comisión en el periodo',
   EAC_BELOW_ACTUAL_COST: 'Estimación al cierre inferior al coste real',
   EAC_DATE_OUT_OF_ORDER: 'Fecha anterior a la estimación vigente',
   WAREHOUSE_INACTIVE: 'Almacén inactivo',

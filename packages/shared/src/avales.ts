@@ -269,6 +269,53 @@ export type AvalVencerInput = z.input<typeof avalVencerSchema>;
 export const avalAnularSchema = z.object({ motivo });
 export type AvalAnularInput = z.input<typeof avalAnularSchema>;
 
+/* ─────────────────── devengo periódico de comisiones ─────────────────── */
+
+const periodo = z
+  .string()
+  .regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Formato esperado: AAAA-MM');
+
+/** Devengo de un mes para todos los avales emitidos vivos con tasa (o uno). */
+export const devengoAvalesSchema = z.object({
+  periodo,
+  avalId: z.string().uuid().optional(),
+});
+export type DevengoAvalesInput = z.input<typeof devengoAvalesSchema>;
+
+export const devengoAvalesQuerySchema = z.object({
+  periodo: periodo.optional(),
+  avalId: z.string().uuid().optional(),
+});
+export type DevengoAvalesQuery = z.infer<typeof devengoAvalesQuerySchema>;
+
+export const devengoAnularSchema = z.object({ motivo });
+export type DevengoAnularInput = z.input<typeof devengoAnularSchema>;
+
+export interface DevengoAvalDto {
+  id: string;
+  avalId: string;
+  referencia: string;
+  periodo: string;
+  desde: string;
+  hasta: string;
+  dias: number;
+  saldoBase: number;
+  tasaAnualPct: number;
+  importe: number;
+  estado: 'contabilizado' | 'anulado';
+  asientoId: string | null;
+  contraAsientoId: string | null;
+  motivoAnulacion: string | null;
+  version: number;
+}
+
+export interface ResultadoDevengoAvalesDto {
+  periodo: string;
+  contabilizados: number;
+  importe: number;
+  omitidos: { avalId: string; referencia: string; motivo: string }[];
+}
+
 export const avalesQuerySchema = z.object({
   projectId: z.string().uuid().optional(),
   contactId: z.string().uuid().optional(),
@@ -324,6 +371,9 @@ export interface AvalDto extends SaldoAval {
   tasaComisionAnualPct: number | null;
   periodicidadComisionMeses: number | null;
   comisiones: number;
+  /** Comisión devengada (6260 a 4100) y la parte ya liquidada por el banco. */
+  comisionDevengada: number;
+  devengoLiquidado: number;
   estado: EstadoAval;
   motivo: string | null;
   notas: string | null;

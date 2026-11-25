@@ -311,6 +311,7 @@ describe('agruparDesviacionPorCapitulo', () => {
       partesMaquinaria: 0,
       almacen: 0,
       amortizacion: 0,
+      avales: 0,
     },
     deviation: actual - budget,
     deviationPct: budget > 0 ? ((actual - budget) / budget) * 100 : null,

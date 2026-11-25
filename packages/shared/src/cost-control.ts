@@ -3,6 +3,7 @@ import {
   computeVatBreakdown,
   round2,
   type InvoiceLineAmount,
+  type OrigenEstimacionCierre,
   type VatBreakdown,
   type VatGroup,
 } from './calculo';
@@ -65,6 +66,8 @@ export interface CostControlAcBreakdownDto {
   almacen: number;
   /** Amortización (681x) imputada a la obra en el mayor. */
   amortizacion: number;
+  /** Comisiones y ejecuciones de avales (grupo 6, origen `aval`) imputadas a la obra. */
+  avales: number;
 }
 
 /** Respuesta completa de `GET /projects/:id/cost-control`. */
@@ -82,6 +85,16 @@ export interface CostControlDto extends CostControlResult {
    * repartir.
    */
   curvaPlanificadaPartidasSinFechas: number;
+  /** EAC por fórmula EVM (BAC / CPI), antes de aplicar la EAC manual. */
+  eacCalculada: number;
+  /** `manual`: `eac` es la estimación al cierre vigente de la obra. */
+  origenEac: OrigenEstimacionCierre;
+  /** La EAC manual quedó por debajo del AC y se eleva a él. */
+  eacAjustadaAlReal: boolean;
+  /** Estimate to Complete = EAC − AC (lo que falta por gastar). */
+  etc: number;
+  /** To-Complete Performance Index = (BAC − EV) / (EAC − AC); null si EAC = AC. */
+  tcpi: number | null;
 }
 
 export function computeCostControl(
@@ -289,6 +302,8 @@ export interface CosteRealDesglose {
   almacen?: number | string;
   /** Amortización imputada (opcional: 0 si no se informa). */
   amortizacion?: number | string;
+  /** Coste de avales imputado (opcional: 0 si no se informa). */
+  avales?: number | string;
 }
 
 /** Coste real total de un desglose, en céntimos. */
@@ -299,6 +314,7 @@ function costeTotal(c: CosteRealDesglose): bigint {
     toCents(c.partesMaquinaria),
     toCents(c.almacen ?? 0),
     toCents(c.amortizacion ?? 0),
+    toCents(c.avales ?? 0),
   ]);
 }
 
@@ -309,6 +325,7 @@ function costesToDto(c: CosteRealDesglose): CostControlAcBreakdownDto {
     partesMaquinaria: fromCents(toCents(c.partesMaquinaria)),
     almacen: fromCents(toCents(c.almacen ?? 0)),
     amortizacion: fromCents(toCents(c.amortizacion ?? 0)),
+    avales: fromCents(toCents(c.avales ?? 0)),
   };
 }
 
@@ -413,6 +430,7 @@ export interface DesviacionPartidaInput {
   partesMaquinaria: number | string;
   almacen?: number | string;
   amortizacion?: number | string;
+  avales?: number | string;
 }
 
 export interface DesviacionPartidaDto {
@@ -444,7 +462,8 @@ export function computeDesviacionPorPartida(
     const pm = toCents(r.partesMaquinaria);
     const al = toCents(r.almacen ?? 0);
     const am = toCents(r.amortizacion ?? 0);
-    const actual = fc + pp + pm + al + am;
+    const av = toCents(r.avales ?? 0);
+    const actual = fc + pp + pm + al + am + av;
     const deviation = actual - budget;
     return {
       phaseId: r.phaseId,
@@ -458,6 +477,7 @@ export function computeDesviacionPorPartida(
         partesMaquinaria: fromCents(pm),
         almacen: fromCents(al),
         amortizacion: fromCents(am),
+        avales: fromCents(av),
       },
       deviation: fromCents(deviation),
       deviationPct: budget > 0n ? pctOf(deviation, budget) : null,
@@ -481,6 +501,7 @@ export function computeDesviacionPorPartida(
     partesMaquinaria: suma((r) => r.partesMaquinaria),
     almacen: suma((r) => r.almacen ?? 0),
     amortizacion: suma((r) => r.amortizacion ?? 0),
+    avales: suma((r) => r.avales ?? 0),
   });
   if (agregada.budget === 0 && agregada.actual === 0) return conPartida;
   return [...conPartida, agregada];
@@ -838,4 +859,19 @@ export interface ObraEconomicsDto {
   iva: IvaObraDto;
   /** Margen previsto frente al actual (contrato − presupuesto). */
   previsto: MargenPrevistoObraDto;
+  /**
+   * Estimación al cierre del cuadro de márgenes (misma fuente de verdad):
+   * la EAC manual vigente o la automática, y el margen proyectado.
+   */
+  estimacionCierre: EstimacionCierreEconomiaDto;
+}
+
+export interface EstimacionCierreEconomiaDto {
+  automatica: number;
+  efectiva: number;
+  origen: OrigenEstimacionCierre;
+  ajustadaAlReal: boolean;
+  /** Contrato − EAC efectiva; null sin contrato. */
+  margenProyectado: number | null;
+  margenProyectadoPct: number | null;
 }

@@ -30,6 +30,8 @@ import type { EstadoAval } from './calculo';
 import { AVAL_TRANSITIONS } from './avales';
 import type { EstadoCierreEjercicio } from './cierre-ejercicio';
 import { CIERRE_EJERCICIO_TRANSITIONS } from './cierre-ejercicio';
+import type { EstadoAplicacionResultado } from './aplicacion-resultado';
+import { APLICACION_RESULTADO_TRANSITIONS } from './aplicacion-resultado';
 import { AJUSTE_CONSOLIDACION_TRANSITIONS } from './consolidacion';
 import type { EstadoActivo } from './activos';
 import { ACTIVO_TRANSITIONS } from './activos';
@@ -86,6 +88,9 @@ export interface EstadoPorEntidad {
   loss_provision: EstadoWip;
   bank_guarantee: EstadoAval;
   fiscal_year_closing: EstadoCierreEjercicio;
+  result_application: EstadoAplicacionResultado;
+  /** Mismo ciclo que la obra en curso: contabilizado → anulado. */
+  bank_guarantee_accrual: EstadoWip;
 }
 
 export type EntidadConEstado = keyof EstadoPorEntidad;
@@ -148,6 +153,10 @@ function tablaDe(entidad: EntidadConEstado): Record<string, readonly string[]> {
       return AVAL_TRANSITIONS;
     case 'fiscal_year_closing':
       return CIERRE_EJERCICIO_TRANSITIONS;
+    case 'result_application':
+      return APLICACION_RESULTADO_TRANSITIONS;
+    case 'bank_guarantee_accrual':
+      return WIP_TRANSITIONS;
   }
 }
 
