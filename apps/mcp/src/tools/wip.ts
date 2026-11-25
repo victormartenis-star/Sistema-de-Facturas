@@ -3,8 +3,13 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   ESTADOS_WIP,
+  provisionPerdidasCierreSchema,
+  provisionPerdidasContabilizarSchema,
   wipContabilizarSchema,
   wipCierreSchema,
+  type PropuestaProvisionPerdidasDto,
+  type ProvisionPerdidasDto,
+  type ResultadoCierreProvisionPerdidasDto,
   type PropuestaWipDto,
   type ResultadoCierreWipDto,
   type WipDto,
@@ -85,6 +90,86 @@ export function registrarWip(server: McpServer) {
               '/wip/cierre',
               post(wipCierreSchema.parse({ periodo: p })),
             ),
+      ),
+  );
+
+  /* ─────────── provisión por pérdidas previstas (contratos onerosos) ─────────── */
+
+  server.registerTool(
+    'calcular_provision_perdidas',
+    {
+      title: 'Cálculo de la provisión por pérdidas previstas (borrador)',
+      description:
+        'Por obra y periodo (AAAA-MM), sin contabilizar (NRV 14, contratos ' +
+        'onerosos): contrato, coste estimado al cierre, pérdida total ' +
+        '(coste estimado − contrato), pérdida ya reconocida por el grado de ' +
+        'avance (coste real − producción), provisión necesaria, la anterior y ' +
+        'el ajuste (dotación > 0, exceso < 0). Sin projectId, solo obras con ' +
+        'pérdida prevista o provisión vigente.',
+      inputSchema: { periodo, projectId: z.string().uuid().optional() },
+      annotations: { readOnlyHint: true },
+    },
+    async (q) =>
+      ejecutar(() =>
+        pedir<PropuestaProvisionPerdidasDto[]>(
+          `/provision-perdidas/propuesta${query(q)}`,
+        ),
+      ),
+  );
+
+  server.registerTool(
+    'cierres_provision_perdidas',
+    {
+      title: 'Cierres de la provisión por pérdidas previstas',
+      description:
+        'Cierres de provisión contabilizados o anulados, con su asiento y ' +
+        'contra-asiento. Filtra por periodo, obra y estado.',
+      inputSchema: {
+        periodo: periodo.optional(),
+        projectId: z.string().uuid().optional(),
+        estado: z.enum(ESTADOS_WIP).optional(),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (q) =>
+      ejecutar(() =>
+        pedir<ProvisionPerdidasDto[]>(`/provision-perdidas${query(q)}`),
+      ),
+  );
+
+  server.registerTool(
+    'contabilizar_provision_perdidas',
+    {
+      title: 'Contabilizar la provisión por pérdidas previstas',
+      description:
+        'Con projectId, cierra esa obra; sin él, el periodo para todas las ' +
+        'obras con pérdida prevista o provisión vigente (informa de las ' +
+        'omitidas). Contabiliza solo el ajuste frente a la provisión vigente: ' +
+        'dotación 6954 (obra) a 4994, o exceso 4994 a 7954 (obra), fechado el ' +
+        'último día del mes. Errores: LOSS_PROVISION_ALREADY_POSTED, ' +
+        'LOSS_PROVISION_PERIOD_OUT_OF_ORDER, FISCAL_PERIOD_CLOSED.',
+      inputSchema: { periodo, projectId: z.string().uuid().optional() },
+      annotations: { readOnlyHint: false, idempotentHint: false },
+    },
+    async ({ periodo: p, projectId }) =>
+      ejecutar(
+        (): Promise<
+          ProvisionPerdidasDto | ResultadoCierreProvisionPerdidasDto
+        > =>
+          projectId
+            ? pedir<ProvisionPerdidasDto>(
+                '/provision-perdidas',
+                post(
+                  provisionPerdidasContabilizarSchema.parse({
+                    periodo: p,
+                    projectId,
+                  }),
+                ),
+              )
+            : pedir<ResultadoCierreProvisionPerdidasDto>(
+                '/provision-perdidas/cierre',
+                post(provisionPerdidasCierreSchema.parse({ periodo: p })),
+              ),
       ),
   );
 }

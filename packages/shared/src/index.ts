@@ -61,4 +61,5 @@ export * from './control-presupuestario';
 export * from './aprobaciones';
 export * from './solicitudes-material';
 export * from './wip';
+export * from './provision-perdidas';
 export * from './consolidacion';

@@ -3629,6 +3629,7 @@ export const journalEntrySourceEnum = pgEnum('journal_entry_source', [
   'devolucion_obra',
   'regularizacion_inventario',
   'obra_en_curso',
+  'provision_perdidas',
 ]);
 
 export const journalEntryStatusEnum = pgEnum('journal_entry_status', [
@@ -4737,3 +4738,97 @@ export const workInProgress = pgTable(
 );
 
 export type WorkInProgress = typeof workInProgress.$inferSelect;
+
+/* ─────────────── Provisión por pérdidas previstas (contratos onerosos) ───────────────
+ * Un cierre por obra y mes: pérdida total prevista, la ya reconocida por el
+ * grado de avance, la provisión necesaria y el ajuste contabilizado frente a
+ * la anterior. Reglas puras en `calculo.ts`; contrato en
+ * `@erp/shared/provision-perdidas`. Mismo ciclo de estados que la obra en curso.
+ */
+
+export const lossProvisions = pgTable(
+  'loss_provisions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    year: smallint('year').notNull(),
+    month: smallint('month').notNull(),
+    closingDate: date('closing_date').notNull(),
+    /** Ingreso total previsto (null: obra sin contrato, sin provisión). */
+    contractAmount: numeric('contract_amount', { precision: 14, scale: 2 }),
+    /** Coste estimado al cierre (cuadro de márgenes). */
+    estimatedCost: numeric('estimated_cost', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    /** Producción ejecutada a origen (como la obra en curso). */
+    production: numeric('production', { precision: 14, scale: 2 }).notNull(),
+    /** Coste real a origen hasta el cierre. */
+    actualCost: numeric('actual_cost', { precision: 14, scale: 2 }).notNull(),
+    projectFinished: boolean('project_finished').notNull().default(false),
+    /** máx(0, coste estimado − contrato). */
+    totalLoss: numeric('total_loss', { precision: 14, scale: 2 }).notNull(),
+    /** máx(0, coste real − producción): ya en resultados. */
+    recognizedLoss: numeric('recognized_loss', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    requiredProvision: numeric('required_provision', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    previousProvision: numeric('previous_provision', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    /** Lo contabilizado: required − previous (dotación > 0, exceso < 0). */
+    adjustment: numeric('adjustment', { precision: 14, scale: 2 }).notNull(),
+    status: wipStatusEnum('status').notNull().default('contabilizado'),
+    /** Null si el ajuste es 0 (no hay asiento). */
+    journalEntryId: uuid('journal_entry_id').references(
+      () => journalEntries.id,
+    ),
+    reversalEntryId: uuid('reversal_entry_id').references(
+      () => journalEntries.id,
+    ),
+    cancelReason: varchar('cancel_reason', { length: 240 }),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Un solo cierre vigente por obra y mes.
+    uniqueIndex('loss_provisions_vigente_unique')
+      .on(t.companyId, t.projectId, t.year, t.month)
+      .where(sql`status = 'contabilizado'`),
+    index('loss_provisions_company_period_idx').on(
+      t.companyId,
+      t.year,
+      t.month,
+    ),
+    index('loss_provisions_project_idx').on(t.projectId, t.year, t.month),
+    check(
+      'loss_provisions_cuadre',
+      sql`${t.month} BETWEEN 1 AND 12
+        AND ${t.totalLoss} >= 0 AND ${t.recognizedLoss} >= 0
+        AND ${t.requiredProvision} >= 0 AND ${t.previousProvision} >= 0
+        AND ${t.adjustment} = ${t.requiredProvision} - ${t.previousProvision}`,
+    ),
+    check(
+      'loss_provisions_anulacion',
+      sql`(${t.status} = 'anulado') = (${t.cancelReason} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export type LossProvision = typeof lossProvisions.$inferSelect;

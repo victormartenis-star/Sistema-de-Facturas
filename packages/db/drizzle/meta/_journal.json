@@ -414,6 +414,13 @@
       "when": 1795537836478,
       "tag": "0058_obra_en_curso",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1795603132063,
+      "tag": "0059_provision_perdidas",
+      "breakpoints": true
     }
   ]
 }

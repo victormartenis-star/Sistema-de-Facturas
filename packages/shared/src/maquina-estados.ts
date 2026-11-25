@@ -78,6 +78,8 @@ export interface EstadoPorEntidad {
   consolidation_adjustment: EstadoAjusteConsolidacion;
   material_request: EstadoSolicitudMaterial;
   work_in_progress: EstadoWip;
+  /** Mismo ciclo que la obra en curso: contabilizado → anulado. */
+  loss_provision: EstadoWip;
 }
 
 export type EntidadConEstado = keyof EstadoPorEntidad;
@@ -133,6 +135,8 @@ function tablaDe(entidad: EntidadConEstado): Record<string, readonly string[]> {
     case 'material_request':
       return SOLICITUD_MATERIAL_TRANSITIONS;
     case 'work_in_progress':
+      return WIP_TRANSITIONS;
+    case 'loss_provision':
       return WIP_TRANSITIONS;
   }
 }

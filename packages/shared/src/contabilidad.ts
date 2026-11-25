@@ -53,6 +53,7 @@ export const ORIGENES_ASIENTO = [
   'devolucion_obra',
   'regularizacion_inventario',
   'obra_en_curso',
+  'provision_perdidas',
 ] as const;
 export type OrigenAsiento = (typeof ORIGENES_ASIENTO)[number];
 
@@ -70,6 +71,7 @@ export const ORIGEN_ASIENTO_LABELS: Record<OrigenAsiento, string> = {
   devolucion_obra: 'Devolución de material de obra',
   regularizacion_inventario: 'Regularización de inventario',
   obra_en_curso: 'Obra en curso (cierre)',
+  provision_perdidas: 'Provisión por pérdidas previstas',
 };
 
 export const ESTADOS_ASIENTO = ['contabilizado', 'anulado'] as const;

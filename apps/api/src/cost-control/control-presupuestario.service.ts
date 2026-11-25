@@ -526,11 +526,28 @@ export class ControlPresupuestarioService {
     projectId: string,
     hasta: string,
   ): Promise<string> {
+    return (await this.proyeccionHasta(ex, projectId, null, hasta)).costeReal;
+  }
+
+  /**
+   * Coste real a origen y coste estimado al cierre de una obra a una fecha,
+   * del mismo cuadro de márgenes (una sola carga). Lo usa la provisión por
+   * pérdidas previstas: pérdida total = coste estimado − contrato.
+   */
+  async proyeccionHasta(
+    ex: DbOrTx,
+    projectId: string,
+    contrato: string | null,
+    hasta: string,
+  ): Promise<{ costeReal: string; costeEstimadoCierre: string }> {
     const datos = await this.cargar(ex, [projectId], { hasta });
     const cuadro = cuadroMargenesObra(
-      this.entrada(null, datos.get(projectId)!),
+      this.entrada(contrato, datos.get(projectId)!),
     );
-    return centsToNumeric(toCents(cuadro.costeReal));
+    return {
+      costeReal: centsToNumeric(toCents(cuadro.costeReal)),
+      costeEstimadoCierre: centsToNumeric(toCents(cuadro.costeEstimadoCierre)),
+    };
   }
 
   /* ──────────────────────────── obras ──────────────────────────── */

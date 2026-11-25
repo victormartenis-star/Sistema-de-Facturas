@@ -71,6 +71,43 @@ describe('herramientas MCP de obra en curso', () => {
     expect(h0['Idempotency-Key']).toMatch(/^[0-9a-f-]{36}$/);
   });
 
+  it('provisión por pérdidas: cálculo en items; contabilizar con obra y periodo completo', async () => {
+    fetchMock
+      .mockResolvedValueOnce(json([{ projectId: OBRA, ajuste: 10000 }]))
+      .mockResolvedValueOnce(json({ id: 'p1', ajuste: 10000 }, 201))
+      .mockResolvedValueOnce(
+        json({ contabilizados: 1, ajuste: -2000, omitidos: [] }),
+      );
+    const h = herramientas();
+    const c = await h.get('calcular_provision_perdidas')!({
+      periodo: '2026-01',
+    });
+    expect(c.structuredContent).toEqual({
+      items: [{ projectId: OBRA, ajuste: 10000 }],
+    });
+    const una = await h.get('contabilizar_provision_perdidas')!({
+      periodo: '2026-01',
+      projectId: OBRA,
+    });
+    expect(una.structuredContent).toMatchObject({ id: 'p1', ajuste: 10000 });
+    const todas = await h.get('contabilizar_provision_perdidas')!({
+      periodo: '2026-02',
+    });
+    expect(todas.structuredContent).toMatchObject({ ajuste: -2000 });
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      '/provision-perdidas/propuesta?periodo=2026-01',
+    );
+    expect(String(fetchMock.mock.calls[1][0])).toMatch(/\/provision-perdidas$/);
+    expect(String(fetchMock.mock.calls[2][0])).toMatch(
+      /\/provision-perdidas\/cierre$/,
+    );
+    const h1 = (fetchMock.mock.calls[1][1] as RequestInit).headers as Record<
+      string,
+      string
+    >;
+    expect(h1['Idempotency-Key']).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
   it('FISCAL_PERIOD_CLOSED llega estructurado', async () => {
     fetchMock.mockResolvedValueOnce(
       json(

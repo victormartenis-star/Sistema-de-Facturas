@@ -162,8 +162,16 @@ export class WipService {
     return w;
   }
 
-  /** Producción, facturado y coste a origen de una obra hasta la fecha de cierre. */
-  private async magnitudes(ex: DbOrTx, projectId: string, fecha: string) {
+  /**
+   * Producción ejecutada a origen hasta la fecha: última certificación a
+   * origen (cualquier estado, no borrada). La comparte la provisión por
+   * pérdidas previstas.
+   */
+  async produccionHasta(
+    ex: DbOrTx,
+    projectId: string,
+    fecha: string,
+  ): Promise<string> {
     const [cert] = await ex
       .select({ total: certifications.cumulativeAmount })
       .from(certifications)
@@ -176,6 +184,12 @@ export class WipService {
       )
       .orderBy(desc(certifications.seq))
       .limit(1);
+    return centsToNumeric(toCents(cert?.total ?? '0'));
+  }
+
+  /** Producción, facturado y coste a origen de una obra hasta la fecha de cierre. */
+  private async magnitudes(ex: DbOrTx, projectId: string, fecha: string) {
+    const produccion = await this.produccionHasta(ex, projectId, fecha);
     const [fact] = await ex
       .select({
         total: sql<string>`coalesce(sum(${invoiceLines.baseAmount}), 0)`,
@@ -193,7 +207,7 @@ export class WipService {
       );
     const coste = await this.control.costeRealHasta(ex, projectId, fecha);
     return {
-      produccion: centsToNumeric(toCents(cert?.total ?? '0')),
+      produccion,
       facturado: centsToNumeric(toCents(fact?.total ?? '0')),
       coste,
     };

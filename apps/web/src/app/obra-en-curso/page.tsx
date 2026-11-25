@@ -24,6 +24,7 @@ import {
   inputCls,
   labelCls,
 } from '@/components/ui';
+import { ProvisionPerdidasPanel } from './provision-perdidas-panel';
 
 function mesAnterior(): string {
   const d = new Date();
@@ -260,6 +261,8 @@ export default function ObraEnCursoPage() {
           </ul>
         )}
       </section>
+
+      <ProvisionPerdidasPanel periodo={periodo} />
 
       <AnularModal w={anulando} onClose={() => setAnulando(null)} />
     </div>

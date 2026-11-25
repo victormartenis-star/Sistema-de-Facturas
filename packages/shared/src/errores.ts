@@ -51,6 +51,11 @@ export const TITULO_POR_CODIGO: Readonly<Record<string, string>> = {
   WIP_ALREADY_POSTED: 'Obra en curso ya contabilizada en el periodo',
   WIP_PERIOD_OUT_OF_ORDER: 'Periodo anterior al último cierre de obra en curso',
   WIP_NOT_LATEST: 'Solo se anula el último cierre de obra en curso',
+  LOSS_PROVISION_ALREADY_POSTED:
+    'Provisión por pérdidas ya contabilizada en el periodo',
+  LOSS_PROVISION_PERIOD_OUT_OF_ORDER:
+    'Periodo anterior al último cierre de la provisión por pérdidas',
+  LOSS_PROVISION_NOT_LATEST: 'Solo se anula el último cierre de la provisión',
   WAREHOUSE_INACTIVE: 'Almacén inactivo',
   STOCK_ARTICLE_INACTIVE: 'Artículo inactivo',
   DELIVERY_NOTE_ALREADY_STOCKED: 'Albarán ya recepcionado en stock',

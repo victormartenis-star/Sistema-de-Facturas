@@ -65,6 +65,7 @@ export const AUDIT_ENTITY_TYPES = [
   'consolidation_closing',
   'material_request',
   'work_in_progress',
+  'loss_provision',
   'iot_lectura_telemetria',
   'mantenimiento_equipo',
   'parte_maquinaria',

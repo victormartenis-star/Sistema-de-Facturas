@@ -30,6 +30,9 @@ import type {
   PropuestaWipDto,
   ResultadoCierreWipDto,
   WipDto,
+  PropuestaProvisionPerdidasDto,
+  ProvisionPerdidasDto,
+  ResultadoCierreProvisionPerdidasDto,
   AjusteConsolidacionCreateInput,
   AjusteConsolidacionDto,
   CierreConsolidacionDto,
@@ -2484,6 +2487,34 @@ export const wipApi = {
     }),
   anular: (id: string, motivo: string, version: number, clave: string) =>
     request<WipDto>(`/wip/${id}/anular`, {
+      method: 'POST',
+      body: JSON.stringify({ motivo }),
+      headers: { ...ifMatch(version), ...idempotencyKey(clave) },
+    }),
+};
+
+/** Provisión por pérdidas previstas (contratos onerosos) al cierre de obra. */
+export const provisionPerdidasApi = {
+  propuesta: (periodo: string) =>
+    request<PropuestaProvisionPerdidasDto[]>(
+      `/provision-perdidas/propuesta${qs({ periodo })}`,
+    ),
+  listar: (f: { periodo?: string; projectId?: string } = {}) =>
+    request<ProvisionPerdidasDto[]>(`/provision-perdidas${qs(f)}`),
+  contabilizar: (periodo: string, projectId: string, clave: string) =>
+    request<ProvisionPerdidasDto>('/provision-perdidas', {
+      method: 'POST',
+      body: JSON.stringify({ periodo, projectId }),
+      headers: idempotencyKey(clave),
+    }),
+  cierre: (periodo: string, clave: string) =>
+    request<ResultadoCierreProvisionPerdidasDto>('/provision-perdidas/cierre', {
+      method: 'POST',
+      body: JSON.stringify({ periodo }),
+      headers: idempotencyKey(clave),
+    }),
+  anular: (id: string, motivo: string, version: number, clave: string) =>
+    request<ProvisionPerdidasDto>(`/provision-perdidas/${id}/anular`, {
       method: 'POST',
       body: JSON.stringify({ motivo }),
       headers: { ...ifMatch(version), ...idempotencyKey(clave) },
