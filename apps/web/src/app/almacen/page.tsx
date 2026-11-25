@@ -8,7 +8,10 @@ import {
   TIPO_ALMACEN_LABELS,
   TIPO_MOVIMIENTO_STOCK_LABELS,
   UNIDADES_STOCK,
+  SEGUIMIENTOS_STOCK,
+  SEGUIMIENTO_STOCK_LABELS,
   type ExistenciaDto,
+  type SeguimientoStock,
   type TipoAlmacen,
   type TipoMovimientoStock,
   type UnidadStock,
@@ -18,9 +21,11 @@ import {
   deliveryNotesApi,
   formatDate,
   formatEur,
+  lotesApi,
   projectsApi,
 } from '@/lib/api';
 import { nuevoUuid } from '@/lib/api-error';
+import { parseLotes } from '@/lib/lotes';
 import { Autorizado } from '@/components/autorizado';
 import { IconAlertTriangle, IconCube } from '@/components/icons';
 import { useAvisarError, useToast } from '@/components/toast';
@@ -248,6 +253,7 @@ export default function AlmacenPage() {
       ) : (
         <Movimientos almacenId={almacenId} />
       )}
+      <PanelLotes almacenId={almacenId} />
 
       <AlmacenModal
         open={operacion === 'almacen'}
@@ -568,6 +574,14 @@ function Movimientos({ almacenId }: { almacenId: string }) {
                     <td className="px-3 py-2">
                       <span className="font-medium">{m.articuloCodigo}</span>{' '}
                       {m.articuloNombre}
+                      {m.lotes && m.lotes.length > 0 && (
+                        <span className="block text-[11px] text-gray-500">
+                          {m.lotes
+                            .filter((l) => l.almacenId === m.almacenId)
+                            .map((l) => `${l.codigo} ${l.cantidad}`)
+                            .join(' · ')}
+                        </span>
+                      )}
                     </td>
                     <td
                       className={`px-3 py-2 text-right tabular-nums ${
@@ -853,6 +867,7 @@ function ArticuloModal({
     codigo: '',
     nombre: '',
     unidad: 'ud' as UnidadStock,
+    seguimiento: 'ninguno' as SeguimientoStock,
     cuentaExistencias: '3000',
     cuentaVariacion: '6100',
   });
@@ -864,6 +879,7 @@ function ArticuloModal({
           codigo: f.codigo.trim(),
           nombre: f.nombre.trim(),
           unidad: f.unidad,
+          seguimiento: f.seguimiento,
           cuentaExistencias: f.cuentaExistencias.trim(),
           cuentaVariacion: f.cuentaVariacion.trim(),
         },
@@ -909,6 +925,27 @@ function ArticuloModal({
             ))}
           </select>
         </Campo>
+        <Campo id="ar-seg" label="Seguimiento">
+          <select
+            id="ar-seg"
+            className={fieldCls}
+            value={f.seguimiento}
+            onChange={(e) =>
+              setF({ ...f, seguimiento: e.target.value as SeguimientoStock })
+            }
+          >
+            {SEGUIMIENTOS_STOCK.map((s) => (
+              <option key={s} value={s}>
+                {SEGUIMIENTO_STOCK_LABELS[s]}
+              </option>
+            ))}
+          </select>
+          {f.seguimiento === 'serie' && f.unidad !== 'ud' && (
+            <span className="text-xs text-red-700">
+              La serie exige la unidad «ud»
+            </span>
+          )}
+        </Campo>
         <Campo id="ar-nombre" label="Nombre" ancho>
           <input
             id="ar-nombre"
@@ -953,6 +990,8 @@ interface LineaForm {
   articuloId: string;
   cantidad: string;
   costeUnitario: string;
+  /** «L1:4:2027-03-31, L2:6» (lote:cantidad[:caducidad]) o «SN-1, SN-2» (serie). */
+  lotes?: string;
 }
 
 function LineasEditor({
@@ -1010,6 +1049,30 @@ function LineasEditor({
                 onChange={(e) => cambiar(i, 'costeUnitario', e.target.value)}
               />
             )}
+            {(() => {
+              const seg = activos.find(
+                (a) => a.id === l.articuloId,
+              )?.seguimiento;
+              if (!seg || seg === 'ninguno') return null;
+              return (
+                <input
+                  aria-label="Lotes o series"
+                  className={`${fieldCls} w-48`}
+                  placeholder={
+                    seg === 'serie'
+                      ? conCoste
+                        ? 'SN-1, SN-2'
+                        : 'Series (vacío: FEFO)'
+                      : conCoste
+                        ? 'L1:4:2027-03-31, L2:6'
+                        : 'Lotes (vacío: FEFO)'
+                  }
+                  value={l.lotes ?? ''}
+                  required={conCoste}
+                  onChange={(e) => cambiar(i, 'lotes', e.target.value)}
+                />
+              );
+            })()}
             {lineas.length > 1 && (
               <button
                 type="button"
@@ -1111,6 +1174,7 @@ function EntradaModal({
             articuloId: l.articuloId,
             cantidad: num(l.cantidad),
             costeUnitario: num(l.costeUnitario),
+            ...(parseLotes(l.lotes) ? { lotes: parseLotes(l.lotes) } : {}),
           })),
         },
         clave,
@@ -1217,6 +1281,7 @@ function ConsumoModal({
         lineas: lineas.map((l) => ({
           articuloId: l.articuloId,
           cantidad: num(l.cantidad),
+          ...(parseLotes(l.lotes) ? { lotes: parseLotes(l.lotes) } : {}),
         })),
       };
       return modo === 'consumo'
@@ -1542,6 +1607,163 @@ function RegularizarModal({
         </form>
       )}
     </Modal>
+  );
+}
+
+/**
+ * Lotes y números de serie: existencia por almacén, caducidad y, al abrir
+ * uno, su trazabilidad (entrada, traspasos, consumos y obras que lo usaron).
+ */
+function PanelLotes({ almacenId }: { almacenId: string }) {
+  const [q, setQ] = useState('');
+  const [conStock, setConStock] = useState(true);
+  const [abierto, setAbierto] = useState<string | null>(null);
+  const lotes = useQuery({
+    queryKey: ['almacen', 'lotes', almacenId, q, conStock],
+    queryFn: () =>
+      lotesApi.listar({
+        almacenId: almacenId || undefined,
+        q: q.trim() || undefined,
+        conStock,
+      }),
+  });
+  const traza = useQuery({
+    queryKey: ['almacen', 'lote', abierto],
+    queryFn: () => lotesApi.traza(abierto!),
+    enabled: abierto !== null,
+  });
+  const hoyIso = hoy();
+  const filas = lotes.data ?? [];
+  const t = traza.data;
+  return (
+    <section className="mt-8">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold">Lotes y números de serie</h2>
+        <div className="flex items-center gap-2">
+          <input
+            className={inputCls}
+            placeholder="Buscar lote o serie"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            aria-label="Buscar lote o serie"
+          />
+          <label className="flex items-center gap-1 text-xs text-gray-600">
+            <input
+              type="checkbox"
+              checked={conStock}
+              onChange={(e) => setConStock(e.target.checked)}
+            />
+            Solo con existencias
+          </label>
+        </div>
+      </div>
+      {lotes.isError && (
+        <ErrorBanner message={(lotes.error as Error).message} />
+      )}
+      {filas.length === 0 ? (
+        <p className="text-xs text-gray-500">
+          Sin lotes ni series. Los artículos con seguimiento piden el lote o la
+          serie en cada entrada; las salidas sin lote salen por FEFO.
+        </p>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-left text-xs text-gray-500">
+              <tr>
+                <th className="px-3 py-2">Artículo</th>
+                <th className="px-3 py-2">Lote / serie</th>
+                <th className="px-3 py-2">Caducidad</th>
+                <th className="px-3 py-2 text-right">Existencia</th>
+                <th className="px-3 py-2">Almacenes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filas.map((l) => (
+                <tr
+                  key={l.id}
+                  className="cursor-pointer border-t border-gray-100 hover:bg-amber-50/40"
+                  onClick={() => setAbierto(l.id)}
+                >
+                  <td className="px-3 py-1.5">
+                    <span className="font-medium">{l.articuloCodigo}</span>{' '}
+                    {l.articuloNombre}
+                  </td>
+                  <td className="px-3 py-1.5">
+                    {l.codigo}
+                    <span className="ml-1 text-xs text-gray-500">
+                      ({l.seguimiento})
+                    </span>
+                  </td>
+                  <td
+                    className={`px-3 py-1.5 tabular-nums ${l.caducidad && l.caducidad < hoyIso ? 'text-red-700' : ''}`}
+                  >
+                    {l.caducidad ? formatDate(l.caducidad) : '—'}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">
+                    {l.cantidad}
+                  </td>
+                  <td className="px-3 py-1.5 text-xs text-gray-600">
+                    {l.porAlmacen
+                      .map((p) => `${p.almacenCodigo}: ${p.cantidad}`)
+                      .join(' · ')}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <Modal
+        open={abierto !== null}
+        title={
+          t ? `Trazabilidad ${t.articuloCodigo} · ${t.codigo}` : 'Trazabilidad'
+        }
+        onClose={() => setAbierto(null)}
+      >
+        {traza.isError && (
+          <ErrorBanner message={(traza.error as Error).message} />
+        )}
+        {t && (
+          <div className="text-sm">
+            <p className="mb-2 text-xs text-gray-600">
+              Existencia {t.cantidad}
+              {t.caducidad && ` · caduca ${formatDate(t.caducidad)}`}
+              {t.obras.length > 0 &&
+                ` · consumido en ${t.obras.length} obra(s): ${t.obras.map((o) => o.cantidad).join(', ')}`}
+            </p>
+            <table className="w-full text-sm">
+              <thead className="text-left text-xs text-gray-500">
+                <tr>
+                  <th className="py-1">Fecha</th>
+                  <th className="py-1">Movimiento</th>
+                  <th className="py-1">Almacén</th>
+                  <th className="py-1 text-right">Cantidad</th>
+                </tr>
+              </thead>
+              <tbody>
+                {t.movimientos.map((m, i) => (
+                  <tr
+                    key={`${m.movimientoId}-${i}`}
+                    className="border-t border-gray-100"
+                  >
+                    <td className="py-1 tabular-nums">{formatDate(m.fecha)}</td>
+                    <td className="py-1">
+                      {TIPO_MOVIMIENTO_STOCK_LABELS[
+                        m.tipo as TipoMovimientoStock
+                      ] ?? m.tipo}
+                    </td>
+                    <td className="py-1">{m.almacenCodigo}</td>
+                    <td className="py-1 text-right tabular-nums">
+                      {m.cantidad}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Modal>
+    </section>
   );
 }
 

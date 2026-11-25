@@ -838,6 +838,17 @@ function CuentasAnuales({ ejercicio }: { ejercicio: number }) {
               Efectivo inicial {formatEur(c.efe.efectivoInicial)} · final{' '}
               {formatEur(c.efe.efectivoFinal)}
             </p>
+            {c.efe.cobrosPagos && (
+              <p className="text-xs text-gray-500">
+                Cobros de clientes {formatEur(c.efe.cobrosPagos.cobrosClientes)}{' '}
+                · pagos a proveedores{' '}
+                {formatEur(c.efe.cobrosPagos.pagosProveedores)} · otros{' '}
+                {formatEur(c.efe.cobrosPagos.otros)}
+                {!c.efe.cobrosPagos.cuadra && (
+                  <span className="ml-1 text-red-700">(no cuadra con 57x)</span>
+                )}
+              </p>
+            )}
           </div>
         </div>
       )}

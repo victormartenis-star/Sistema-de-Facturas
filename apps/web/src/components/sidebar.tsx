@@ -67,6 +67,11 @@ const GESTION: NavItem[] = [
   { href: '/facturas', label: 'Facturas', icon: IconReceipt },
   { href: '/albaranes', label: 'Albaranes', icon: IconInbox },
   { href: '/tesoreria', label: 'Tesorería', icon: IconWallet },
+  {
+    href: '/cartera',
+    label: 'Cartera clientes y proveedores',
+    icon: IconWallet,
+  },
   { href: '/avales', label: 'Avales y garantías', icon: IconShield },
   { href: '/margenes', label: 'Márgenes y presupuesto', icon: IconTrendingUp },
   { href: '/contabilidad', label: 'Contabilidad', icon: IconCalculator },

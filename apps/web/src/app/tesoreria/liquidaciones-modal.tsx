@@ -211,7 +211,11 @@ export function LiquidacionesModal({
                   >
                     <td className="py-1.5">{formatDate(s.settledOn)}</td>
                     <td className="py-1.5">
-                      {PAYMENT_INSTRUMENT_LABELS[s.paymentInstrument]}
+                      {s.origen === 'anticipo'
+                        ? 'Aplicación de anticipo'
+                        : s.origen === 'compensacion'
+                          ? 'Compensación'
+                          : PAYMENT_INSTRUMENT_LABELS[s.paymentInstrument]}
                     </td>
                     <td className="py-1.5 text-gray-600">
                       {[s.bankAccountName, s.reference]
@@ -227,20 +231,28 @@ export function LiquidacionesModal({
                       {formatEur(s.amount)}
                     </td>
                     <td className="py-1.5 text-right">
-                      {s.status === 'vigente' && (
-                        <Autorizado accion="anular">
-                          <button
-                            type="button"
-                            className={`${btnGhostCls} text-xs`}
-                            onClick={() => {
-                              setAnulando(s);
-                              setMotivo('');
-                            }}
-                          >
-                            Anular
-                          </button>
-                        </Autorizado>
-                      )}
+                      {s.status === 'vigente' &&
+                        s.origen !== undefined &&
+                        s.origen !== 'tesoreria' && (
+                          <span className="text-xs text-gray-500">
+                            Se anula en Cartera
+                          </span>
+                        )}
+                      {s.status === 'vigente' &&
+                        (s.origen ?? 'tesoreria') === 'tesoreria' && (
+                          <Autorizado accion="anular">
+                            <button
+                              type="button"
+                              className={`${btnGhostCls} text-xs`}
+                              onClick={() => {
+                                setAnulando(s);
+                                setMotivo('');
+                              }}
+                            >
+                              Anular
+                            </button>
+                          </Autorizado>
+                        )}
                     </td>
                   </tr>
                 ))}

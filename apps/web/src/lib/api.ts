@@ -57,6 +57,17 @@ import type {
   ResultadoDevengoAutomaticoDto,
   EjecucionDevengoDto,
   LoteDevengoDto,
+  AnticipoAplicarInput,
+  AnticipoCreateInput,
+  AnticipoDto,
+  AntiguedadDto,
+  CompensacionCreateInput,
+  CompensacionDto,
+  ConciliacionCarteraDto,
+  LoteDto,
+  PartidasCarteraDto,
+  TipoCartera,
+  TrazaLoteDto,
   ConciliacionCierreDto,
   ResultadoCierreProvisionPerdidasDto,
   AjusteConsolidacionCreateInput,
@@ -2217,6 +2228,99 @@ const postJson = (body: unknown, clave: string, version?: number) => ({
     ...(version !== undefined ? ifMatch(version) : {}),
   },
 });
+
+/** `If-Match` solo con una versión entera positiva. */
+const siVersion = (version: number | undefined): Record<string, string> =>
+  version !== undefined && Number.isInteger(version) && version > 0
+    ? ifMatch(version)
+    : {};
+
+/** Cartera de clientes y proveedores (subledgers AR/AP). */
+export const carteraApi = {
+  partidas: (q: {
+    tipo: TipoCartera;
+    fecha?: string;
+    contactId?: string;
+    soloVencidas?: boolean;
+  }) =>
+    request<PartidasCarteraDto>(
+      `/cartera/partidas${qs({
+        tipo: q.tipo,
+        fecha: q.fecha,
+        contactId: q.contactId,
+        soloVencidas: q.soloVencidas ? 'true' : undefined,
+      })}`,
+    ),
+  antiguedad: (tipo: TipoCartera, fecha?: string) =>
+    request<AntiguedadDto>(`/cartera/antiguedad${qs({ tipo, fecha })}`),
+  conciliacion: (tipo: TipoCartera, fecha?: string) =>
+    request<ConciliacionCarteraDto>(
+      `/cartera/conciliacion${qs({ tipo, fecha })}`,
+    ),
+  anticipos: (tipo?: TipoCartera) =>
+    request<AnticipoDto[]>(`/cartera/anticipos${qs({ tipo })}`),
+  crearAnticipo: (input: AnticipoCreateInput, clave: string) =>
+    request<AnticipoDto>('/cartera/anticipos', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: idempotencyKey(clave),
+    }),
+  aplicarAnticipo: (
+    id: string,
+    input: AnticipoAplicarInput,
+    version: number,
+    clave: string,
+  ) =>
+    request<AnticipoDto>(`/cartera/anticipos/${id}/aplicar`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: { ...idempotencyKey(clave), ...siVersion(version) },
+    }),
+  desaplicarAnticipo: (id: string, motivo: string, version: number) =>
+    request<AnticipoDto>(`/cartera/anticipos/${id}/desaplicar`, {
+      method: 'POST',
+      body: JSON.stringify({ motivo }),
+      headers: siVersion(version),
+    }),
+  anularAnticipo: (id: string, motivo: string, version: number) =>
+    request<AnticipoDto>(`/cartera/anticipos/${id}/anular`, {
+      method: 'POST',
+      body: JSON.stringify({ motivo }),
+      headers: siVersion(version),
+    }),
+  compensaciones: () => request<CompensacionDto[]>('/cartera/compensaciones'),
+  crearCompensacion: (input: CompensacionCreateInput, clave: string) =>
+    request<CompensacionDto>('/cartera/compensaciones', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: idempotencyKey(clave),
+    }),
+  anularCompensacion: (id: string, motivo: string, version: number) =>
+    request<CompensacionDto>(`/cartera/compensaciones/${id}/anular`, {
+      method: 'POST',
+      body: JSON.stringify({ motivo }),
+      headers: siVersion(version),
+    }),
+};
+
+/** Lotes y números de serie del almacén. */
+export const lotesApi = {
+  listar: (q: {
+    articuloId?: string;
+    almacenId?: string;
+    q?: string;
+    conStock?: boolean;
+  }) =>
+    request<LoteDto[]>(
+      `/almacen/lotes${qs({
+        articuloId: q.articuloId,
+        almacenId: q.almacenId,
+        q: q.q,
+        conStock: q.conStock ? 'true' : undefined,
+      })}`,
+    ),
+  traza: (id: string) => request<TrazaLoteDto>(`/almacen/lotes/${id}`),
+};
 
 export const almacenApi = {
   resumen: () => request<ResumenAlmacenDto>('/almacen/resumen'),
