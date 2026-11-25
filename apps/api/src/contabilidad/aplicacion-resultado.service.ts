@@ -22,6 +22,10 @@ import {
   centsToNumeric,
   cuentasAnuales,
   diferenciasAuditoria,
+  estadoCambiosPatrimonioNeto,
+  estadoFlujosEfectivo,
+  fechaLimiteAplicacion,
+  situacionPatrimonial,
   fromCents,
   reservaLegalMinima,
   toCents,
@@ -131,7 +135,8 @@ export class AplicacionResultadoService {
       ex,
       companyId,
       `${ejercicio + 1}-01-01`,
-      ['100', '1120', '1130', '1200', '1210'],
+      // Masas de patrimonio neto del PGC (10x-13x), 129 incluida.
+      ['10', '11', '12', '13'],
     );
     const acreedor = (pref: string) =>
       centsToNumeric(
@@ -145,6 +150,9 @@ export class AplicacionResultadoService {
       reservasVoluntarias: acreedor('1130'),
       remanente: acreedor('1200'),
       negativosAnteriores: centsToNumeric(s.get('1210') ?? 0n),
+      patrimonioNeto: centsToNumeric(
+        -[...s.values()].reduce((t, v) => t + v, 0n),
+      ),
     };
   }
 
@@ -165,6 +173,23 @@ export class AplicacionResultadoService {
               : CUENTAS_APLICACION_PERDIDA,
           ).map(([cuenta, nombre]) => ({ cuenta, nombre }));
     const n = (v: string | number) => fromCents(toCents(v));
+    const minima = reservaLegalMinima({
+      beneficio: resultado ?? 0,
+      capital: saldos.capital,
+      reservaLegal: saldos.reservaLegal,
+    });
+    const pn = toCents(saldos.patrimonioNeto ?? 0);
+    const capital = toCents(saldos.capital);
+    // Dividendo máximo: lo que queda tras la reserva legal y las pérdidas
+    // pendientes, sin dejar el PN por debajo del capital (art. 273.2 LSC).
+    const libre =
+      toCents(resultado ?? 0) -
+      toCents(minima) -
+      (toCents(saldos.negativosAnteriores) > 0n
+        ? toCents(saldos.negativosAnteriores)
+        : 0n);
+    const holgura = pn - capital;
+    const dividendoMaximo = [libre, holgura].reduce((a, b) => (a < b ? a : b));
     return {
       ejercicio,
       resultado,
@@ -174,11 +199,14 @@ export class AplicacionResultadoService {
       reservasVoluntarias: n(saldos.reservasVoluntarias),
       remanente: n(saldos.remanente),
       negativosAnteriores: n(saldos.negativosAnteriores),
-      reservaLegalMinima: reservaLegalMinima({
-        beneficio: resultado ?? 0,
+      reservaLegalMinima: minima,
+      fechaLimite: fechaLimiteAplicacion(ejercicio),
+      patrimonioNeto: fromCents(pn),
+      situacionPatrimonial: situacionPatrimonial({
+        patrimonioNeto: centsToNumeric(pn),
         capital: saldos.capital,
-        reservaLegal: saldos.reservaLegal,
       }),
+      dividendoMaximo: fromCents(dividendoMaximo > 0n ? dividendoMaximo : 0n),
       destinos,
       aplicacionVigente: vig ? dto(vig) : null,
     };
@@ -223,6 +251,11 @@ export class AplicacionResultadoService {
         reparto: d.reparto,
         saldos: await this.saldosPn(tx, companyId, ejercicio),
         cuentaResultado: CUENTA_RESULTADO_EJERCICIO,
+        plazo: {
+          ejercicio,
+          fecha: d.fecha,
+          aceptarFueraDePlazo: d.aceptarFueraDePlazo,
+        },
       });
       if (!r.ok) {
         throw new UnprocessableEntityException({
@@ -248,6 +281,7 @@ export class AplicacionResultadoService {
           result: cierre.result,
           applicationDate: d.fecha,
           agreement: d.acuerdo,
+          outOfTerm: d.fecha > fechaLimiteAplicacion(ejercicio),
           allocation: d.reparto.map((x) => ({
             cuenta: x.cuenta,
             importe: centsToNumeric(toCents(x.importe)),
@@ -349,12 +383,13 @@ export class AplicacionResultadoService {
    */
   async cuentasAnuales(ejercicio: number): Promise<CuentasAnualesDto> {
     const companyId = this.dbs.getCompanyId();
-    const [filas, cierre, aplicacion] = await Promise.all([
+    const [filas, cierre, aplicacion, movimientos] = await Promise.all([
       this.contabilidad.saldosEjercicio(this.dbs.db, companyId, ejercicio, {
         sinCierre: true,
       }),
       this.cierreVigente(this.dbs.db, companyId, ejercicio),
       this.vigente(this.dbs.db, companyId, ejercicio),
+      this.contabilidad.movimientosPorOrigen(this.dbs.db, companyId, ejercicio),
     ]);
     // Por cuenta (la obra no es dimensión de las cuentas anuales).
     const porCuenta = new Map<
@@ -379,18 +414,58 @@ export class AplicacionResultadoService {
       a.haber += toCents(f.haber);
       porCuenta.set(f.cuenta, a);
     }
+    const anuales = cuentasAnuales(
+      [...porCuenta.values()].map((a) => ({
+        ...a,
+        debe: centsToNumeric(a.debe),
+        haber: centsToNumeric(a.haber),
+      })),
+    );
+    // ECPN: cuentas de patrimonio neto, sin regularización ni cierre.
+    const pnMovs = movimientos.filter(
+      (m) => m.tipo === 'patrimonio' && m.origen !== 'cierre',
+    );
+    // Dividendos acordados en el ejercicio: abonos netos a 5260 por la
+    // aplicación del resultado (los contra-asientos los compensan).
+    const dividendos = movimientos
+      .filter((m) => m.cuenta.startsWith('526') && m.origen === 'aplicacion')
+      .reduce((t, m) => t + toCents(m.haber) - toCents(m.debe), 0n);
+    const ecpn = estadoCambiosPatrimonioNeto({
+      movimientos: pnMovs.map((m) => ({
+        cuenta: m.cuenta,
+        origen:
+          m.origen === 'apertura' || m.origen === 'aplicacion'
+            ? m.origen
+            : 'otro',
+        debe: m.debe,
+        haber: m.haber,
+      })),
+      resultadoEjercicio: anuales.pyg.resultado,
+      dividendos: centsToNumeric(dividendos),
+    });
+    // EFE: movimientos sin apertura ni cierre; efectivo inicial = 57x de la apertura.
+    const efectivoInicial = movimientos
+      .filter((m) => m.cuenta.startsWith('57') && m.origen === 'apertura')
+      .reduce((t, m) => t + toCents(m.debe) - toCents(m.haber), 0n);
+    const efe = estadoFlujosEfectivo({
+      movimientos: movimientos.filter(
+        (m) => m.origen !== 'apertura' && m.origen !== 'cierre',
+      ),
+      efectivoInicial: centsToNumeric(efectivoInicial),
+    });
     return {
       ejercicio,
       fecha: `${ejercicio}-12-31`,
       cerrado: !!cierre,
       aplicacion: aplicacion ? dto(aplicacion) : null,
-      ...cuentasAnuales(
-        [...porCuenta.values()].map((a) => ({
-          ...a,
-          debe: centsToNumeric(a.debe),
-          haber: centsToNumeric(a.haber),
-        })),
-      ),
+      ...anuales,
+      ecpn: {
+        ...ecpn,
+        cuadraConBalance:
+          toCents(ecpn.saldoFinal.total) ===
+          toCents(anuales.balance.patrimonioNeto.total),
+      },
+      efe,
     };
   }
 }

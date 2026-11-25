@@ -77,7 +77,17 @@ export function CostControlDashboard({ projectId }: { projectId: string }) {
         />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <KpiCard
+          etiqueta="SPI (plazo)"
+          valor={cc.spi !== null ? cc.spi.toFixed(2) : '—'}
+          tono={cc.spi === null ? 'neutro' : cc.spi >= 1 ? 'bueno' : 'aviso'}
+          detalle={
+            cc.pv === null
+              ? 'Sin cronograma planificado (PV)'
+              : `Ganado / planificado (PV ${formatEur(cc.pv)}) · SV ${formatEur(cc.scheduleVariance ?? 0)}`
+          }
+        />
         <KpiCard
           etiqueta="Falta por gastar (ETC)"
           valor={formatEur(cc.etc)}

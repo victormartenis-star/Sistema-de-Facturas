@@ -377,11 +377,31 @@ function DevengosAval() {
     },
     onError: (e) => avisarError(e, refrescar),
   });
-  const ocupado = devengar.isPending || anular.isPending;
+  const ejecuciones = useQuery({
+    queryKey: ['avales', 'devengos', 'ejecuciones'],
+    queryFn: () => avalesApi.ejecucionesDevengo(),
+  });
+  const automatico = useMutation({
+    mutationFn: () => avalesApi.devengoAutomatico(undefined, clave.current),
+    onSuccess: (r) => {
+      clave.current = nuevoUuid();
+      const omitidos = r.periodos.reduce((t, p) => t + p.omitidos.length, 0);
+      toast(
+        `Devengo automático ${r.desde ?? '—'} a ${r.hasta}: ${r.contabilizados} devengos (${formatEur(r.importe)})` +
+          (omitidos ? ` · ${omitidos} omitidos` : ''),
+        omitidos ? 'error' : 'success',
+      );
+      refrescar();
+    },
+    onError: (e) => avisarError(e, refrescar),
+  });
+  const ocupado =
+    devengar.isPending || anular.isPending || automatico.isPending;
   useEffect(() => {
     if (!ocupado) guarda.liberar();
   }, [ocupado, guarda]);
   const filas = lista.data ?? [];
+  const ultima = ejecuciones.data?.[0];
 
   return (
     <section className="mt-8">
@@ -389,9 +409,18 @@ function DevengosAval() {
         <div>
           <h2 className="text-sm font-semibold">Devengo de comisiones</h2>
           <p className="text-xs text-gray-500">
-            Saldo vivo × tasa anual × días del mes / 365, contabilizado 6260
-            (obra) a 4100. La liquidación del banco salda lo devengado.
+            Σ saldo vivo de cada tramo × tasa anual × días / 365 (los cambios de
+            saldo dentro del mes abren tramos), contabilizado 6260 (obra) a
+            4100. La liquidación del banco salda lo devengado. Se ejecuta solo
+            el día 1 de cada mes.
           </p>
+          {ultima && (
+            <p className="text-xs text-gray-500">
+              Última ejecución ({ultima.disparo}): {ultima.periodo} ·{' '}
+              {ultima.contabilizados} devengos · {formatEur(ultima.importe)}
+              {ultima.omitidos > 0 && ` · ${ultima.omitidos} omitidos`}
+            </p>
+          )}
         </div>
         <div className="flex items-end gap-2">
           <input
@@ -419,6 +448,24 @@ function DevengosAval() {
             >
               {devengar.isPending ? 'Devengando…' : 'Devengar el mes'}
             </button>
+            <button
+              type="button"
+              className={btnGhostCls}
+              disabled={ocupado}
+              onClick={() => {
+                if (
+                  !can('cambiarEstado', 'aval') ||
+                  ocupado ||
+                  !guarda.intentar()
+                )
+                  return;
+                automatico.mutate();
+              }}
+            >
+              {automatico.isPending
+                ? 'Devengando pendientes…'
+                : 'Devengar meses pendientes'}
+            </button>
           </Autorizado>
         </div>
       </div>
@@ -445,6 +492,17 @@ function DevengosAval() {
                   <td className="px-3 py-2 font-medium">{d.referencia}</td>
                   <td className="px-3 py-2 tabular-nums">
                     {formatDate(d.desde)} – {formatDate(d.hasta)} ({d.dias} d)
+                    {d.tramos.length > 1 && (
+                      <ul className="mt-1 text-xs text-gray-500">
+                        {d.tramos.map((t) => (
+                          <li key={t.desde}>
+                            {formatDate(t.desde)}–{formatDate(t.hasta)} ·{' '}
+                            {formatEur(t.saldo)} × {t.dias} d ={' '}
+                            {formatEur(t.importe)}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
                     {formatEur(d.saldoBase)}

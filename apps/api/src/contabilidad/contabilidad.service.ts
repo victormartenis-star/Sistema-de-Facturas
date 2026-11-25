@@ -68,7 +68,10 @@ import {
   todayIso,
 } from '@erp/shared';
 import { AuditService } from '../audit/audit.service';
-import { getRequestContext } from '../common/request-context';
+import {
+  getRequestContext,
+  usuarioPersistible,
+} from '../common/request-context';
 import { cambiarEstado } from '../common/cambiar-estado';
 import { verificarVersion } from '../common/version';
 import { DbService } from '../db/db.service';
@@ -395,7 +398,7 @@ export class ContabilidadService {
         sourceId: a.origenId,
         reversesId: a.reversesId ?? null,
         totalAmount: centsToNumeric(total),
-        createdBy: getRequestContext()?.userId ?? null,
+        createdBy: usuarioPersistible(),
       })
       .returning();
     await tx.insert(journalEntryLines).values(
@@ -1069,6 +1072,50 @@ export class ContabilidadService {
         ledgerAccounts.type,
         journalEntryLines.projectId,
       );
+  }
+
+  /**
+   * Movimientos del ejercicio por cuenta y naturaleza del asiento, para ECPN
+   * y EFE: `apertura`, `aplicacion` (aplicación del resultado), `cierre`
+   * (regularización y cierre) u `otro`. Un contra-asiento cuenta con la
+   * naturaleza del asiento que anula, así ambos se compensan en su fila.
+   */
+  async movimientosPorOrigen(
+    ex: DbOrTx,
+    companyId: string,
+    ejercicio: number,
+  ): Promise<
+    {
+      cuenta: string;
+      tipo: string;
+      origen: 'apertura' | 'aplicacion' | 'cierre' | 'otro';
+      debe: string;
+      haber: string;
+    }[]
+  > {
+    const filas = await ex.execute(sql`
+      select la.code as cuenta, la.type as tipo,
+        case coalesce(r.source, je.source)
+          when 'apertura_ejercicio' then 'apertura'
+          when 'aplicacion_resultado' then 'aplicacion'
+          when 'regularizacion_ejercicio' then 'cierre'
+          when 'cierre_ejercicio' then 'cierre'
+          else 'otro' end as origen,
+        coalesce(sum(l.debit), 0)::text as debe,
+        coalesce(sum(l.credit), 0)::text as haber
+      from journal_entry_lines l
+      join journal_entries je on je.id = l.entry_id
+      join ledger_accounts la on la.id = l.account_id
+      left join journal_entries r on r.id = je.reverses_id
+      where l.company_id = ${companyId} and je.fiscal_year = ${ejercicio}
+      group by 1, 2, 3`);
+    return filas.rows as {
+      cuenta: string;
+      tipo: string;
+      origen: 'apertura' | 'aplicacion' | 'cierre' | 'otro';
+      debe: string;
+      haber: string;
+    }[];
   }
 
   /**

@@ -7,7 +7,11 @@ import {
   cierreEjercicioRevertirSchema,
   devengoAvalesQuerySchema,
   devengoAvalesSchema,
+  devengoAutomaticoSchema,
   estimacionCierreSetSchema,
+  type ConciliacionCierreDto,
+  type EjecucionDevengoDto,
+  type ResultadoDevengoAutomaticoDto,
   type AplicacionResultadoDto,
   type CierreEjercicioDto,
   type CuentasAnualesDto,
@@ -303,11 +307,13 @@ export function registrarCierre(server: McpServer) {
     {
       title: 'Devengar las comisiones de aval de un mes',
       description:
-        'Con avalId, ese aval; sin él, todos los emitidos vivos con tasa (los ' +
-        'rechazados se informan en `omitidos`). Saldo vivo × tasa × días del ' +
-        'mes / 365, 6260 (obra) a 4100. Errores: ' +
-        'BANK_GUARANTEE_ACCRUAL_ALREADY_POSTED, ' +
-        'BANK_GUARANTEE_ACCRUAL_NOT_APPLICABLE, FISCAL_PERIOD_CLOSED.',
+        'Con avalId, ese aval; sin él, todos los emitidos con tasa que ' +
+        'estuvieron vivos en el mes (los rechazados se informan en ' +
+        '`omitidos`). Prorrateado por tramos de saldo: Σ saldo × tasa × días ' +
+        '/ 365, 6260 (obra) a 4100; el detalle va en `tramos`. Solo meses ' +
+        'terminados. Errores: BANK_GUARANTEE_ACCRUAL_ALREADY_POSTED, ' +
+        'BANK_GUARANTEE_ACCRUAL_NOT_APPLICABLE, ' +
+        'BANK_GUARANTEE_ACCRUAL_PERIOD_OPEN, FISCAL_PERIOD_CLOSED.',
       inputSchema: devengoAvalesSchema.shape,
       annotations: { readOnlyHint: false, idempotentHint: false },
     },
@@ -316,6 +322,83 @@ export function registrarCierre(server: McpServer) {
         pedir<ResultadoDevengoAvalesDto | DevengoAvalDto>('/avales/devengos', {
           method: 'POST',
           body: JSON.stringify(devengoAvalesSchema.parse(body)),
+          headers: { 'Idempotency-Key': randomUUID() },
+        }),
+      ),
+  );
+
+  server.registerTool(
+    'devengo_automatico_avales',
+    {
+      title: 'Devengar todos los meses pendientes de los avales',
+      description:
+        'Recorre los meses terminados hasta `hasta` (por defecto, el anterior ' +
+        'al actual) desde el primero en que algún aval pudo devengar (máximo ' +
+        '24) y devenga lo que falte. Idempotente: lo ya devengado no se repite ' +
+        'ni se informa; los rechazos reales (período cerrado) sí, en ' +
+        '`periodos[].omitidos`. Es lo mismo que la tarea programada del día 1.',
+      inputSchema: devengoAutomaticoSchema.shape,
+      annotations: { readOnlyHint: false, idempotentHint: true },
+    },
+    async (body) =>
+      ejecutar(() =>
+        pedir<ResultadoDevengoAutomaticoDto>('/avales/devengos/automatico', {
+          method: 'POST',
+          body: JSON.stringify(devengoAutomaticoSchema.parse(body)),
+          headers: { 'Idempotency-Key': randomUUID() },
+        }),
+      ),
+  );
+
+  server.registerTool(
+    'ejecuciones_devengo_avales',
+    {
+      title: 'Ejecuciones del devengo de avales',
+      description:
+        'Registro de ejecuciones del devengo (manual o programada): mes, ' +
+        'devengos, importe y omitidos.',
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    async () =>
+      ejecutar(() =>
+        pedir<EjecucionDevengoDto[]>('/avales/devengos/ejecuciones'),
+      ),
+  );
+
+  /* ─────────── conciliación de cierre (auxiliar ↔ mayor) ─────────── */
+
+  server.registerTool(
+    'conciliacion_cierre',
+    {
+      title: 'Conciliación de cierre auxiliar ↔ mayor',
+      description:
+        'En vivo: devengos de aval pendientes ↔ 4100, amortización acumulada ' +
+        '↔ 281x, obra en curso ↔ 4309 − 4389 y provisión por pérdidas ↔ ' +
+        '4994, con diferencia y `cuadra` por partida.',
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    async () =>
+      ejecutar(() =>
+        pedir<ConciliacionCierreDto>('/contabilidad/conciliacion'),
+      ),
+  );
+
+  server.registerTool(
+    'registrar_conciliacion_cierre',
+    {
+      title: 'Registrar la conciliación de cierre',
+      description:
+        'Ejecuta la conciliación y la guarda como evidencia del cierre ' +
+        '(auditada). Admin, gerente y administración.',
+      inputSchema: {},
+      annotations: { readOnlyHint: false, idempotentHint: false },
+    },
+    async () =>
+      ejecutar(() =>
+        pedir<ConciliacionCierreDto>('/contabilidad/conciliacion', {
+          method: 'POST',
           headers: { 'Idempotency-Key': randomUUID() },
         }),
       ),

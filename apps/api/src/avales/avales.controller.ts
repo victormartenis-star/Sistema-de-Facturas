@@ -22,6 +22,8 @@ import {
   avalesQuerySchema,
   avalesResumenQuerySchema,
   devengoAnularSchema,
+  devengoAutomaticoSchema,
+  type DevengoAutomaticoInput,
   devengoAvalesQuerySchema,
   devengoAvalesSchema,
   lineaAvalCreateSchema,
@@ -86,6 +88,28 @@ export class AvalesController {
     q: DevengoAvalesQuery,
   ) {
     return this.devengo.listar(q);
+  }
+
+  /** Ejecuciones del devengo (manuales y programadas), más recientes primero. */
+  @Get('devengos/ejecuciones')
+  ejecucionesDevengo() {
+    return this.devengo.ejecuciones();
+  }
+
+  /**
+   * Devengo automático de todos los meses terminados pendientes hasta
+   * `hasta` (por defecto, el mes anterior). Idempotente; lo ejecuta también
+   * la tarea programada del día 1.
+   */
+  @Post('devengos/automatico')
+  @Roles('admin', 'gerente', 'administracion')
+  @Idempotente()
+  @HttpCode(200)
+  devengoAutomatico(
+    @Body(new ZodValidationPipe(devengoAutomaticoSchema))
+    body: DevengoAutomaticoInput,
+  ) {
+    return this.devengo.automatico(body, 'manual');
   }
 
   /** Devenga un mes: un aval o todos los emitidos vivos con tasa. */

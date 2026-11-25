@@ -6,7 +6,12 @@ import {
   ESTADO_CIERRE_EJERCICIO_LABELS,
   type AsientoCierrePropuestoDto,
 } from '@erp/shared';
-import { cierreEjercicioApi, formatDate, formatEur } from '@/lib/api';
+import {
+  cierreEjercicioApi,
+  conciliacionApi,
+  formatDate,
+  formatEur,
+} from '@/lib/api';
 import { nuevoUuid } from '@/lib/api-error';
 import { crearGuardaEnvio } from '@/lib/envio-unico';
 import { usePermisos } from '@/lib/permisos';
@@ -331,6 +336,7 @@ function AplicacionResultado({ ejercicio }: { ejercicio: number }) {
   const [importes, setImportes] = useState<Record<string, string>>({});
   const [fecha, setFecha] = useState(`${ejercicio + 1}-06-30`);
   const [acuerdo, setAcuerdo] = useState('');
+  const [fueraDePlazo, setFueraDePlazo] = useState(false);
   const [motivo, setMotivo] = useState('');
   const clave = useRef(nuevoUuid());
   const [guarda] = useState(crearGuardaEnvio);
@@ -354,6 +360,7 @@ function AplicacionResultado({ ejercicio }: { ejercicio: number }) {
     clave.current = nuevoUuid();
     setImportes({});
     setAcuerdo('');
+    setFueraDePlazo(false);
     setMotivo('');
     toast(texto);
     refrescar();
@@ -365,6 +372,7 @@ function AplicacionResultado({ ejercicio }: { ejercicio: number }) {
         {
           fecha,
           acuerdo: acuerdo.trim(),
+          ...(fueraDePlazo ? { aceptarFueraDePlazo: true } : {}),
           reparto: Object.entries(importes)
             .filter(([, v]) => v.trim() && Number(v.replace(',', '.')) > 0)
             .map(([cuenta, v]) => ({
@@ -413,8 +421,17 @@ function AplicacionResultado({ ejercicio }: { ejercicio: number }) {
         {formatEur(p.reservasVoluntarias)} · pérdidas pendientes{' '}
         {formatEur(p.negativosAnteriores)}
         {p.resultado > 0 &&
-          ` · reserva legal mínima ${formatEur(p.reservaLegalMinima)}`}
+          ` · reserva legal mínima ${formatEur(p.reservaLegalMinima)} · dividendo máximo ${formatEur(p.dividendoMaximo)}`}
+        {` · patrimonio neto ${formatEur(p.patrimonioNeto)} · plazo de la junta hasta ${formatDate(p.fechaLimite)}`}
       </p>
+      {p.situacionPatrimonial.bajoCapital && (
+        <p className="mb-3 rounded bg-amber-50 p-2 text-xs text-amber-800">
+          El patrimonio neto está por debajo del capital social: no se pueden
+          repartir dividendos que lo reduzcan (art. 273.2 LSC).
+          {p.situacionPatrimonial.desequilibrio &&
+            ' Además es inferior a la mitad del capital: causa de disolución salvo que se reequilibre (art. 363 LSC).'}
+        </p>
+      )}
       {prop.isError && <ErrorBanner message={(prop.error as Error).message} />}
       {vigente ? (
         <>
@@ -521,6 +538,16 @@ function AplicacionResultado({ ejercicio }: { ejercicio: number }) {
                 onChange={(e) => setFecha(e.target.value)}
                 required
               />
+              {fecha > p.fechaLimite && (
+                <label className="mt-1 flex items-center gap-1 text-xs text-amber-700">
+                  <input
+                    type="checkbox"
+                    checked={fueraDePlazo}
+                    onChange={(e) => setFueraDePlazo(e.target.checked)}
+                  />
+                  Fuera del plazo de seis meses: confirmar
+                </label>
+              )}
             </div>
             <div className="sm:col-span-2">
               <label className={labelCls} htmlFor="apl-acuerdo">
@@ -667,6 +694,233 @@ function CuentasAnuales({ ejercicio }: { ejercicio: number }) {
           </div>
         </div>
       )}
+      {c && (
+        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+          <div className="overflow-x-auto rounded-xl border bg-white p-3 shadow-sm lg:col-span-2">
+            <p className="mb-1 text-xs font-semibold uppercase text-gray-500">
+              Estado de cambios en el patrimonio neto
+              {!c.ecpn.cuadraConBalance && (
+                <span className="ml-2 text-red-700">
+                  (no cuadra con el balance)
+                </span>
+              )}
+            </p>
+            <table className="w-full text-xs">
+              <thead className="text-left text-gray-500">
+                <tr>
+                  <th className="py-1" />
+                  <th className="py-1 text-right">Capital</th>
+                  <th className="py-1 text-right">Reservas</th>
+                  <th className="py-1 text-right">Rdos. anteriores</th>
+                  <th className="py-1 text-right">Rdo. ejercicio</th>
+                  <th className="py-1 text-right">Otros</th>
+                  <th className="py-1 text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {c.ecpn.filas.map((f) => (
+                  <tr
+                    key={f.clave}
+                    className={`border-t border-gray-100 ${f.clave === 'saldoFinal' || f.clave === 'saldoInicial' ? 'font-semibold' : ''}`}
+                  >
+                    <td className="py-1 pr-2">{f.etiqueta}</td>
+                    {(
+                      [
+                        'capital',
+                        'reservas',
+                        'resultadosAnteriores',
+                        'resultadoEjercicio',
+                        'otros',
+                      ] as const
+                    ).map((col) => (
+                      <td key={col} className="py-1 text-right tabular-nums">
+                        {f.importes[col] === 0
+                          ? ''
+                          : formatEur(f.importes[col])}
+                      </td>
+                    ))}
+                    <td className="py-1 text-right font-semibold tabular-nums">
+                      {formatEur(f.total)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="rounded-xl border bg-white p-3 shadow-sm">
+            <p className="mb-1 text-xs font-semibold uppercase text-gray-500">
+              Estado de flujos de efectivo
+              {!c.efe.cuadra && (
+                <span className="ml-2 text-red-700">(no cuadra)</span>
+              )}
+            </p>
+            {(
+              [
+                ['Resultado del ejercicio', c.efe.explotacion.resultado],
+                [
+                  'Ajustes (amortizaciones, provisiones)',
+                  c.efe.explotacion.ajustes,
+                ],
+                [
+                  'Cambios en el capital corriente',
+                  c.efe.explotacion.capitalCorriente,
+                ],
+              ] as const
+            ).map(([e, v]) => (
+              <p
+                key={e}
+                className="flex justify-between gap-2 text-xs text-gray-600"
+              >
+                <span>{e}</span>
+                <span className="tabular-nums">{formatEur(v)}</span>
+              </p>
+            ))}
+            <p className="flex justify-between text-sm">
+              <span>Flujos de explotación</span>
+              <span className="tabular-nums">
+                {formatEur(c.efe.explotacion.total)}
+              </span>
+            </p>
+            <p className="flex justify-between text-sm">
+              <span>Flujos de inversión</span>
+              <span className="tabular-nums">{formatEur(c.efe.inversion)}</span>
+            </p>
+            <p className="flex justify-between text-sm">
+              <span>Flujos de financiación</span>
+              <span className="tabular-nums">
+                {formatEur(c.efe.financiacion)}
+              </span>
+            </p>
+            <p className="mt-1 flex justify-between border-t pt-1 text-sm font-semibold">
+              <span>Variación del efectivo</span>
+              <span className="tabular-nums">
+                {formatEur(c.efe.variacionEfectivo)}
+              </span>
+            </p>
+            <p className="text-xs text-gray-500">
+              Efectivo inicial {formatEur(c.efe.efectivoInicial)} · final{' '}
+              {formatEur(c.efe.efectivoFinal)}
+            </p>
+          </div>
+        </div>
+      )}
+      <ConciliacionCierre />
     </section>
+  );
+}
+
+/**
+ * Conciliación de cierre auxiliar ↔ mayor (devengos de avales, amortización,
+ * obra en curso, provisión por pérdidas). Registrarla deja evidencia.
+ */
+function ConciliacionCierre() {
+  const clave = useRef(nuevoUuid());
+  const [guarda] = useState(crearGuardaEnvio);
+  const { can } = usePermisos();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const avisarError = useAvisarError();
+  const vivo = useQuery({
+    queryKey: ['cierre-ejercicio', 'conciliacion'],
+    queryFn: () => conciliacionApi.consultar(),
+  });
+  const historial = useQuery({
+    queryKey: ['cierre-ejercicio', 'conciliacion', 'historial'],
+    queryFn: () => conciliacionApi.historial(),
+  });
+  const registrar = useMutation({
+    mutationFn: () => conciliacionApi.registrar(clave.current),
+    onSuccess: (r) => {
+      clave.current = nuevoUuid();
+      toast(
+        r.cuadra
+          ? 'Conciliación registrada: todo cuadra'
+          : `Conciliación registrada con ${r.descuadres} descuadre(s)`,
+        r.cuadra ? 'success' : 'error',
+      );
+      void qc.invalidateQueries({
+        queryKey: ['cierre-ejercicio', 'conciliacion'],
+      });
+    },
+    onError: (e) => avisarError(e),
+  });
+  useEffect(() => {
+    if (!registrar.isPending) guarda.liberar();
+  }, [registrar.isPending, guarda]);
+  const c = vivo.data;
+  return (
+    <div className="mt-4 rounded-xl border bg-white p-3 shadow-sm">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase text-gray-500">
+          Conciliación auxiliar ↔ mayor
+          {c && (
+            <span
+              className={`ml-2 ${c.cuadra ? 'text-emerald-700' : 'text-red-700'}`}
+            >
+              {c.cuadra ? 'cuadra' : `${c.descuadres} descuadre(s)`}
+            </span>
+          )}
+        </p>
+        <Autorizado accion="cambiarEstado" recurso="contabilidad">
+          <button
+            type="button"
+            className={btnGhostCls}
+            disabled={registrar.isPending}
+            onClick={() => {
+              if (
+                !can('cambiarEstado', 'contabilidad') ||
+                registrar.isPending ||
+                !guarda.intentar()
+              )
+                return;
+              registrar.mutate();
+            }}
+          >
+            {registrar.isPending ? 'Registrando…' : 'Registrar evidencia'}
+          </button>
+        </Autorizado>
+      </div>
+      {vivo.isError && <ErrorBanner message={(vivo.error as Error).message} />}
+      {c && (
+        <table className="w-full text-xs">
+          <thead className="text-left text-gray-500">
+            <tr>
+              <th className="py-1">Partida</th>
+              <th className="py-1">Cuentas</th>
+              <th className="py-1 text-right">Auxiliar</th>
+              <th className="py-1 text-right">Mayor</th>
+              <th className="py-1 text-right">Diferencia</th>
+            </tr>
+          </thead>
+          <tbody>
+            {c.partidas.map((p) => (
+              <tr key={p.clave} className="border-t border-gray-100">
+                <td className="py-1">{p.etiqueta}</td>
+                <td className="py-1 text-gray-500">{p.cuentas}</td>
+                <td className="py-1 text-right tabular-nums">
+                  {formatEur(p.auxiliar)}
+                </td>
+                <td className="py-1 text-right tabular-nums">
+                  {formatEur(p.mayor)}
+                </td>
+                <td
+                  className={`py-1 text-right tabular-nums ${p.cuadra ? 'text-emerald-700' : 'font-semibold text-red-700'}`}
+                >
+                  {formatEur(p.diferencia)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {(historial.data ?? []).length > 0 && (
+        <p className="mt-2 text-xs text-gray-500">
+          Última evidencia: {formatDate(historial.data![0].fecha)} ·{' '}
+          {historial.data![0].cuadra
+            ? 'cuadraba'
+            : `${historial.data![0].descuadres} descuadre(s)`}
+        </p>
+      )}
+    </div>
   );
 }

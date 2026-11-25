@@ -22,7 +22,8 @@ import {
   FasePlanificadaInput,
   SobrecostePartidaInput,
   buildCurvaS,
-  buildPlannedByPeriod,
+  buildPlannedByPeriodCents,
+  pvAcumuladoHasta,
   centsToNumeric,
   computeCostControl,
   computeDesviacionPorPartida,
@@ -111,8 +112,9 @@ export class CostControlService {
         ),
       );
 
-    const budgetByPhase = new Map<string, number>();
-    let bac = 0;
+    // Todo el núcleo EVM en céntimos BigInt: BAC, AC, EV y PV exactos.
+    const budgetByPhase = new Map<string, bigint>();
+    let bacCents = 0n;
     if (activeBudget) {
       const rows = await this.dbs.db
         .select({
@@ -123,15 +125,15 @@ export class CostControlService {
         .where(eq(budgetItems.budgetId, activeBudget.id))
         .groupBy(budgetItems.phaseId);
       for (const row of rows) {
-        const amount = Number(row.total);
-        bac += amount;
+        const amount = toCents(row.total);
+        bacCents += amount;
         if (row.phaseId) budgetByPhase.set(row.phaseId, amount);
       }
     } else {
-      bac =
-        project.contractAmount === null ? 0 : Number(project.contractAmount);
+      bacCents =
+        project.contractAmount === null ? 0n : toCents(project.contractAmount);
       for (const phase of phases) {
-        budgetByPhase.set(phase.id, Number(phase.budgetAmount ?? 0));
+        budgetByPhase.set(phase.id, toCents(phase.budgetAmount ?? 0));
       }
     }
 
@@ -139,15 +141,11 @@ export class CostControlService {
     const { invoiceRows, personalRows, maquinariaRows } =
       await this.loadCostRows(projectId);
 
-    const facturasCompra = invoiceRows.reduce((s, r) => s + Number(r.total), 0);
-    const partesPersonalTotal = personalRows.reduce(
-      (s, r) => s + Number(r.total),
-      0,
-    );
-    const partesMaquinariaTotal = maquinariaRows.reduce(
-      (s, r) => s + Number(r.total),
-      0,
-    );
+    const suma = (rows: { total: string }[]) =>
+      sumCents(rows.map((r) => toCents(r.total)));
+    const facturasCompra = fromCents(suma(invoiceRows));
+    const partesPersonalTotal = fromCents(suma(personalRows));
+    const partesMaquinariaTotal = fromCents(suma(maquinariaRows));
     // Almacén y amortización imputados (sin partida), como en el cuadro de márgenes.
     // Coste de avales y EAC manual: del cuadro de márgenes (misma fuente de
     // verdad, que ya excluye los asientos de cierre del ejercicio).
@@ -176,14 +174,13 @@ export class CostControlService {
       ),
     );
 
-    const actualByPhase = new Map<string, number>();
-    for (const [phaseId, total] of [
-      ...invoiceRows.map((r) => [r.phaseId, Number(r.total)] as const),
-      ...personalRows.map((r) => [r.phaseId, Number(r.total)] as const),
-      ...maquinariaRows.map((r) => [r.phaseId, Number(r.total)] as const),
-    ]) {
-      if (!phaseId) continue;
-      actualByPhase.set(phaseId, (actualByPhase.get(phaseId) ?? 0) + total);
+    const actualByPhase = new Map<string, bigint>();
+    for (const r of [...invoiceRows, ...personalRows, ...maquinariaRows]) {
+      if (!r.phaseId) continue;
+      actualByPhase.set(
+        r.phaseId,
+        (actualByPhase.get(r.phaseId) ?? 0n) + toCents(r.total),
+      );
     }
 
     // EV: última certificación (mayor seq) de la obra.
@@ -198,9 +195,25 @@ export class CostControlService {
       )
       .orderBy(sql`${certifications.seq} desc`)
       .limit(1);
-    const ev = lastCert ? Number(lastCert.cumulativeAmount) : 0;
+    const ev = lastCert ? lastCert.cumulativeAmount : '0';
 
-    const result = computeCostControl({ bac, ac, ev });
+    const plannedInput: FasePlanificadaInput[] = phases
+      .filter((p) => p.plannedStartDate && p.plannedEndDate)
+      .map((p) => ({
+        budgetAmount: fromCents(budgetByPhase.get(p.id) ?? 0n),
+        plannedStartDate: p.plannedStartDate!,
+        plannedEndDate: p.plannedEndDate!,
+      }));
+    const plannedByPeriod = buildPlannedByPeriodCents(plannedInput);
+    // PV a la fecha: lo planificado hasta el mes en curso (SPI = EV / PV).
+    const pv = pvAcumuladoHasta(plannedByPeriod, todayIso().slice(0, 7));
+
+    const result = computeCostControl({
+      bac: centsToNumeric(bacCents),
+      ac: centsToNumeric(toCents(ac)),
+      ev,
+      pv,
+    });
     const evm = evmConEstimacion({
       bac: result.bac,
       ac: result.ac,
@@ -216,22 +229,14 @@ export class CostControlService {
       phaseId: phase.id,
       code: phase.code,
       name: phase.name,
-      budget: budgetByPhase.get(phase.id) ?? 0,
-      actual: actualByPhase.get(phase.id) ?? 0,
+      budget: fromCents(budgetByPhase.get(phase.id) ?? 0n),
+      actual: fromCents(actualByPhase.get(phase.id) ?? 0n),
     }));
     const sobrecostePorPartida = computeSobrecostePorPartida(sobrecosteInput);
 
-    const plannedInput: FasePlanificadaInput[] = phases
-      .filter((p) => p.plannedStartDate && p.plannedEndDate)
-      .map((p) => ({
-        budgetAmount: budgetByPhase.get(p.id) ?? 0,
-        plannedStartDate: p.plannedStartDate!,
-        plannedEndDate: p.plannedEndDate!,
-      }));
-    const plannedByPeriod = buildPlannedByPeriod(plannedInput);
     const curvaPlanificadaPartidasSinFechas = phases.filter(
       (p) =>
-        (budgetByPhase.get(p.id) ?? 0) > 0 &&
+        (budgetByPhase.get(p.id) ?? 0n) > 0n &&
         (!p.plannedStartDate || !p.plannedEndDate),
     ).length;
 
@@ -248,9 +253,9 @@ export class CostControlService {
       etc: evm.etc,
       tcpi: evm.tcpi,
       acBreakdown: {
-        facturasCompra: Math.round(facturasCompra * 100) / 100,
-        partesPersonal: Math.round(partesPersonalTotal * 100) / 100,
-        partesMaquinaria: Math.round(partesMaquinariaTotal * 100) / 100,
+        facturasCompra,
+        partesPersonal: partesPersonalTotal,
+        partesMaquinaria: partesMaquinariaTotal,
         almacen: almacenTotal,
         amortizacion: amortizacionTotal,
         avales: avalesTotal,
@@ -790,7 +795,7 @@ export class CostControlService {
    */
   private async buildCurvaSParaObra(
     projectId: string,
-    plannedByPeriod: Map<string, number>,
+    plannedByPeriod: Map<string, bigint>,
   ): Promise<ReturnType<typeof buildCurvaS>> {
     const invoiceRows = await this.dbs.db
       .select({ date: invoices.issueDate, amount: invoiceLines.baseAmount })
@@ -841,7 +846,10 @@ export class CostControlService {
         ),
       );
 
-    const actualByPeriod = new Map<string, number>();
+    // Serie mensual en céntimos BigInt (sin acumular coma flotante).
+    const actualByPeriod = new Map<string, bigint>();
+    const suma = (mapa: Map<string, bigint>, period: string, v: bigint) =>
+      mapa.set(period, (mapa.get(period) ?? 0n) + v);
     const [almacenMes, amortizacionMes, avalesMes] = await Promise.all([
       costeAlmacen(this.dbs.db, [projectId], { porMes: true }),
       costeAmortizacion(this.dbs.db, [projectId], { porMes: true }),
@@ -849,27 +857,15 @@ export class CostControlService {
     ]);
     for (const mapa of [almacenMes, amortizacionMes, avalesMes]) {
       for (const [clave, v] of mapa) {
-        const period = clave.slice(clave.indexOf('|') + 1);
-        actualByPeriod.set(
-          period,
-          (actualByPeriod.get(period) ?? 0) + fromCents(v),
-        );
+        suma(actualByPeriod, clave.slice(clave.indexOf('|') + 1), v);
       }
     }
     for (const row of [...invoiceRows, ...personalRows, ...maquinariaRows]) {
-      const period = row.date.slice(0, 7);
-      actualByPeriod.set(
-        period,
-        (actualByPeriod.get(period) ?? 0) + Number(row.amount),
-      );
+      suma(actualByPeriod, row.date.slice(0, 7), toCents(row.amount ?? 0));
     }
-    const earnedByPeriod = new Map<string, number>();
+    const earnedByPeriod = new Map<string, bigint>();
     for (const row of certRows) {
-      const period = row.date.slice(0, 7);
-      earnedByPeriod.set(
-        period,
-        (earnedByPeriod.get(period) ?? 0) + Number(row.amount),
-      );
+      suma(earnedByPeriod, row.date.slice(0, 7), toCents(row.amount ?? 0));
     }
     return buildCurvaS(actualByPeriod, earnedByPeriod, plannedByPeriod);
   }

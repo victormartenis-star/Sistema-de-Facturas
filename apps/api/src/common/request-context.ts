@@ -57,6 +57,21 @@ export function getRequestContext(): RequestContext | undefined {
   return storage.getStore()?.identidad;
 }
 
+/** Usuario de las tareas programadas (no existe en `users`). */
+export const USUARIO_SISTEMA = '00000000-0000-0000-0000-000000000000';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Id de usuario que se puede guardar en columnas con FK a `users`
+ * (`created_by`…): el de la petición, o null en tareas programadas
+ * (`USUARIO_SISTEMA` u otro identificador que no es un usuario real).
+ */
+export function usuarioPersistible(): string | null {
+  const id = getRequestContext()?.userId;
+  return id && UUID.test(id) && id !== USUARIO_SISTEMA ? id : null;
+}
+
 /** `correlationId` de la petición en curso, o `null` fuera de un contexto. */
 export function getCorrelationId(): string | null {
   const id = storage.getStore()?.correlationId;

@@ -54,6 +54,9 @@ import type {
   AplicacionResultadoInput,
   DevengoAvalDto,
   ResultadoDevengoAvalesDto,
+  ResultadoDevengoAutomaticoDto,
+  EjecucionDevengoDto,
+  ConciliacionCierreDto,
   ResultadoCierreProvisionPerdidasDto,
   AjusteConsolidacionCreateInput,
   AjusteConsolidacionDto,
@@ -2602,6 +2605,14 @@ export const avalesApi = {
         ...idempotencyKey(clave),
       },
     }),
+  devengoAutomatico: (hasta: string | undefined, clave: string) =>
+    request<ResultadoDevengoAutomaticoDto>('/avales/devengos/automatico', {
+      method: 'POST',
+      body: JSON.stringify(hasta ? { hasta } : {}),
+      headers: idempotencyKey(clave),
+    }),
+  ejecucionesDevengo: () =>
+    request<EjecucionDevengoDto[]>('/avales/devengos/ejecuciones'),
   lineas: () => request<LineaAvalDto[]>('/avales/lineas'),
   crearLinea: (input: LineaAvalCreateInput, clave: string) =>
     request<LineaAvalDto>('/avales/lineas', {
@@ -2685,6 +2696,19 @@ export const cierreEjercicioApi = {
         },
       },
     ),
+};
+
+/* ───────────────────── Conciliación de cierre (auxiliar ↔ mayor) ───────────────────── */
+
+export const conciliacionApi = {
+  consultar: () => request<ConciliacionCierreDto>('/contabilidad/conciliacion'),
+  historial: () =>
+    request<ConciliacionCierreDto[]>('/contabilidad/conciliacion/historial'),
+  registrar: (clave: string) =>
+    request<ConciliacionCierreDto>('/contabilidad/conciliacion', {
+      method: 'POST',
+      headers: idempotencyKey(clave),
+    }),
 };
 
 /* ───────────────────── Estimación al cierre (EAC) por obra ───────────────────── */
