@@ -1007,7 +1007,16 @@ function ConciliacionCierre() {
           <tbody>
             {c.partidas.map((p) => (
               <tr key={p.clave} className="border-t border-gray-100">
-                <td className="py-1">{p.etiqueta}</td>
+                <td className="py-1">
+                  {p.etiqueta}
+                  {p.detalle && p.detalle.some((d) => d.importe !== 0) && (
+                    <span className="block text-[11px] text-gray-500">
+                      {p.detalle
+                        .map((d) => `${d.concepto}: ${formatEur(d.importe)}`)
+                        .join(' · ')}
+                    </span>
+                  )}
+                </td>
                 <td className="py-1 text-gray-500">{p.cuentas}</td>
                 <td className="py-1 text-right tabular-nums">
                   {formatEur(p.auxiliar)}

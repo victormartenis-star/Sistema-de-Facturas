@@ -381,15 +381,18 @@ function DevengosAval() {
     queryKey: ['avales', 'devengos', 'ejecuciones'],
     queryFn: () => avalesApi.ejecucionesDevengo(),
   });
+  const lotes = useQuery({
+    queryKey: ['avales', 'devengos', 'lotes'],
+    queryFn: () => avalesApi.lotesDevengo(),
+  });
   const automatico = useMutation({
     mutationFn: () => avalesApi.devengoAutomatico(undefined, clave.current),
     onSuccess: (r) => {
       clave.current = nuevoUuid();
-      const omitidos = r.periodos.reduce((t, p) => t + p.omitidos.length, 0);
       toast(
         `Devengo automático ${r.desde ?? '—'} a ${r.hasta}: ${r.contabilizados} devengos (${formatEur(r.importe)})` +
-          (omitidos ? ` · ${omitidos} omitidos` : ''),
-        omitidos ? 'error' : 'success',
+          (r.alertas ? ` · ${r.alertas} aviso(s) que requieren acción` : ''),
+        r.alertas ? 'error' : 'success',
       );
       refrescar();
     },
@@ -402,6 +405,9 @@ function DevengosAval() {
   }, [ocupado, guarda]);
   const filas = lista.data ?? [];
   const ultima = ejecuciones.data?.[0];
+  const lote = lotes.data?.[0];
+  const alertasLote = lote?.avisos.filter((a) => a.nivel === 'alerta') ?? [];
+  const infoLote = lote?.avisos.filter((a) => a.nivel === 'info') ?? [];
 
   return (
     <section className="mt-8">
@@ -471,6 +477,39 @@ function DevengosAval() {
       </div>
       {lista.isError && (
         <ErrorBanner message={(lista.error as Error).message} />
+      )}
+      {lote && lote.avisos.length > 0 && (
+        <div
+          className={`mb-3 rounded-lg border p-3 text-xs ${alertasLote.length ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-gray-50'}`}
+        >
+          <p className="mb-1 font-semibold text-gray-700">
+            Último devengo automático (
+            {lote.disparo === 'automatico' ? 'tarea programada' : 'manual'},
+            referencia {formatDate(lote.fechaReferencia)}):{' '}
+            {lote.contabilizados} devengos · {formatEur(lote.importe)}
+            {alertasLote.length > 0 &&
+              ` · ${alertasLote.length} aviso(s) que requieren acción`}
+          </p>
+          <ul className="space-y-0.5">
+            {alertasLote.map((a) => (
+              <li key={`${a.motivo}-${a.desde}`} className="text-amber-800">
+                ⚠ {a.detalle}
+              </li>
+            ))}
+          </ul>
+          {infoLote.length > 0 && (
+            <details className="mt-1 text-gray-600">
+              <summary className="cursor-pointer">
+                {infoLote.length} aviso(s) informativo(s)
+              </summary>
+              <ul>
+                {infoLote.map((a) => (
+                  <li key={`${a.motivo}-${a.desde}`}>{a.detalle}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
       )}
       {filas.length > 0 && (
         <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">

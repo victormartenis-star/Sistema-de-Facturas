@@ -15,6 +15,7 @@ import {
   type AvalDetalleDto,
   type ConciliacionCierreDto,
   type EjecucionDevengoDto,
+  type LoteDevengoDto,
   type ResultadoDevengoAutomaticoDto,
   type AplicacionResultadoDto,
   type CierreEjercicioDto,
@@ -338,9 +339,13 @@ export function registrarCierre(server: McpServer) {
       description:
         'Recorre los meses terminados hasta `hasta` (por defecto, el anterior ' +
         'al actual) desde el primero en que algún aval pudo devengar (máximo ' +
-        '24) y devenga lo que falte. Idempotente: lo ya devengado no se repite ' +
-        'ni se informa; los rechazos reales (período cerrado) sí, en ' +
-        '`periodos[].omitidos`. Es lo mismo que la tarea programada del día 1.',
+        '24) y devenga lo que falte. Idempotente: lo ya devengado no se ' +
+        'repite. `avisos` explica cada rango de meses no devengado con su ' +
+        '`motivo` (ya_devengado, sin_avales: info; periodo_cerrado, ' +
+        'ejercicio_cerrado, rechazado, fuera_de_ventana: alerta) y `alertas` ' +
+        'cuenta los que piden acción; la ejecución queda como lote auditado ' +
+        '(`loteId`). Es lo mismo que la tarea programada del día 1; ' +
+        '`fechaReferencia` fija qué meses están terminados.',
       inputSchema: devengoAutomaticoSchema.shape,
       annotations: { readOnlyHint: false, idempotentHint: true },
     },
@@ -370,6 +375,23 @@ export function registrarCierre(server: McpServer) {
       ),
   );
 
+  server.registerTool(
+    'lotes_devengo_avales',
+    {
+      title: 'Lotes y avisos del devengo automático de avales',
+      description:
+        'Ejecuciones completas del devengo automático (endpoint o tarea ' +
+        'programada del día 1), más recientes primero: fecha de referencia, ' +
+        'rango, devengos, importe y `avisos` de los meses omitidos o saltados ' +
+        'con su motivo y nivel. Úsalo para saber si la tarea programada dejó ' +
+        'meses sin devengar (`alertas` > 0).',
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    async () =>
+      ejecutar(() => pedir<LoteDevengoDto[]>('/avales/devengos/lotes')),
+  );
+
   /* ─────────── conciliación de cierre (auxiliar ↔ mayor) ─────────── */
 
   server.registerTool(
@@ -380,9 +402,10 @@ export function registrarCierre(server: McpServer) {
         'A una fecha de corte (`fecha`, por defecto hoy; nunca futura): ' +
         'devengos de aval pendientes ↔ 4100, amortización acumulada ↔ 281x, ' +
         'obra en curso ↔ 4309 − 4389, provisión por pérdidas ↔ 4994, ' +
-        'clientes ↔ 4300 + 4301, proveedores ↔ 4000 + 4001 y almacén ↔ ' +
-        'grupo 3, con diferencia y `cuadra` por partida. Error: ' +
-        'CLOSE_RECONCILIATION_DATE_INVALID.',
+        'clientes ↔ 4300, retenciones de garantía de clientes ↔ 4301, ' +
+        'proveedores ↔ 4000, retenciones de proveedores ↔ 4001 (con `detalle` ' +
+        'vencida / no_vencida a la fecha) y almacén ↔ grupo 3, con diferencia ' +
+        'y `cuadra` por partida. Error: CLOSE_RECONCILIATION_DATE_INVALID.',
       inputSchema: conciliacionCierreQuerySchema.shape,
       annotations: { readOnlyHint: true },
     },

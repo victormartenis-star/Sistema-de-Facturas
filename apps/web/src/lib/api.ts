@@ -56,6 +56,7 @@ import type {
   ResultadoDevengoAvalesDto,
   ResultadoDevengoAutomaticoDto,
   EjecucionDevengoDto,
+  LoteDevengoDto,
   ConciliacionCierreDto,
   ResultadoCierreProvisionPerdidasDto,
   AjusteConsolidacionCreateInput,
@@ -2625,6 +2626,8 @@ export const avalesApi = {
     }),
   ejecucionesDevengo: () =>
     request<EjecucionDevengoDto[]>('/avales/devengos/ejecuciones'),
+  /** Lotes del devengo automático con los avisos de meses omitidos. */
+  lotesDevengo: () => request<LoteDevengoDto[]>('/avales/devengos/lotes'),
   lineas: () => request<LineaAvalDto[]>('/avales/lineas'),
   crearLinea: (input: LineaAvalCreateInput, clave: string) =>
     request<LineaAvalDto>('/avales/lineas', {
