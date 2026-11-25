@@ -66,4 +66,5 @@ export * from './avales';
 export * from './cierre-ejercicio';
 export * from './estimacion-cierre';
 export * from './aplicacion-resultado';
+export * from './memoria-abreviada';
 export * from './consolidacion';

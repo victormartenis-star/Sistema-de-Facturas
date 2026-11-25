@@ -3329,6 +3329,8 @@ export interface TramoDevengo {
   hasta: string;
   dias: number;
   saldo: number;
+  /** Tasa anual aplicada en el tramo (%). Ausente en devengos anteriores a la 0064. */
+  tasaAnualPct?: number;
   importe: number;
 }
 
@@ -3347,9 +3349,15 @@ export function devengoPorTramos(p: {
   periodo: string;
   emision: string;
   vencimiento: string | null;
+  /** Tasa única (sin historial) o la de respaldo antes del primer cambio. */
   tasaAnualPct: Importe;
   /** Historial de saldo vivo: el de cada fecha rige desde ese día. */
   saldos: readonly { fecha: string; saldo: Importe }[];
+  /**
+   * Historial de tasas (opcional): la de cada fecha rige desde ese día; antes
+   * del primer cambio, `tasaAnualPct`. Un cambio dentro del mes abre tramo.
+   */
+  tasas?: readonly { fecha: string; tasaAnualPct: Importe }[];
   baseDias?: number;
 }): { tramos: TramoDevengo[]; dias: number; importe: number } {
   const base = p.baseDias ?? 365;
@@ -3362,36 +3370,51 @@ export function devengoPorTramos(p: {
   const hist = [...p.saldos]
     .map((s) => ({ fecha: s.fecha, saldo: toCents(s.saldo) }))
     .sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const histTasas = [...(p.tasas ?? [])]
+    .map((t) => ({ fecha: t.fecha, tasa: toScaled(t.tasaAnualPct, 4) }))
+    .sort((a, b) => a.fecha.localeCompare(b.fecha));
   const saldoEn = (fecha: string) => {
     let s = 0n;
     for (const h of hist) if (h.fecha <= fecha) s = h.saldo;
     return s;
   };
+  const tasaEn = (fecha: string) => {
+    let t = toScaled(p.tasaAnualPct, 4);
+    for (const h of histTasas) if (h.fecha <= fecha) t = h.tasa;
+    return t;
+  };
   const cortes = [
     mes.desde,
-    ...hist.map((h) => h.fecha).filter((f) => f > mes.desde && f <= mes.hasta),
+    ...[...hist, ...histTasas]
+      .map((h) => h.fecha)
+      .filter((f) => f > mes.desde && f <= mes.hasta)
+      .sort(),
   ].filter((f, i, a) => a.indexOf(f) === i);
   const brutos: {
     desde: string;
     hasta: string;
     dias: number;
     saldo: bigint;
+    tasa: bigint;
   }[] = [];
   cortes.forEach((desde, i) => {
     const hasta =
       i + 1 < cortes.length ? masDias(cortes[i + 1], -1) : mes.hasta;
     const saldo = saldoEn(desde);
     if (saldo > 0n) {
-      brutos.push({ desde, hasta, dias: diasEntre(desde, hasta), saldo });
+      brutos.push({
+        desde,
+        hasta,
+        dias: diasEntre(desde, hasta),
+        saldo,
+        tasa: tasaEn(desde),
+      });
     }
   });
-  const tasa = toScaled(p.tasaAnualPct, 4);
-  const pesos = brutos.map((t) => t.saldo * BigInt(t.dias));
-  const total = mulDivRound(
-    sumCents(pesos) * tasa,
-    1n,
-    10_000n * 100n * BigInt(base),
-  );
+  // Σ saldo × días × tasa, redondeado una sola vez y repartido por resto
+  // mayor: con saldo y tasa constantes coincide con devengoComisionAval.
+  const pesos = brutos.map((t) => t.saldo * BigInt(t.dias) * t.tasa);
+  const total = mulDivRound(sumCents(pesos), 1n, 10_000n * 100n * BigInt(base));
   const importes = brutos.length === 0 ? [] : repartirCents(total, pesos);
   return {
     tramos: brutos.map((t, i) => ({
@@ -3399,11 +3422,30 @@ export function devengoPorTramos(p: {
       hasta: t.hasta,
       dias: t.dias,
       saldo: fromCents(t.saldo),
+      tasaAnualPct: Number(t.tasa) / 10_000,
       importe: fromCents(importes[i]),
     })),
     dias: brutos.reduce((s, t) => s + t.dias, 0),
     importe: fromCents(total),
   };
+}
+
+/**
+ * Un mes está terminado respecto a una fecha de referencia (por defecto la
+ * del sistema, que pasa el llamador): solo se devengan meses terminados. Con
+ * la referencia explícita el cálculo es determinista (tests, reprocesos).
+ */
+export function mesTerminado(
+  periodo: string,
+  fechaReferencia: string,
+): boolean {
+  return periodo < fechaReferencia.slice(0, 7);
+}
+
+/** Mes anterior al de una fecha (AAAA-MM). */
+export function mesAnteriorA(fecha: string): string {
+  const [y, m] = fecha.split('-').map(Number);
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
 }
 
 /** Meses AAAA-MM de `desde` a `hasta` (ambos incluidos). */
@@ -3572,11 +3614,33 @@ export function actividadEfe(cuenta: string): ActividadEfe {
   return 'capitalCorriente';
 }
 
+/** Subgrupo del capital corriente en el EFE. */
+export type PartidaCapitalCorriente =
+  'existencias' | 'clientes' | 'proveedores' | 'administraciones' | 'otros';
+
+export function partidaCapitalCorriente(
+  cuenta: string,
+): PartidaCapitalCorriente {
+  const g2 = cuenta.slice(0, 2);
+  if (cuenta.startsWith('3')) return 'existencias';
+  if (g2 === '43' || g2 === '44') return 'clientes';
+  if (g2 === '40' || g2 === '41') return 'proveedores';
+  if (g2 === '47') return 'administraciones';
+  return 'otros';
+}
+
 export interface EstadoFlujosEfectivo {
   explotacion: {
     resultado: number;
     ajustes: number;
     capitalCorriente: number;
+    /**
+     * Desglose del capital corriente (suma exacta): existencias (3x),
+     * clientes y deudores (43x, 44x: lo facturado menos lo cobrado),
+     * proveedores y acreedores (40x, 41x), administraciones públicas (47x) y
+     * otros (resto del grupo 4).
+     */
+    capitalCorrienteDesglose: Record<PartidaCapitalCorriente, number>;
     total: number;
   };
   inversion: number;
@@ -3602,10 +3666,19 @@ export function estadoFlujosEfectivo(p: {
     financiacion: 0n,
     efectivo: 0n,
   };
+  const cc: Record<PartidaCapitalCorriente, bigint> = {
+    existencias: 0n,
+    clientes: 0n,
+    proveedores: 0n,
+    administraciones: 0n,
+    otros: 0n,
+  };
   for (const m of p.movimientos) {
     const deudor = toCents(m.debe) - toCents(m.haber);
     const a = actividadEfe(m.cuenta);
     acc[a] += a === 'efectivo' ? deudor : -deudor;
+    if (a === 'capitalCorriente')
+      cc[partidaCapitalCorriente(m.cuenta)] -= deudor;
   }
   const explotacion = acc.resultado + acc.ajustes + acc.capitalCorriente;
   const neto = explotacion + acc.inversion + acc.financiacion;
@@ -3615,6 +3688,13 @@ export function estadoFlujosEfectivo(p: {
       resultado: fromCents(acc.resultado),
       ajustes: fromCents(acc.ajustes),
       capitalCorriente: fromCents(acc.capitalCorriente),
+      capitalCorrienteDesglose: {
+        existencias: fromCents(cc.existencias),
+        clientes: fromCents(cc.clientes),
+        proveedores: fromCents(cc.proveedores),
+        administraciones: fromCents(cc.administraciones),
+        otros: fromCents(cc.otros),
+      },
       total: fromCents(explotacion),
     },
     inversion: fromCents(acc.inversion),

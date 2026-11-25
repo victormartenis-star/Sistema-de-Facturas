@@ -319,6 +319,7 @@ describe('ECPN, EFE, EVM BigInt, devengo por tramos y conciliación (integració
         hasta: '2026-03-15',
         dias: 15,
         saldo: 100000,
+        tasaAnualPct: 0.75,
         importe: 30.82,
       },
       {
@@ -326,6 +327,7 @@ describe('ECPN, EFE, EVM BigInt, devengo por tramos y conciliación (integració
         hasta: '2026-03-31',
         dias: 16,
         saldo: 40000,
+        tasaAnualPct: 0.75,
         importe: 13.15,
       },
     ]);
@@ -344,11 +346,16 @@ describe('ECPN, EFE, EVM BigInt, devengo por tramos y conciliación (integració
       .send({ periodo: '2026-05' })
       .expect(200);
     expect(may.body).toMatchObject({ contabilizados: 0, omitidos: [] });
+    // Con fecha de referencia explícita, el mes abierto no depende del reloj.
     const actual = await api()
       .post('/avales/devengos')
-      .send({ periodo: '2026-11' });
+      .send({ periodo: '2026-11', fechaReferencia: '2026-11-15' });
     expect(actual.status).toBe(422);
     expect(actual.body.errorCode).toBe('BANK_GUARANTEE_ACCRUAL_PERIOD_OPEN');
+    const futura = await api()
+      .post('/avales/devengos')
+      .send({ periodo: '2026-03', fechaReferencia: '2999-01-01' });
+    expect(futura.body.errorCode).toBe('BANK_GUARANTEE_REFERENCE_DATE_INVALID');
   });
 
   it('devengo automático (endpoint y tarea programada): idempotente y con períodos cerrados', async () => {
@@ -402,12 +409,13 @@ describe('ECPN, EFE, EVM BigInt, devengo por tramos y conciliación (integració
     expect(oct.omitidos[0].motivo).toContain('cerrado');
     const abierto = await api()
       .post('/avales/devengos/automatico')
-      .send({ hasta: '2026-11' });
+      .send({ hasta: '2026-11', fechaReferencia: '2026-11-15' });
     expect(abierto.body.errorCode).toBe('BANK_GUARANTEE_ACCRUAL_PERIOD_OPEN');
 
-    // La tarea programada devenga octubre al reabrirlo, con el usuario de sistema.
+    // La tarea programada devenga octubre al reabrirlo, con el usuario de
+    // sistema (fecha de referencia fija: el mes anterior es octubre).
     await api().post('/contabilidad/periodos/2026/10/reabrir').expect(200);
-    await app.get(DevengoSchedulerService).handleCron();
+    await app.get(DevengoSchedulerService).handleCron('2026-11-15');
     const devOct = (
       await api().get('/avales/devengos?periodo=2026-10').expect(200)
     ).body;

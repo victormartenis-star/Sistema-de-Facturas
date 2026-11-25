@@ -172,6 +172,14 @@ describe('EFE (indirecto)', () => {
       resultado: 4700,
       ajustes: 300,
       capitalCorriente: -4000,
+      // Clientes: facturado 12.100 − cobrado 6.000; IVA repercutido 2.100.
+      capitalCorrienteDesglose: {
+        existencias: 0,
+        clientes: -6100,
+        proveedores: 0,
+        administraciones: 2100,
+        otros: 0,
+      },
       total: 1000,
     });
     expect(e).toMatchObject({
@@ -220,6 +228,7 @@ describe('devengo por tramos de saldo', () => {
         hasta: '2026-03-15',
         dias: 15,
         saldo: 100000,
+        tasaAnualPct: 0.75,
         importe: 30.82,
       },
       {
@@ -227,6 +236,7 @@ describe('devengo por tramos de saldo', () => {
         hasta: '2026-03-31',
         dias: 16,
         saldo: 40000,
+        tasaAnualPct: 0.75,
         importe: 13.15,
       },
     ]);

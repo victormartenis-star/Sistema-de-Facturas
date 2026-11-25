@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   ConflictException,
   Injectable,
@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import {
+  companies,
   fiscalYearClosings,
   resultApplications,
   type DbOrTx,
@@ -21,6 +22,11 @@ import {
   aplicacionResultadoSchema,
   centsToNumeric,
   cuentasAnuales,
+  cuentasAnualesACsv,
+  cuentasAnualesAJson,
+  memoriaAbreviada,
+  movimientoMasa,
+  type FormatoExportacionCuentas,
   diferenciasAuditoria,
   estadoCambiosPatrimonioNeto,
   estadoFlujosEfectivo,
@@ -453,11 +459,50 @@ export class AplicacionResultadoService {
       ),
       efectivoInicial: centsToNumeric(efectivoInicial),
     });
+    // Memoria abreviada: movimientos de las masas que desglosa y garantías.
+    const sinCierre = movimientos.map((m) => ({
+      ...m,
+      origen:
+        m.origen === 'cierre'
+          ? ('cierre' as const)
+          : m.origen === 'apertura'
+            ? ('apertura' as const)
+            : ('otro' as const),
+    }));
+    const aplicacionDto = aplicacion ? dto(aplicacion) : null;
+    const capital = anuales.balance.patrimonioNeto.cuentas
+      .filter((c) => c.cuenta.startsWith('10'))
+      .reduce((t, c) => t + toCents(c.importe), 0n);
+    const memoria = memoriaAbreviada({
+      empresa: await this.nombreEmpresa(companyId),
+      ejercicio,
+      cuentas: anuales,
+      ecpn,
+      efe,
+      aplicacion: aplicacionDto,
+      inmovilizado: movimientoMasa(
+        sinCierre,
+        (c) => c.startsWith('2') && !c.startsWith('28') && !c.startsWith('29'),
+        'deudora',
+      ),
+      amortizacionAcumulada: movimientoMasa(
+        sinCierre,
+        (c) => c.startsWith('28'),
+        'acreedora',
+      ),
+      provisiones: movimientoMasa(
+        sinCierre,
+        (c) => c.startsWith('14') || c.startsWith('499'),
+        'acreedora',
+      ),
+      garantias: await this.garantiasAFecha(companyId, ejercicio),
+      capital: centsToNumeric(capital),
+    });
     return {
       ejercicio,
       fecha: `${ejercicio}-12-31`,
       cerrado: !!cierre,
-      aplicacion: aplicacion ? dto(aplicacion) : null,
+      aplicacion: aplicacionDto,
       ...anuales,
       ecpn: {
         ...ecpn,
@@ -466,6 +511,92 @@ export class AplicacionResultadoService {
           toCents(anuales.balance.patrimonioNeto.total),
       },
       efe,
+      memoria,
+    };
+  }
+
+  private async nombreEmpresa(companyId: string): Promise<string> {
+    const [c] = await this.dbs.db
+      .select({ nombre: companies.name })
+      .from(companies)
+      .where(eq(companies.id, companyId));
+    return c?.nombre ?? 'La sociedad';
+  }
+
+  /**
+   * Avales vivos al 31-12 del ejercicio (saldo del último movimiento hasta
+   * esa fecha) y comisiones devengadas en el ejercicio, para la nota de
+   * garantías comprometidas con terceros.
+   */
+  private async garantiasAFecha(companyId: string, ejercicio: number) {
+    const fecha = `${ejercicio}-12-31`;
+    const r = await this.dbs.db.execute(sql`
+      with saldos as (
+        select distinct on (g.id) g.direction, mv.outstanding_after as saldo
+        from bank_guarantees g
+        join bank_guarantee_movements mv on mv.guarantee_id = g.id
+        where g.company_id = ${companyId} and g.status <> 'anulado'
+          and mv.movement_date <= ${fecha}
+        order by g.id, mv.movement_date desc, mv.created_at desc)
+      select
+        count(*) filter (where direction = 'emitido' and saldo > 0)::int as emitidos,
+        coalesce(sum(saldo) filter (where direction = 'emitido'), 0)::text as saldo_emitidos,
+        count(*) filter (where direction = 'recibido' and saldo > 0)::int as recibidos,
+        coalesce(sum(saldo) filter (where direction = 'recibido'), 0)::text as saldo_recibidos,
+        (select coalesce(sum(amount), 0)::text from bank_guarantee_accruals
+          where company_id = ${companyId} and year = ${ejercicio}
+            and status = 'contabilizado') as devengado
+      from saldos`);
+    const f = r.rows[0] as {
+      emitidos: number;
+      saldo_emitidos: string;
+      recibidos: number;
+      saldo_recibidos: string;
+      devengado: string;
+    };
+    return {
+      emitidosNumero: Number(f.emitidos),
+      emitidosSaldoVivo: f.saldo_emitidos,
+      recibidosNumero: Number(f.recibidos),
+      recibidosSaldoVivo: f.saldo_recibidos,
+      comisionesDevengadas: f.devengado,
+    };
+  }
+
+  /**
+   * Exportación de las cuentas anuales (balance, PyG, ECPN, EFE y memoria):
+   * CSV (`;`, BOM UTF-8) o JSON canónico. Determinista: se devuelve también
+   * la huella SHA-256 del contenido, que queda en la auditoría como evidencia.
+   */
+  async exportar(
+    ejercicio: number,
+    formato: FormatoExportacionCuentas,
+  ): Promise<{
+    body: string;
+    contentType: string;
+    fileName: string;
+    sha256: string;
+  }> {
+    const ca = await this.cuentasAnuales(ejercicio);
+    const texto =
+      formato === 'csv' ? cuentasAnualesACsv(ca) : cuentasAnualesAJson(ca);
+    const sha256 = createHash('sha256').update(texto, 'utf8').digest('hex');
+    await this.dbs.db.transaction((tx) =>
+      this.audit.registrar(tx, {
+        entityType: 'annual_accounts',
+        entityId: this.dbs.getCompanyId(),
+        action: 'export',
+        meta: { ejercicio, formato, sha256, coherente: ca.memoria.coherente },
+      }),
+    );
+    return {
+      body: formato === 'csv' ? `\uFEFF${texto}` : texto,
+      contentType:
+        formato === 'csv'
+          ? 'text/csv; charset=utf-8'
+          : 'application/json; charset=utf-8',
+      fileName: `cuentas-anuales-${ejercicio}.${formato}`,
+      sha256,
     };
   }
 }

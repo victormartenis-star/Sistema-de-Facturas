@@ -19,6 +19,10 @@ import type {
   PartidaConciliacion,
 } from './calculo';
 import type { Transiciones } from './maquina-estados';
+import {
+  FORMATOS_EXPORTACION_CUENTAS,
+  type MemoriaAbreviada,
+} from './memoria-abreviada';
 
 export const ESTADOS_APLICACION_RESULTADO = ['aplicado', 'anulado'] as const;
 export type EstadoAplicacionResultado =
@@ -128,14 +132,38 @@ export interface CuentasAnualesDto extends CuentasAnualesCalculo {
   ecpn: { filas: FilaEcpn[]; saldoFinal: FilaEcpn; cuadraConBalance: boolean };
   /** Estado de flujos de efectivo (método indirecto). */
   efe: EstadoFlujosEfectivo;
+  /** Memoria abreviada con indicadores y comprobaciones de coherencia. */
+  memoria: MemoriaAbreviada;
 }
+
+export const exportacionCuentasQuerySchema = z.object({
+  formato: z.enum(FORMATOS_EXPORTACION_CUENTAS).default('json'),
+});
+export type ExportacionCuentasQuery = z.infer<
+  typeof exportacionCuentasQuerySchema
+>;
+
+/**
+ * Conciliación a una fecha de corte (por defecto, hoy): auxiliares y mayor
+ * reconstruidos a esa fecha. No admite fechas futuras.
+ */
+export const conciliacionCierreQuerySchema = z.object({
+  fecha: fecha.optional(),
+});
+export type ConciliacionCierreQuery = z.infer<
+  typeof conciliacionCierreQuerySchema
+>;
+export const conciliacionCierreRegistrarSchema = conciliacionCierreQuerySchema;
+export type ConciliacionCierreRegistrarInput = z.input<
+  typeof conciliacionCierreRegistrarSchema
+>;
 
 /* ───────────────────── conciliación de cierre (auxiliar ↔ mayor) ───────────────────── */
 
 /**
- * Conciliación del estado actual: los auxiliares (devengos, amortización,
- * obra en curso, provisión) no guardan saldo histórico, así que se compara
- * con el mayor completo a la fecha de la consulta.
+ * Conciliación a una fecha de corte: cada auxiliar (devengos de aval,
+ * amortización, obra en curso, provisión, clientes, proveedores y almacén)
+ * se reconstruye a esa fecha y se compara con el mayor a la misma fecha.
  */
 export interface ConciliacionCierreDto {
   /** Id del registro guardado (null en la consulta en vivo). */

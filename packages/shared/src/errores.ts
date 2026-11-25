@@ -100,6 +100,9 @@ export const TITULO_POR_CODIGO: Readonly<Record<string, string>> = {
   RESULT_APPLICATION_EQUITY_BELOW_CAPITAL:
     'El dividendo dejaría el patrimonio neto por debajo del capital',
   BANK_GUARANTEE_ACCRUAL_PERIOD_OPEN: 'El mes del devengo aún no ha terminado',
+  BANK_GUARANTEE_REFERENCE_DATE_INVALID: 'Fecha de referencia futura',
+  BANK_GUARANTEE_RATE_DATE_INVALID: 'Fecha de efecto de la tasa no válida',
+  CLOSE_RECONCILIATION_DATE_INVALID: 'Fecha de corte de la conciliación futura',
   RESULT_APPLICATION_RESERVES_INSUFFICIENT:
     'Reservas insuficientes para compensar la pérdida',
   BANK_GUARANTEE_ACCRUAL_ALREADY_POSTED:

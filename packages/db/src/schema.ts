@@ -5024,6 +5024,16 @@ export const bankGuaranteeMovements = pgTable(
     ),
     /** Ejecución financiada por el banco (5200) en vez de cargo en cuenta. */
     financed: boolean('financed').notNull().default(false),
+    /**
+     * En una liquidación de comisión, la parte que saldó lo devengado (4100):
+     * permite reconstruir lo pendiente de liquidar a cualquier fecha.
+     */
+    accrualSettledAmount: numeric('accrual_settled_amount', {
+      precision: 14,
+      scale: 2,
+    })
+      .notNull()
+      .default('0'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -5392,3 +5402,41 @@ export const closeReconciliations = pgTable(
 );
 
 export type CloseReconciliation = typeof closeReconciliations.$inferSelect;
+
+/**
+ * Historial de tasas de comisión de un aval: la de cada fecha rige desde ese
+ * día (null: sin comisión). El devengo de un mes con cambio de tasa se
+ * prorratea por tramos. Una tasa por aval y fecha de efecto.
+ */
+export const bankGuaranteeRates = pgTable(
+  'bank_guarantee_rates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    guaranteeId: uuid('guarantee_id')
+      .notNull()
+      .references(() => bankGuarantees.id),
+    effectiveDate: date('effective_date').notNull(),
+    ratePct: numeric('rate_pct', { precision: 7, scale: 4 }),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('bank_guarantee_rates_effective_unique').on(
+      t.companyId,
+      t.guaranteeId,
+      t.effectiveDate,
+    ),
+    check(
+      'bank_guarantee_rates_rango',
+      sql`${t.ratePct} IS NULL OR (${t.ratePct} >= 0 AND ${t.ratePct} <= 100)`,
+    ),
+  ],
+);
+
+export type BankGuaranteeRate = typeof bankGuaranteeRates.$inferSelect;

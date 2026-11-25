@@ -25,8 +25,12 @@ export class DevengoSchedulerService {
     private readonly devengo: DevengoAvalesService,
   ) {}
 
+  /**
+   * `fechaReferencia` solo para reprocesos y pruebas deterministas: la tarea
+   * programada usa la fecha del sistema.
+   */
   @Cron('0 30 3 1 * *')
-  async handleCron(): Promise<void> {
+  async handleCron(fechaReferencia?: string): Promise<void> {
     const empresas = await this.dbs.db
       .select({ id: companies.id })
       .from(companies);
@@ -35,7 +39,11 @@ export class DevengoSchedulerService {
       try {
         const r = await runWithRequestContext(
           { userId: USUARIO_SISTEMA, companyId: e.id, role: 'admin' },
-          () => this.devengo.automatico({}, 'automatico'),
+          () =>
+            this.devengo.automatico(
+              fechaReferencia ? { fechaReferencia } : {},
+              'automatico',
+            ),
         );
         total += r.contabilizados;
       } catch (err) {

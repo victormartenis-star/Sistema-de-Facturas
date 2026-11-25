@@ -1,12 +1,24 @@
-import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+  Res,
+} from '@nestjs/common';
+import type { Response } from 'express';
 import {
   aplicacionResultadoAnularSchema,
   aplicacionResultadoSchema,
   cierreEjercicioRevertirSchema,
   ejercicioParamSchema,
+  exportacionCuentasQuerySchema,
   type AplicacionResultadoAnularInput,
   type AplicacionResultadoInput,
   type CierreEjercicioRevertirInput,
+  type ExportacionCuentasQuery,
 } from '@erp/shared';
 import { AplicacionResultadoService } from './aplicacion-resultado.service';
 import { Roles } from '../auth/roles';
@@ -61,6 +73,28 @@ export class CierreEjercicioController {
     ejercicio: number,
   ) {
     return this.aplicacion.cuentasAnuales(ejercicio);
+  }
+
+  /**
+   * Exportación de las cuentas anuales (CSV con BOM o JSON canónico). La
+   * huella SHA-256 del contenido va en `X-Content-SHA256` y en la auditoría.
+   */
+  @Get(':ejercicio/cuentas-anuales/exportar')
+  async exportarCuentasAnuales(
+    @Param('ejercicio', new ZodValidationPipe(ejercicioParamSchema))
+    ejercicio: number,
+    @Query(new ZodValidationPipe(exportacionCuentasQuerySchema))
+    q: ExportacionCuentasQuery,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const out = await this.aplicacion.exportar(ejercicio, q.formato);
+    res.setHeader('Content-Type', out.contentType);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${out.fileName}"`,
+    );
+    res.setHeader('X-Content-SHA256', out.sha256);
+    return out.body;
   }
 
   /** Resultado, saldos de PN, reserva legal mínima y destinos admitidos. */

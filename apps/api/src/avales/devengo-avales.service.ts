@@ -6,21 +6,12 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  inArray,
-  isNotNull,
-  ne,
-  sql,
-  SQL,
-} from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, sql, SQL } from 'drizzle-orm';
 import {
   bankGuaranteeAccrualRuns,
   bankGuaranteeAccruals,
   bankGuaranteeMovements,
+  bankGuaranteeRates,
   bankGuarantees,
   type BankGuarantee,
   type BankGuaranteeAccrual,
@@ -38,6 +29,8 @@ import {
   diferenciasAuditoria,
   fromCents,
   mesesEntre,
+  mesAnteriorA,
+  mesTerminado,
   sumCents,
   toCents,
   todayIso,
@@ -65,10 +58,10 @@ const finDeMes = (periodo: string) => {
   const [y, m] = periodo.split('-').map(Number);
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
 };
-const mesAnterior = (hoy: string) => {
-  const [y, m] = hoy.split('-').map(Number);
-  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
-};
+/** El aval tiene (o tuvo) una tasa de comisión: la actual o alguna del historial. */
+const conTasa = sql`(${bankGuarantees.commissionRatePct} is not null or exists (
+  select 1 from bank_guarantee_rates br
+  where br.guarantee_id = ${bankGuarantees.id} and br.rate_pct is not null))`;
 /** Meses hacia atrás que recorre como máximo el devengo automático. */
 const MAX_MESES_AUTOMATICO = 24;
 
@@ -203,13 +196,41 @@ export class DevengoAvalesService {
     return dto(x.a, x.referencia);
   }
 
-  private exigirMesTerminado(periodo: string): void {
-    if (periodo >= todayIso().slice(0, 7)) {
+  /**
+   * Fecha de referencia (por defecto, hoy): decide qué meses están
+   * terminados. Explícita, el devengo es determinista; nunca futura.
+   */
+  private referencia(fecha: string | undefined): string {
+    const hoy = todayIso();
+    if (fecha && fecha > hoy) {
       throw new UnprocessableEntityException({
-        code: 'BANK_GUARANTEE_ACCRUAL_PERIOD_OPEN',
-        message: `El mes ${periodo} aún no ha terminado: solo se devengan meses cerrados`,
+        code: 'BANK_GUARANTEE_REFERENCE_DATE_INVALID',
+        message: `La fecha de referencia (${fecha}) no puede ser futura`,
       });
     }
+    return fecha ?? hoy;
+  }
+
+  private exigirMesTerminado(periodo: string, referencia: string): void {
+    if (!mesTerminado(periodo, referencia)) {
+      throw new UnprocessableEntityException({
+        code: 'BANK_GUARANTEE_ACCRUAL_PERIOD_OPEN',
+        message: `El mes ${periodo} aún no ha terminado (referencia ${referencia}): solo se devengan meses cerrados`,
+      });
+    }
+  }
+
+  /** Historial de tasas del aval (null = sin comisión desde esa fecha → 0). */
+  private async historialTasas(tx: Tx, g: BankGuarantee) {
+    const filas = await tx
+      .select({
+        fecha: bankGuaranteeRates.effectiveDate,
+        tasa: bankGuaranteeRates.ratePct,
+      })
+      .from(bankGuaranteeRates)
+      .where(eq(bankGuaranteeRates.guaranteeId, g.id))
+      .orderBy(asc(bankGuaranteeRates.effectiveDate));
+    return filas.map((f) => ({ fecha: f.fecha, tasaAnualPct: f.tasa ?? '0' }));
   }
 
   /** Historial de saldo vivo del aval: el de cada fecha rige desde ese día. */
@@ -280,7 +301,11 @@ export class DevengoAvalesService {
     if (g.status === 'anulado') {
       throw noAplica(`El aval ${g.reference} está anulado`);
     }
-    if (g.commissionRatePct === null) {
+    const tasas = await this.historialTasas(tx, g);
+    if (
+      g.commissionRatePct === null &&
+      !tasas.some((t) => toCents(t.tasaAnualPct) > 0n)
+    ) {
       throw noAplica(`El aval ${g.reference} no tiene tasa de comisión`);
     }
     const [y, m] = periodo.split('-').map(Number);
@@ -305,7 +330,9 @@ export class DevengoAvalesService {
       periodo,
       emision: g.issueDate,
       vencimiento: g.expiryDate,
-      tasaAnualPct: g.commissionRatePct,
+      // Sin historial (avales anteriores a la 0064): la tasa actual desde la emisión.
+      tasaAnualPct: g.commissionRatePct ?? '0',
+      tasas,
       saldos: await this.historialSaldo(tx, g),
     });
     if (calculo.tramos.length === 0 || toCents(calculo.importe) <= 0n) {
@@ -343,7 +370,7 @@ export class DevengoAvalesService {
         periodTo: ultimo.hasta,
         days: calculo.dias,
         baseAmount: centsToNumeric(toCents(primero.saldo)),
-        ratePct: g.commissionRatePct,
+        ratePct: (primero.tasaAnualPct ?? 0).toFixed(4),
         amount: centsToNumeric(toCents(calculo.importe)),
         segments: calculo.tramos,
         journalEntryId: asiento.id,
@@ -380,7 +407,7 @@ export class DevengoAvalesService {
       eq(bankGuarantees.companyId, this.dbs.getCompanyId()),
       eq(bankGuarantees.direction, 'emitido'),
       ne(bankGuarantees.status, 'anulado'),
-      isNotNull(bankGuarantees.commissionRatePct),
+      conTasa,
       sql`${bankGuarantees.issueDate} <= ${finDeMes(periodo)}`,
       // Vivo hoy, o se redujo a cero (liberación, ejecución, vencimiento) en
       // ese mes o después: estuvo vivo en parte del mes.
@@ -483,7 +510,7 @@ export class DevengoAvalesService {
     input: DevengoAvalesInput,
   ): Promise<ResultadoDevengoAvalesDto | DevengoAvalDto> {
     const d = devengoAvalesSchema.parse(input);
-    this.exigirMesTerminado(d.periodo);
+    this.exigirMesTerminado(d.periodo, this.referencia(d.fechaReferencia));
     if (d.avalId) {
       const id = await this.dbs.db.transaction((tx) =>
         this.devengarEnTx(tx, d.avalId!, d.periodo),
@@ -504,8 +531,9 @@ export class DevengoAvalesService {
     disparo: DisparoDevengo = 'manual',
   ): Promise<ResultadoDevengoAutomaticoDto> {
     const d = devengoAutomaticoSchema.parse(input);
-    const hasta = d.hasta ?? mesAnterior(todayIso());
-    this.exigirMesTerminado(hasta);
+    const ref = this.referencia(d.fechaReferencia);
+    const hasta = d.hasta ?? mesAnteriorA(ref);
+    this.exigirMesTerminado(hasta, ref);
     const [primero] = await this.dbs.db
       .select({ desde: sql<string | null>`min(${bankGuarantees.issueDate})` })
       .from(bankGuarantees)
@@ -514,7 +542,7 @@ export class DevengoAvalesService {
           eq(bankGuarantees.companyId, this.dbs.getCompanyId()),
           eq(bankGuarantees.direction, 'emitido'),
           ne(bankGuarantees.status, 'anulado'),
-          isNotNull(bankGuarantees.commissionRatePct),
+          conTasa,
         ),
       );
     const res: ResultadoDevengoAutomaticoDto = {

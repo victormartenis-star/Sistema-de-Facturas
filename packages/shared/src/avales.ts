@@ -202,6 +202,11 @@ export const avalUpdateSchema = z
     certificationId: z.string().uuid().nullish(),
     bankAccountId: z.string().uuid().nullish(),
     tasaComisionAnualPct: tasa.nullish(),
+    /**
+     * Desde qué día rige la nueva tasa (por defecto, hoy). El devengo de un
+     * mes con cambio de tasa se prorratea por tramos.
+     */
+    tasaVigenteDesde: fecha.optional(),
     periodicidadComisionMeses: z.number().int().min(1).max(12).nullish(),
     notas: z.string().trim().max(1000).nullish(),
   })
@@ -277,9 +282,16 @@ const periodo = z
   .regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Formato esperado: AAAA-MM');
 
 /** Devengo de un mes para todos los avales emitidos vivos con tasa (o uno). */
+/**
+ * Fecha de referencia para decidir qué meses están terminados (por defecto,
+ * hoy). No puede ser futura: sirve para reprocesos y pruebas deterministas.
+ */
+const fechaReferencia = fecha.optional();
+
 export const devengoAvalesSchema = z.object({
   periodo,
   avalId: z.string().uuid().optional(),
+  fechaReferencia,
 });
 export type DevengoAvalesInput = z.input<typeof devengoAvalesSchema>;
 
@@ -319,7 +331,14 @@ export interface DevengoAvalDto {
  */
 export const devengoAutomaticoSchema = z.object({
   hasta: periodo.optional(),
+  fechaReferencia,
 });
+
+/** Historial de tasas de comisión de un aval (la de cada fecha rige desde ese día). */
+export interface TasaAvalDto {
+  fecha: string;
+  tasaAnualPct: number | null;
+}
 export type DevengoAutomaticoInput = z.input<typeof devengoAutomaticoSchema>;
 
 export const DISPAROS_DEVENGO = ['manual', 'automatico'] as const;
@@ -470,6 +489,8 @@ export interface MovimientoAvalDto {
 
 export interface AvalDetalleDto extends AvalDto {
   movimientos: MovimientoAvalDto[];
+  /** Historial de tasas de comisión (desde la 0064). */
+  tasas: TasaAvalDto[];
 }
 
 export interface ResumenAvalesDto extends ResumenAvalesCalculo {

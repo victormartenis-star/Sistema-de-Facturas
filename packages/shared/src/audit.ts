@@ -73,6 +73,7 @@ export const AUDIT_ENTITY_TYPES = [
   'bank_guarantee_accrual',
   'bank_guarantee_accrual_run',
   'close_reconciliation',
+  'annual_accounts',
   'project_cost_estimate',
   'iot_lectura_telemetria',
   'mantenimiento_equipo',

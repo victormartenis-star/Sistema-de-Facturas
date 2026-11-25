@@ -8,6 +8,7 @@ import {
 import {
   and,
   asc,
+  desc,
   eq,
   ilike,
   inArray,
@@ -21,6 +22,7 @@ import {
 import {
   bankAccounts,
   bankGuaranteeLines,
+  bankGuaranteeRates,
   bankGuaranteeMovements,
   bankGuarantees,
   certifications,
@@ -91,7 +93,10 @@ import {
 import { AuditService } from '../audit/audit.service';
 import { NotificacionesService } from '../alerts/notificaciones.service';
 import { cambiarEstado } from '../common/cambiar-estado';
-import { getRequestContext } from '../common/request-context';
+import {
+  getRequestContext,
+  usuarioPersistible,
+} from '../common/request-context';
 import { verificarVersion } from '../common/version';
 import { ContabilidadService } from '../contabilidad/contabilidad.service';
 import { DbService } from '../db/db.service';
@@ -324,7 +329,27 @@ export class AvalesService {
         asc(bankGuaranteeMovements.movementDate),
         asc(bankGuaranteeMovements.createdAt),
       );
-    return { ...avalDto(f, hoyIso()), movimientos: movs.map(movimientoDto) };
+    const tasas = await this.dbs.db
+      .select({
+        fecha: bankGuaranteeRates.effectiveDate,
+        tasa: bankGuaranteeRates.ratePct,
+      })
+      .from(bankGuaranteeRates)
+      .where(
+        and(
+          eq(bankGuaranteeRates.companyId, companyId),
+          eq(bankGuaranteeRates.guaranteeId, id),
+        ),
+      )
+      .orderBy(asc(bankGuaranteeRates.effectiveDate));
+    return {
+      ...avalDto(f, hoyIso()),
+      movimientos: movs.map(movimientoDto),
+      tasas: tasas.map((t) => ({
+        fecha: t.fecha,
+        tasaAnualPct: t.tasa === null ? null : Number(t.tasa),
+      })),
+    };
   }
 
   /* ─────────────────────────── vínculos ─────────────────────────── */
@@ -681,6 +706,15 @@ export class AvalesService {
           importe,
           saldo: importe,
         });
+        if (row.commissionRatePct !== null) {
+          await tx.insert(bankGuaranteeRates).values({
+            companyId,
+            guaranteeId: id,
+            effectiveDate: d.fechaEmision,
+            ratePct: row.commissionRatePct,
+            createdBy: usuarioPersistible(),
+          });
+        }
         await this.audit.registrar(tx, {
           entityType: 'bank_guarantee',
           entityId: id,
@@ -692,6 +726,67 @@ export class AvalesService {
       this.referenciaDuplicada(e);
     }
     return this.detalle(id);
+  }
+
+  /**
+   * Nueva tasa con fecha de efecto en el historial: no antes de la emisión
+   * ni de la última tasa (BANK_GUARANTEE_RATE_DATE_INVALID); la misma fecha
+   * sustituye la tasa de ese día. Si el aval no tenía historial (anterior a
+   * la 0064), se siembra con la tasa vigente desde la emisión.
+   */
+  private async registrarTasa(
+    tx: Tx,
+    g: BankGuarantee,
+    tasa: number | null,
+    desde: string,
+  ): Promise<void> {
+    if (desde < g.issueDate) {
+      throw new UnprocessableEntityException({
+        code: 'BANK_GUARANTEE_RATE_DATE_INVALID',
+        message: `La nueva tasa no puede regir antes de la emisión del aval (${g.issueDate})`,
+      });
+    }
+    const historial = await tx
+      .select()
+      .from(bankGuaranteeRates)
+      .where(eq(bankGuaranteeRates.guaranteeId, g.id))
+      .orderBy(desc(bankGuaranteeRates.effectiveDate));
+    if (historial.length === 0 && g.commissionRatePct !== null) {
+      await tx.insert(bankGuaranteeRates).values({
+        companyId: g.companyId,
+        guaranteeId: g.id,
+        effectiveDate: g.issueDate,
+        ratePct: g.commissionRatePct,
+        createdBy: usuarioPersistible(),
+      });
+      historial.push({
+        effectiveDate: g.issueDate,
+      } as (typeof historial)[number]);
+    }
+    const ultima = historial[0]?.effectiveDate;
+    if (ultima && desde < ultima) {
+      throw new UnprocessableEntityException({
+        code: 'BANK_GUARANTEE_RATE_DATE_INVALID',
+        message: `La nueva tasa no puede regir antes del último cambio de tasa (${ultima})`,
+      });
+    }
+    await tx
+      .insert(bankGuaranteeRates)
+      .values({
+        companyId: g.companyId,
+        guaranteeId: g.id,
+        effectiveDate: desde,
+        ratePct: tasa === null ? null : tasa.toFixed(4),
+        createdBy: usuarioPersistible(),
+      })
+      .onConflictDoUpdate({
+        target: [
+          bankGuaranteeRates.companyId,
+          bankGuaranteeRates.guaranteeId,
+          bankGuaranteeRates.effectiveDate,
+        ],
+        set: { ratePct: tasa === null ? null : tasa.toFixed(4) },
+      });
   }
 
   async actualizar(
@@ -727,6 +822,14 @@ export class AvalesService {
               : d.certificationId,
           bankAccountId: d.bankAccountId,
         });
+        if (d.tasaComisionAnualPct !== undefined) {
+          await this.registrarTasa(
+            tx,
+            g,
+            d.tasaComisionAnualPct,
+            d.tasaVigenteDesde ?? hoyIso(),
+          );
+        }
         const [nuevo] = await tx
           .update(bankGuarantees)
           .set({
@@ -807,6 +910,7 @@ export class AvalesService {
       asientoId?: string | null;
       id?: string;
       financiada?: boolean;
+      liquidadoContraDevengo?: string;
     },
   ): Promise<string> {
     const [row] = await tx
@@ -824,6 +928,7 @@ export class AvalesService {
         reason: m.motivo ?? null,
         journalEntryId: m.asientoId ?? null,
         financed: m.financiada ?? false,
+        accrualSettledAmount: m.liquidadoContraDevengo ?? '0',
         createdBy: getRequestContext()?.userId ?? null,
       })
       .returning({ id: bankGuaranteeMovements.id });
@@ -1140,6 +1245,7 @@ export class AvalesService {
         importe: n(importe),
         saldo: g.outstandingAmount,
         asientoId,
+        liquidadoContraDevengo: n(reparto.contraDevengo),
       });
       const antes = {
         commissionsAmount: g.commissionsAmount,
