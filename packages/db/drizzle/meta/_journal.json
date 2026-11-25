@@ -421,6 +421,13 @@
       "when": 1795603132063,
       "tag": "0059_provision_perdidas",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1795605182191,
+      "tag": "0060_avales_bancarios",
+      "breakpoints": true
     }
   ]
 }

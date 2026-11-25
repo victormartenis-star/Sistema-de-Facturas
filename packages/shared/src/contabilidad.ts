@@ -54,6 +54,7 @@ export const ORIGENES_ASIENTO = [
   'regularizacion_inventario',
   'obra_en_curso',
   'provision_perdidas',
+  'aval',
 ] as const;
 export type OrigenAsiento = (typeof ORIGENES_ASIENTO)[number];
 
@@ -72,6 +73,7 @@ export const ORIGEN_ASIENTO_LABELS: Record<OrigenAsiento, string> = {
   regularizacion_inventario: 'Regularización de inventario',
   obra_en_curso: 'Obra en curso (cierre)',
   provision_perdidas: 'Provisión por pérdidas previstas',
+  aval: 'Aval bancario (comisión o ejecución)',
 };
 
 export const ESTADOS_ASIENTO = ['contabilizado', 'anulado'] as const;
@@ -188,12 +190,16 @@ export function planContableBase(): CuentaPlan[] {
     c('6210', 'Alquiler de maquinaria', 'gasto'),
     c('622', 'Reparaciones y conservación', 'gasto'),
     c('6220', 'Reparaciones y conservación', 'gasto'),
+    c('626', 'Servicios bancarios y similares', 'gasto'),
+    c('6260', 'Servicios bancarios y similares', 'gasto'),
     c('640', 'Sueldos y salarios', 'gasto'),
     c('6400', 'Sueldos y salarios', 'gasto'),
     c('642', 'Seguridad Social a cargo de la empresa', 'gasto'),
     c('6420', 'Seguridad Social a cargo de la empresa', 'gasto'),
     c('671', 'Pérdidas procedentes del inmovilizado material', 'gasto'),
     c('6710', 'Pérdidas procedentes del inmovilizado material', 'gasto'),
+    c('678', 'Gastos excepcionales', 'gasto'),
+    c('6780', 'Gastos excepcionales', 'gasto'),
     c('681', 'Amortización del inmovilizado material', 'gasto'),
     c('6810', 'Amortización del inmovilizado material', 'gasto'),
     c('700', 'Ventas', 'ingreso'),
@@ -202,6 +208,8 @@ export function planContableBase(): CuentaPlan[] {
     c('7050', 'Ejecución de obra', 'ingreso'),
     c('771', 'Beneficios procedentes del inmovilizado material', 'ingreso'),
     c('7710', 'Beneficios procedentes del inmovilizado material', 'ingreso'),
+    c('778', 'Ingresos excepcionales', 'ingreso'),
+    c('7780', 'Ingresos excepcionales', 'ingreso'),
   ];
 }
 

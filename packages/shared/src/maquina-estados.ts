@@ -26,6 +26,8 @@ import type { EstadoSolicitudMaterial } from './calculo';
 import { SOLICITUD_MATERIAL_TRANSITIONS } from './solicitudes-material';
 import type { EstadoWip } from './calculo';
 import { WIP_TRANSITIONS } from './wip';
+import type { EstadoAval } from './calculo';
+import { AVAL_TRANSITIONS } from './avales';
 import { AJUSTE_CONSOLIDACION_TRANSITIONS } from './consolidacion';
 import type { EstadoActivo } from './activos';
 import { ACTIVO_TRANSITIONS } from './activos';
@@ -80,6 +82,7 @@ export interface EstadoPorEntidad {
   work_in_progress: EstadoWip;
   /** Mismo ciclo que la obra en curso: contabilizado → anulado. */
   loss_provision: EstadoWip;
+  bank_guarantee: EstadoAval;
 }
 
 export type EntidadConEstado = keyof EstadoPorEntidad;
@@ -138,6 +141,8 @@ function tablaDe(entidad: EntidadConEstado): Record<string, readonly string[]> {
       return WIP_TRANSITIONS;
     case 'loss_provision':
       return WIP_TRANSITIONS;
+    case 'bank_guarantee':
+      return AVAL_TRANSITIONS;
   }
 }
 

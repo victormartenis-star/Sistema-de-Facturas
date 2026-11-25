@@ -3396,6 +3396,7 @@ export const alertRuleTypeEnum = pgEnum('alert_rule_type', [
   // Solo notificaciones por evento (no tienen regla configurable).
   'aprobacion',
   'almacen',
+  'aval',
 ]);
 
 export const alertRules = pgTable(
@@ -3630,6 +3631,7 @@ export const journalEntrySourceEnum = pgEnum('journal_entry_source', [
   'regularizacion_inventario',
   'obra_en_curso',
   'provision_perdidas',
+  'aval',
 ]);
 
 export const journalEntryStatusEnum = pgEnum('journal_entry_status', [
@@ -4832,3 +4834,195 @@ export const lossProvisions = pgTable(
 );
 
 export type LossProvision = typeof lossProvisions.$inferSelect;
+
+/* ─────────────────────── Avales bancarios y garantías ───────────────────────
+ * Avales emitidos (a nuestro cargo, a favor de clientes o administraciones) y
+ * recibidos (de subcontratas y proveedores a nuestro favor). Riesgo
+ * contingente: sin asiento mientras vive; se contabilizan sus comisiones y
+ * su ejecución. Invariante: saldo vivo = nominal − liberado − ejecutado.
+ * Reglas puras en `calculo.ts`; contrato en `@erp/shared/avales`.
+ */
+
+export const bankGuaranteeTypeEnum = pgEnum('bank_guarantee_type', [
+  'garantia_definitiva',
+  'garantia_provisional',
+  'anticipo',
+  'buena_ejecucion',
+  'oferta_licitacion',
+  'retencion_garantia',
+  'otro',
+]);
+
+export const bankGuaranteeDirectionEnum = pgEnum('bank_guarantee_direction', [
+  'emitido',
+  'recibido',
+]);
+
+export const bankGuaranteeStatusEnum = pgEnum('bank_guarantee_status', [
+  'vigente',
+  'liberado_parcial',
+  'liberado',
+  'ejecutado',
+  'vencido',
+  'anulado',
+]);
+
+export const bankGuaranteeMovementTypeEnum = pgEnum(
+  'bank_guarantee_movement_type',
+  [
+    'alta',
+    'liberacion',
+    'ejecucion',
+    'prorroga',
+    'comision',
+    'vencimiento',
+    'anulacion',
+  ],
+);
+
+export const bankGuarantees = pgTable(
+  'bank_guarantees',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    /** Número del aval en la entidad avalista. */
+    reference: varchar('reference', { length: 60 }).notNull(),
+    type: bankGuaranteeTypeEnum('type').notNull(),
+    direction: bankGuaranteeDirectionEnum('direction').notNull(),
+    /** Entidad avalista (banco o aseguradora de caución). */
+    issuer: varchar('issuer', { length: 120 }).notNull(),
+    projectId: uuid('project_id').references(() => projects.id),
+    /** Beneficiario (emitido) o avalado (recibido). */
+    contactId: uuid('contact_id').references(() => contacts.id),
+    contratoObraId: uuid('contrato_obra_id').references(() => contratosObra.id),
+    certificationId: uuid('certification_id').references(
+      () => certifications.id,
+    ),
+    /** Cuenta propia de liquidación de comisiones y ejecuciones. */
+    bankAccountId: uuid('bank_account_id').references(() => bankAccounts.id),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    releasedAmount: numeric('released_amount', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    executedAmount: numeric('executed_amount', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    /** Saldo vivo = amount − released − executed (CHECK). */
+    outstandingAmount: numeric('outstanding_amount', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    /** Comisiones registradas (acumulado). */
+    commissionsAmount: numeric('commissions_amount', {
+      precision: 14,
+      scale: 2,
+    })
+      .notNull()
+      .default('0'),
+    issueDate: date('issue_date').notNull(),
+    /** Null: indefinido, hasta su cancelación. */
+    expiryDate: date('expiry_date'),
+    commissionRatePct: numeric('commission_rate_pct', {
+      precision: 7,
+      scale: 4,
+    }),
+    commissionPeriodMonths: smallint('commission_period_months'),
+    status: bankGuaranteeStatusEnum('status').notNull().default('vigente'),
+    /** Motivo de la última liberación, ejecución o anulación. */
+    reason: varchar('reason', { length: 240 }),
+    notes: text('notes'),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('bank_guarantees_reference_unique').on(
+      t.companyId,
+      t.issuer,
+      t.reference,
+    ),
+    index('bank_guarantees_company_status_idx').on(
+      t.companyId,
+      t.status,
+      t.expiryDate,
+    ),
+    index('bank_guarantees_company_project_idx').on(t.companyId, t.projectId),
+    index('bank_guarantees_company_contact_idx').on(t.companyId, t.contactId),
+    check(
+      'bank_guarantees_importes',
+      sql`${t.amount} > 0 AND ${t.releasedAmount} >= 0 AND ${t.executedAmount} >= 0
+        AND ${t.commissionsAmount} >= 0
+        AND ${t.outstandingAmount} >= 0 AND ${t.outstandingAmount} <= ${t.amount}
+        AND ${t.outstandingAmount} = ${t.amount} - ${t.releasedAmount} - ${t.executedAmount}`,
+    ),
+    check(
+      'bank_guarantees_fechas',
+      sql`${t.expiryDate} IS NULL OR ${t.expiryDate} >= ${t.issueDate}`,
+    ),
+    check(
+      'bank_guarantees_comision',
+      sql`(${t.commissionRatePct} IS NULL OR (${t.commissionRatePct} >= 0 AND ${t.commissionRatePct} <= 100 AND ${t.direction} = 'emitido'))
+        AND (${t.commissionPeriodMonths} IS NULL OR ${t.commissionPeriodMonths} BETWEEN 1 AND 12)`,
+    ),
+    check(
+      'bank_guarantees_estado_saldo',
+      sql`(${t.status} IN ('vigente', 'liberado_parcial', 'anulado')) = (${t.outstandingAmount} > 0)`,
+    ),
+  ],
+);
+
+export type BankGuarantee = typeof bankGuarantees.$inferSelect;
+
+/** Historial inmutable del aval: cada alta, liberación, ejecución, prórroga… */
+export const bankGuaranteeMovements = pgTable(
+  'bank_guarantee_movements',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    guaranteeId: uuid('guarantee_id')
+      .notNull()
+      .references(() => bankGuarantees.id),
+    type: bankGuaranteeMovementTypeEnum('type').notNull(),
+    movementDate: date('movement_date').notNull(),
+    amount: numeric('amount', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    /** Saldo vivo tras el movimiento. */
+    outstandingAfter: numeric('outstanding_after', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    /** Nuevo vencimiento (prórroga) o el vigente. */
+    expiryDate: date('expiry_date'),
+    reason: varchar('reason', { length: 240 }),
+    journalEntryId: uuid('journal_entry_id').references(
+      () => journalEntries.id,
+    ),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('bank_guarantee_movements_guarantee_idx').on(
+      t.companyId,
+      t.guaranteeId,
+      t.movementDate,
+    ),
+    check(
+      'bank_guarantee_movements_importes',
+      sql`${t.amount} >= 0 AND ${t.outstandingAfter} >= 0`,
+    ),
+  ],
+);
+
+export type BankGuaranteeMovement = typeof bankGuaranteeMovements.$inferSelect;

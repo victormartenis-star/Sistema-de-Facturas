@@ -25,6 +25,7 @@ export const TIPOS_NOTIFICACION = [
   ...ALERT_RULE_TYPES,
   'aprobacion',
   'almacen',
+  'aval',
 ] as const;
 export type TipoNotificacion = (typeof TIPOS_NOTIFICACION)[number];
 
@@ -35,6 +36,7 @@ export const TIPO_NOTIFICACION_LABELS: Record<TipoNotificacion, string> = {
   garantia_postventa: 'Postventa',
   aprobacion: 'Aprobaciones',
   almacen: 'Almacén',
+  aval: 'Avales',
 };
 
 export const ALERT_RULE_TYPE_LABELS: Record<AlertRuleType, string> = {

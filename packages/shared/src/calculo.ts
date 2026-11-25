@@ -2222,3 +2222,266 @@ export function asientoProvisionPerdidas(ajuste: Importe): LineaAsientoWip[] {
         { cuenta: '7954', debe: '0.00', haber: imp, imputaObra: true },
       ];
 }
+
+/* ───────────────────────── avales bancarios y garantías ─────────────────────────
+ * Un aval es un riesgo contingente: mientras está vivo no se contabiliza en el
+ * balance (se informa en la memoria); solo su coste (comisiones) y, si llega,
+ * su ejecución. Por aval:
+ *   saldo vivo = nominal − liberado − ejecutado   (siempre 0 ≤ saldo ≤ nominal)
+ * Una liberación o ejecución reduce el saldo; al llegar a 0 el aval queda
+ * `liberado` (sin ejecuciones) o `ejecutado` (con alguna); el vencimiento
+ * libera el resto y lo deja `vencido`. Todo en céntimos `BigInt`.
+ */
+
+export type EstadoAval =
+  | 'vigente'
+  | 'liberado_parcial'
+  | 'liberado'
+  | 'ejecutado'
+  | 'vencido'
+  | 'anulado';
+
+export type DireccionAval = 'emitido' | 'recibido';
+
+export interface SaldoAval {
+  nominal: number;
+  liberado: number;
+  ejecutado: number;
+  saldoVivo: number;
+}
+
+export function saldoAval(p: {
+  nominal: Importe;
+  liberado: Importe;
+  ejecutado: Importe;
+}): SaldoAval {
+  const n = toCents(p.nominal);
+  const l = toCents(p.liberado);
+  const e = toCents(p.ejecutado);
+  return {
+    nominal: fromCents(n),
+    liberado: fromCents(l),
+    ejecutado: fromCents(e),
+    saldoVivo: fromCents(n - l - e),
+  };
+}
+
+/** Estado que corresponde a unos importes (sin contar vencimiento ni anulación). */
+export function estadoPorSaldo(p: {
+  nominal: Importe;
+  liberado: Importe;
+  ejecutado: Importe;
+}): Exclude<EstadoAval, 'vencido' | 'anulado'> {
+  const n = toCents(p.nominal);
+  const l = toCents(p.liberado);
+  const e = toCents(p.ejecutado);
+  if (n - l - e > 0n) return l + e > 0n ? 'liberado_parcial' : 'vigente';
+  return e > 0n ? 'ejecutado' : 'liberado';
+}
+
+export type CodigoRechazoAval =
+  | 'BANK_GUARANTEE_AMOUNT_INVALID'
+  | 'BANK_GUARANTEE_AMOUNT_EXCEEDS_BALANCE'
+  | 'BANK_GUARANTEE_NOT_ACTIVE';
+
+export type ResultadoMovimientoAval =
+  | {
+      ok: true;
+      /** Importe del movimiento (el saldo entero si no se indicó). */
+      importe: number;
+      liberado: number;
+      ejecutado: number;
+      saldoVivo: number;
+      estado: EstadoAval;
+    }
+  | { ok: false; codigo: CodigoRechazoAval; mensaje: string };
+
+/**
+ * Aplica una liberación, ejecución o vencimiento a un aval vivo. Sin importe,
+ * la liberación y la ejecución son totales (todo el saldo vivo). El
+ * vencimiento libera siempre el saldo entero.
+ */
+export function aplicarMovimientoAval(p: {
+  estado: EstadoAval;
+  nominal: Importe;
+  liberado: Importe;
+  ejecutado: Importe;
+  tipo: 'liberacion' | 'ejecucion' | 'vencimiento';
+  importe?: Importe | null;
+}): ResultadoMovimientoAval {
+  if (p.estado !== 'vigente' && p.estado !== 'liberado_parcial') {
+    return {
+      ok: false,
+      codigo: 'BANK_GUARANTEE_NOT_ACTIVE',
+      mensaje: `El aval no está vivo (estado «${p.estado}»)`,
+    };
+  }
+  const n = toCents(p.nominal);
+  let l = toCents(p.liberado);
+  let e = toCents(p.ejecutado);
+  const vivo = n - l - e;
+  const imp =
+    p.tipo === 'vencimiento' || p.importe === undefined || p.importe === null
+      ? vivo
+      : toCents(p.importe);
+  if (imp <= 0n) {
+    return {
+      ok: false,
+      codigo: 'BANK_GUARANTEE_AMOUNT_INVALID',
+      mensaje: 'El importe debe ser mayor que cero',
+    };
+  }
+  if (imp > vivo) {
+    return {
+      ok: false,
+      codigo: 'BANK_GUARANTEE_AMOUNT_EXCEEDS_BALANCE',
+      mensaje: `El importe (${centsToNumeric(imp)}) supera el saldo vivo del aval (${centsToNumeric(vivo)})`,
+    };
+  }
+  if (p.tipo === 'ejecucion') e += imp;
+  else l += imp;
+  const estado: EstadoAval =
+    p.tipo === 'vencimiento'
+      ? 'vencido'
+      : estadoPorSaldo({
+          nominal: centsToNumeric(n),
+          liberado: centsToNumeric(l),
+          ejecutado: centsToNumeric(e),
+        });
+  return {
+    ok: true,
+    importe: fromCents(imp),
+    liberado: fromCents(l),
+    ejecutado: fromCents(e),
+    saldoVivo: fromCents(n - l - e),
+    estado,
+  };
+}
+
+/**
+ * Comisión de riesgo de un aval: saldo vivo × tasa anual (%) × meses / 12,
+ * half-up al céntimo. Tasa con hasta 4 decimales (p. ej. 0,7500 %).
+ */
+export function comisionAval(p: {
+  saldoVivo: Importe;
+  tasaAnualPct: Importe;
+  meses: number;
+}): number {
+  if (!Number.isInteger(p.meses) || p.meses < 1) {
+    throw new RangeError(`Meses no válidos: ${p.meses}`);
+  }
+  const saldo = toCents(p.saldoVivo);
+  const tasa = toScaled(p.tasaAnualPct, 4); // % × 10⁴
+  // saldo × (tasa / 10⁴) / 100 × meses / 12
+  return fromCents(
+    mulDivRound(saldo * tasa, BigInt(p.meses), 10_000n * 100n * 12n),
+  );
+}
+
+/** Días naturales de `hoy` a `vencimiento` (negativo si ya venció); null si es indefinido. */
+export function diasHastaVencimiento(
+  vencimiento: string | null,
+  hoy: string,
+): number | null {
+  if (!vencimiento) return null;
+  const ms =
+    Date.parse(`${vencimiento}T00:00:00Z`) - Date.parse(`${hoy}T00:00:00Z`);
+  return Math.round(ms / 86_400_000);
+}
+
+export interface ResumenAvalesCalculo {
+  emitidos: { numero: number; nominal: number; saldoVivo: number };
+  recibidos: { numero: number; nominal: number; saldoVivo: number };
+  /** Vivos que vencen entre hoy y `dias` días. */
+  proximosVencer: number;
+  saldoProximosVencer: number;
+  /** Vivos con la fecha de vencimiento ya pasada (pendientes de liberar o vencer). */
+  vencidosSinCerrar: number;
+  /** Comisiones registradas de todos los avales del conjunto. */
+  comisionesAcumuladas: number;
+}
+
+/** Exposición viva por dirección y vencimientos próximos (solo avales vivos). */
+export function resumenAvales(
+  avales: readonly {
+    direccion: DireccionAval;
+    estado: EstadoAval;
+    nominal: Importe;
+    saldoVivo: Importe;
+    fechaVencimiento: string | null;
+    comisiones: Importe;
+  }[],
+  hoy: string,
+  dias: number,
+): ResumenAvalesCalculo {
+  const acc = {
+    emitido: { numero: 0, nominal: 0n, saldo: 0n },
+    recibido: { numero: 0, nominal: 0n, saldo: 0n },
+  };
+  let proximos = 0;
+  let saldoProximos = 0n;
+  let vencidos = 0;
+  let comisiones = 0n;
+  for (const a of avales) {
+    comisiones += toCents(a.comisiones);
+    if (a.estado !== 'vigente' && a.estado !== 'liberado_parcial') continue;
+    const d = acc[a.direccion];
+    d.numero += 1;
+    d.nominal += toCents(a.nominal);
+    d.saldo += toCents(a.saldoVivo);
+    const faltan = diasHastaVencimiento(a.fechaVencimiento, hoy);
+    if (faltan === null) continue;
+    if (faltan < 0) vencidos += 1;
+    else if (faltan <= dias) {
+      proximos += 1;
+      saldoProximos += toCents(a.saldoVivo);
+    }
+  }
+  const fmt = (x: { numero: number; nominal: bigint; saldo: bigint }) => ({
+    numero: x.numero,
+    nominal: fromCents(x.nominal),
+    saldoVivo: fromCents(x.saldo),
+  });
+  return {
+    emitidos: fmt(acc.emitido),
+    recibidos: fmt(acc.recibido),
+    proximosVencer: proximos,
+    saldoProximosVencer: fromCents(saldoProximos),
+    vencidosSinCerrar: vencidos,
+    comisionesAcumuladas: fromCents(comisiones),
+  };
+}
+
+/** Comisión bancaria del aval: 6260 (obra) a 5720. */
+export function asientoComisionAval(importe: Importe): LineaAsientoWip[] {
+  const c = toCents(importe);
+  if (c <= 0n) return [];
+  const imp = centsToNumeric(c);
+  return [
+    { cuenta: '6260', debe: imp, haber: '0.00', imputaObra: true },
+    { cuenta: '5720', debe: '0.00', haber: imp, imputaObra: false },
+  ];
+}
+
+/**
+ * Ejecución del aval. Emitido (el banco paga al beneficiario y nos lo carga):
+ * 6780 gasto excepcional (obra) a 5720. Recibido (cobramos la garantía del
+ * tercero): 5720 a 7780 ingreso excepcional (obra).
+ */
+export function asientoEjecucionAval(
+  importe: Importe,
+  direccion: DireccionAval,
+): LineaAsientoWip[] {
+  const c = toCents(importe);
+  if (c <= 0n) return [];
+  const imp = centsToNumeric(c);
+  return direccion === 'emitido'
+    ? [
+        { cuenta: '6780', debe: imp, haber: '0.00', imputaObra: true },
+        { cuenta: '5720', debe: '0.00', haber: imp, imputaObra: false },
+      ]
+    : [
+        { cuenta: '5720', debe: imp, haber: '0.00', imputaObra: false },
+        { cuenta: '7780', debe: '0.00', haber: imp, imputaObra: true },
+      ];
+}

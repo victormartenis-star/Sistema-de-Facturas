@@ -56,6 +56,19 @@ export const TITULO_POR_CODIGO: Readonly<Record<string, string>> = {
   LOSS_PROVISION_PERIOD_OUT_OF_ORDER:
     'Periodo anterior al último cierre de la provisión por pérdidas',
   LOSS_PROVISION_NOT_LATEST: 'Solo se anula el último cierre de la provisión',
+  BANK_GUARANTEE_NOT_FOUND: 'Aval no encontrado',
+  BANK_GUARANTEE_REFERENCE_DUPLICATE: 'Referencia de aval duplicada',
+  BANK_GUARANTEE_NOT_ACTIVE: 'El aval no está vivo',
+  BANK_GUARANTEE_AMOUNT_INVALID: 'Importe del aval no válido',
+  BANK_GUARANTEE_AMOUNT_EXCEEDS_BALANCE:
+    'Importe superior al saldo vivo del aval',
+  BANK_GUARANTEE_DATE_INVALID: 'Fecha no válida para el aval',
+  BANK_GUARANTEE_NOT_EXPIRED: 'El aval aún no ha vencido',
+  BANK_GUARANTEE_EXTENSION_INVALID: 'Prórroga de aval no válida',
+  BANK_GUARANTEE_COMMISSION_NOT_APPLICABLE: 'El aval no devenga comisión',
+  BANK_GUARANTEE_HAS_MOVEMENTS:
+    'El aval tiene movimientos y no se puede anular',
+  BANK_GUARANTEE_LINK_INVALID: 'Vínculo del aval no válido',
   WAREHOUSE_INACTIVE: 'Almacén inactivo',
   STOCK_ARTICLE_INACTIVE: 'Artículo inactivo',
   DELIVERY_NOTE_ALREADY_STOCKED: 'Albarán ya recepcionado en stock',
