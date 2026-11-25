@@ -21,6 +21,10 @@ import {
   avalesAvisosSchema,
   avalesQuerySchema,
   avalesResumenQuerySchema,
+  lineaAvalCreateSchema,
+  lineaAvalUpdateSchema,
+  type LineaAvalCreateInput,
+  type LineaAvalUpdateInput,
   type AvalAnularInput,
   type AvalComisionInput,
   type AvalCreateInput,
@@ -63,6 +67,33 @@ export class AvalesController {
     q: AvalesResumenQuery,
   ) {
     return this.service.resumen(q);
+  }
+
+  /** Líneas de avales por entidad con dispuesto, disponible y % de uso. */
+  @Get('lineas')
+  lineas() {
+    return this.service.listarLineas();
+  }
+
+  @Post('lineas')
+  @Roles('admin', 'gerente', 'administracion')
+  @Idempotente()
+  crearLinea(
+    @Body(new ZodValidationPipe(lineaAvalCreateSchema))
+    body: LineaAvalCreateInput,
+  ) {
+    return this.service.crearLinea(body);
+  }
+
+  @Patch('lineas/:id')
+  @Roles('admin', 'gerente', 'administracion')
+  actualizarLinea(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(lineaAvalUpdateSchema))
+    body: LineaAvalUpdateInput,
+    @VersionEsperada({ exigible: true }) version: number | undefined,
+  ) {
+    return this.service.actualizarLinea(id, body, version);
   }
 
   @Get(':id')

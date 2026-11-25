@@ -20,6 +20,7 @@ import {
 } from 'drizzle-orm';
 import {
   bankAccounts,
+  bankGuaranteeLines,
   bankGuaranteeMovements,
   bankGuarantees,
   certifications,
@@ -28,7 +29,9 @@ import {
   notifications,
   projects,
   type BankGuarantee,
+  type BankGuaranteeLine,
   type BankGuaranteeMovement,
+  type DbOrTx,
   type Tx,
 } from '@erp/db';
 import {
@@ -48,8 +51,16 @@ import {
   centsToNumeric,
   comisionAval,
   diasHastaVencimiento,
+  diferenciasAuditoria,
   fromCents,
+  lineaAvalCreateSchema,
+  lineaAvalUpdateSchema,
   resumenAvales,
+  validarLineaAval,
+  type LineaAvalCreateInput,
+  type LineaAvalDto,
+  type LineaAvalUpdateInput,
+  type LiquidacionEjecucionAval,
   saldoAval,
   toCents,
   TIPO_AVAL_LABELS,
@@ -84,6 +95,12 @@ import { ContabilidadService } from '../contabilidad/contabilidad.service';
 import { DbService } from '../db/db.service';
 
 const hoyIso = () => new Date().toISOString().slice(0, 10);
+
+const lineaDuplicada = () =>
+  new ConflictException({
+    code: 'BANK_GUARANTEE_LINE_DUPLICATE',
+    message: 'Ya hay una línea de avales para esa entidad',
+  });
 
 function sumarDias(fecha: string, dias: number): string {
   const d = new Date(`${fecha}T00:00:00Z`);
@@ -167,6 +184,7 @@ function movimientoDto(m: BankGuaranteeMovement): MovimientoAvalDto {
     fechaVencimiento: m.expiryDate,
     motivo: m.reason,
     asientoId: m.journalEntryId,
+    financiada: m.financed,
     createdAt: m.createdAt.toISOString(),
   };
 }
@@ -418,6 +436,195 @@ export class AvalesService {
 
   /* ─────────────────────────── alta y edición ─────────────────────────── */
 
+  /* ─────────────────────── líneas de avales por entidad ─────────────────────── */
+
+  /** Saldo vivo de los avales emitidos de una entidad (dispuesto de su línea). */
+  private async dispuesto(ex: DbOrTx, entidad: string): Promise<string> {
+    const [f] = await ex
+      .select({
+        total: sql<string>`coalesce(sum(${bankGuarantees.outstandingAmount}), 0)`,
+      })
+      .from(bankGuarantees)
+      .where(
+        and(
+          eq(bankGuarantees.companyId, this.dbs.getCompanyId()),
+          eq(bankGuarantees.direction, 'emitido'),
+          inArray(bankGuarantees.status, [...ESTADOS_AVAL_VIVOS]),
+          sql`lower(${bankGuarantees.issuer}) = lower(${entidad})`,
+        ),
+      );
+    return f.total;
+  }
+
+  /**
+   * Un aval emitido consume la línea de su entidad: si la hay y el alta la
+   * supera (o la línea está inactiva o vencida), BANK_GUARANTEE_LIMIT_EXCEEDED.
+   * Sin línea no hay límite. Serializa las altas de la misma entidad.
+   */
+  private async validarLinea(
+    tx: Tx,
+    entidad: string,
+    importe: string,
+    fecha: string,
+  ): Promise<void> {
+    const companyId = this.dbs.getCompanyId();
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${`aval-linea:${companyId}:${entidad.toLowerCase()}`}))`,
+    );
+    const [linea] = await tx
+      .select()
+      .from(bankGuaranteeLines)
+      .where(
+        and(
+          eq(bankGuaranteeLines.companyId, companyId),
+          sql`lower(${bankGuaranteeLines.issuer}) = lower(${entidad})`,
+        ),
+      );
+    if (!linea) return;
+    const operativa =
+      linea.isActive && (!linea.expiryDate || linea.expiryDate >= fecha);
+    const v = validarLineaAval({
+      limite: operativa ? linea.limitAmount : '0',
+      dispuesto: await this.dispuesto(tx, entidad),
+      importe,
+    });
+    if (!v.ok) {
+      throw new ConflictException({
+        code: 'BANK_GUARANTEE_LIMIT_EXCEEDED',
+        message: operativa
+          ? `El aval (${importe} €) supera el disponible de la línea de ${linea.issuer}: límite ${v.limite.toFixed(2)} €, dispuesto ${v.dispuesto.toFixed(2)} €, disponible ${v.disponible.toFixed(2)} €`
+          : `La línea de avales de ${linea.issuer} está inactiva o vencida`,
+      });
+    }
+  }
+
+  private async lineaDto(l: BankGuaranteeLine): Promise<LineaAvalDto> {
+    const dispuesto = toCents(await this.dispuesto(this.dbs.db, l.issuer));
+    const limite = toCents(l.limitAmount);
+    return {
+      id: l.id,
+      entidad: l.issuer,
+      limite: fromCents(limite),
+      dispuesto: fromCents(dispuesto),
+      disponible: fromCents(limite - dispuesto),
+      usoPct:
+        limite === 0n ? null : Number((dispuesto * 10_000n) / limite) / 100,
+      activa: l.isActive,
+      fechaVencimiento: l.expiryDate,
+      notas: l.notes,
+      version: l.version,
+    };
+  }
+
+  async listarLineas(): Promise<LineaAvalDto[]> {
+    const filas = await this.dbs.db
+      .select()
+      .from(bankGuaranteeLines)
+      .where(eq(bankGuaranteeLines.companyId, this.dbs.getCompanyId()))
+      .orderBy(asc(bankGuaranteeLines.issuer));
+    return Promise.all(filas.map((l) => this.lineaDto(l)));
+  }
+
+  private async lineaPorId(ex: DbOrTx, id: string, bloquear = false) {
+    const q = ex
+      .select()
+      .from(bankGuaranteeLines)
+      .where(
+        and(
+          eq(bankGuaranteeLines.id, id),
+          eq(bankGuaranteeLines.companyId, this.dbs.getCompanyId()),
+        ),
+      );
+    const [l] = bloquear ? await q.for('update') : await q;
+    if (!l) {
+      throw new NotFoundException({
+        code: 'BANK_GUARANTEE_LINE_NOT_FOUND',
+        message: 'Línea de avales no encontrada',
+      });
+    }
+    return l;
+  }
+
+  async crearLinea(input: LineaAvalCreateInput): Promise<LineaAvalDto> {
+    const d = lineaAvalCreateSchema.parse(input);
+    const companyId = this.dbs.getCompanyId();
+    let id = '';
+    try {
+      await this.dbs.db.transaction(async (tx) => {
+        const [dup] = await tx
+          .select({ id: bankGuaranteeLines.id })
+          .from(bankGuaranteeLines)
+          .where(
+            and(
+              eq(bankGuaranteeLines.companyId, companyId),
+              sql`lower(${bankGuaranteeLines.issuer}) = lower(${d.entidad})`,
+            ),
+          );
+        if (dup) throw lineaDuplicada();
+        const [row] = await tx
+          .insert(bankGuaranteeLines)
+          .values({
+            companyId,
+            issuer: d.entidad,
+            limitAmount: n(d.limite),
+            expiryDate: d.fechaVencimiento ?? null,
+            notes: d.notas ?? null,
+          })
+          .returning();
+        id = row.id;
+        await this.audit.registrar(tx, {
+          entityType: 'bank_guarantee_line',
+          entityId: row.id,
+          action: 'create',
+          newData: row,
+        });
+      });
+    } catch (e) {
+      const pg = (e as { cause?: { code?: string }; code?: string }) ?? {};
+      if ((pg.cause?.code ?? pg.code) === '23505') throw lineaDuplicada();
+      throw e;
+    }
+    return this.lineaDto(await this.lineaPorId(this.dbs.db, id));
+  }
+
+  async actualizarLinea(
+    id: string,
+    input: LineaAvalUpdateInput,
+    version: number | undefined,
+  ): Promise<LineaAvalDto> {
+    const d = lineaAvalUpdateSchema.parse(input);
+    await this.dbs.db.transaction(async (tx) => {
+      const l = await this.lineaPorId(tx, id, true);
+      verificarVersion(l.version, version);
+      const [nueva] = await tx
+        .update(bankGuaranteeLines)
+        .set({
+          ...(d.limite !== undefined && { limitAmount: n(d.limite) }),
+          ...(d.activa !== undefined && { isActive: d.activa }),
+          ...(d.fechaVencimiento !== undefined && {
+            expiryDate: d.fechaVencimiento ?? null,
+          }),
+          ...(d.notas !== undefined && { notes: d.notas ?? null }),
+          version: l.version + 1,
+          updatedAt: new Date(),
+        })
+        .where(eq(bankGuaranteeLines.id, id))
+        .returning();
+      const campos = ['limitAmount', 'isActive', 'expiryDate', 'notes'];
+      await this.audit.registrar(tx, {
+        entityType: 'bank_guarantee_line',
+        entityId: id,
+        action: 'update',
+        oldData: l,
+        newData: {
+          ...nueva,
+          cambios: diferenciasAuditoria(l, nueva, campos),
+        },
+      });
+    });
+    return this.lineaDto(await this.lineaPorId(this.dbs.db, id));
+  }
+
   async crear(input: AvalCreateInput): Promise<AvalDetalleDto> {
     const d = avalCreateSchema.parse(input);
     const companyId = this.dbs.getCompanyId();
@@ -433,6 +640,9 @@ export class AvalesService {
           bankAccountId: d.bankAccountId,
         });
         const importe = n(d.importe);
+        if (d.direccion === 'emitido') {
+          await this.validarLinea(tx, d.entidad, importe, d.fechaEmision);
+        }
         const [row] = await tx
           .insert(bankGuarantees)
           .values({
@@ -592,6 +802,7 @@ export class AvalesService {
       motivo?: string | null;
       asientoId?: string | null;
       id?: string;
+      financiada?: boolean;
     },
   ): Promise<string> {
     const [row] = await tx
@@ -608,6 +819,7 @@ export class AvalesService {
           m.vencimiento === undefined ? g.expiryDate : (m.vencimiento ?? null),
         reason: m.motivo ?? null,
         journalEntryId: m.asientoId ?? null,
+        financed: m.financiada ?? false,
         createdBy: getRequestContext()?.userId ?? null,
       })
       .returning({ id: bankGuaranteeMovements.id });
@@ -656,16 +868,29 @@ export class AvalesService {
   private async reducir(
     id: string,
     tipo: 'liberacion' | 'ejecucion' | 'vencimiento',
-    d: { fecha: string; importe?: number | null; motivo?: string },
+    d: {
+      fecha: string;
+      importe?: number | null;
+      motivo?: string;
+      liquidacion?: LiquidacionEjecucionAval;
+    },
     version: number | undefined,
     validar?: (g: BankGuarantee) => void,
   ): Promise<AvalDetalleDto> {
+    const financiada = d.liquidacion === 'financiacion';
     await this.dbs.db.transaction(async (tx) => {
       const g = await this.bloquear(tx, id, version);
       const de = g.status as EstadoAval;
       if (de !== 'vigente' && de !== 'liberado_parcial') throw noVivo(de);
       this.exigirFecha(g, d.fecha);
       validar?.(g);
+      if (financiada && g.direction !== 'emitido') {
+        throw new UnprocessableEntityException({
+          code: 'BANK_GUARANTEE_FINANCING_NOT_APPLICABLE',
+          message:
+            'Solo la ejecución de un aval emitido puede financiarla el banco (5200)',
+        });
+      }
       const r = aplicarMovimientoAval({
         estado: de,
         nominal: g.amount,
@@ -690,9 +915,9 @@ export class AvalesService {
           tx,
           g,
           d.fecha,
-          `Ejecución de aval ${g.reference} (${g.issuer})`,
+          `Ejecución de aval ${g.reference} (${g.issuer})${financiada ? ' financiada' : ''}`,
           movId,
-          asientoEjecucionAval(r.importe, direccion),
+          asientoEjecucionAval(r.importe, direccion, financiada),
         );
         await this.notificaciones.notificar(tx, {
           companyId: g.companyId,
@@ -729,21 +954,32 @@ export class AvalesService {
         saldo: n(r.saldoVivo),
         motivo,
         asientoId,
+        financiada,
       });
+      const antes = {
+        status: de,
+        releasedAmount: g.releasedAmount,
+        executedAmount: g.executedAmount,
+        outstandingAmount: g.outstandingAmount,
+      };
+      const despues = {
+        status: r.estado,
+        releasedAmount: n(r.liberado),
+        executedAmount: n(r.ejecutado),
+        outstandingAmount: n(r.saldoVivo),
+      };
       await this.audit.registrar(tx, {
         entityType: 'bank_guarantee',
         entityId: id,
         action: 'update',
-        oldData: {
-          status: de,
-          outstandingAmount: g.outstandingAmount,
-        },
+        oldData: antes,
         newData: {
-          status: r.estado,
+          ...despues,
           movimiento: tipo,
           importe: r.importe,
-          outstandingAmount: n(r.saldoVivo),
           asientoId,
+          financiada,
+          cambios: diferenciasAuditoria(antes, despues),
         },
       });
     });

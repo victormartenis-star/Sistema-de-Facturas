@@ -20,6 +20,7 @@ import {
 import {
   contacts,
   fiscalPeriods,
+  fiscalYearClosings,
   invoiceLines,
   invoices,
   journalEntries,
@@ -30,6 +31,7 @@ import {
   projects,
   type JournalEntry,
   type LedgerAccount,
+  type DbOrTx,
   type Tx,
 } from '@erp/db';
 import {
@@ -84,6 +86,23 @@ export interface NuevoAsiento {
   origenId: string | null;
   reversesId?: string | null;
   lineas: LineaPropuesta[];
+  /**
+   * Solo el cierre del ejercicio (y su reversión): no comprueba el bloqueo
+   * del ejercicio ni el del mes, porque los toma el propio cierre.
+   */
+  cierreEjercicio?: boolean;
+}
+
+/** Clave del bloqueo consultivo de un ejercicio (compartido al contabilizar). */
+export function claveBloqueoEjercicio(companyId: string, ejercicio: number) {
+  return `ejercicio:${companyId}:${ejercicio}`;
+}
+
+export function ejercicioCerrado(ejercicio: number): HttpException {
+  return new ConflictException({
+    code: 'FISCAL_YEAR_CLOSED',
+    message: `El ejercicio ${ejercicio} está cerrado: no admite más asientos (revierte el cierre si es imprescindible)`,
+  });
 }
 
 function cuentaToDto(c: LedgerAccount): CuentaContableDto {
@@ -259,6 +278,26 @@ export class ContabilidadService {
       });
     }
     const { ejercicio, mes } = periodoDeFecha(a.fecha);
+    // Orden de bloqueos (sin interbloqueos con el cierre del ejercicio):
+    // primero el ejercicio (compartido; el cierre lo toma exclusivo y ya lo
+    // tiene), después el período.
+    if (!a.cierreEjercicio) {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock_shared(hashtext(${claveBloqueoEjercicio(a.companyId, ejercicio)}))`,
+      );
+      const [cerrado] = await tx
+        .select({ id: fiscalYearClosings.id })
+        .from(fiscalYearClosings)
+        .where(
+          and(
+            eq(fiscalYearClosings.companyId, a.companyId),
+            eq(fiscalYearClosings.year, ejercicio),
+            eq(fiscalYearClosings.status, 'cerrado'),
+          ),
+        )
+        .limit(1);
+      if (cerrado) throw ejercicioCerrado(ejercicio);
+    }
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext(${`periodo:${a.companyId}:${ejercicio}:${mes}`}))`,
     );
@@ -273,7 +312,11 @@ export class ContabilidadService {
         ),
       )
       .limit(1);
-    if (periodo?.status === 'cerrado') throw periodoCerrado(ejercicio, mes);
+    // Los asientos del propio cierre van al 31-12 / 01-01 aunque el mes esté
+    // cerrado (el equivalente a los períodos especiales 13-16 de SAP).
+    if (periodo?.status === 'cerrado' && !a.cierreEjercicio) {
+      throw periodoCerrado(ejercicio, mes);
+    }
 
     // Cuentas: deben existir, estar activas y ser imputables.
     const codigos = [...new Set(a.lineas.map((l) => l.cuenta))];
@@ -442,6 +485,8 @@ export class ContabilidadService {
     motivo: string,
     fecha: string | undefined,
     versionEsperada?: number,
+    /** Solo la reversión del cierre del ejercicio. */
+    cierreEjercicio = false,
   ): Promise<JournalEntry> {
     const [original] = await tx
       .select()
@@ -495,6 +540,7 @@ export class ContabilidadService {
       origen: 'anulacion',
       origenId: null,
       reversesId: original.id,
+      cierreEjercicio,
       lineas: lineasContraAsiento(
         lineas.map((l) => ({
           cuenta: l.cuenta,
@@ -853,6 +899,24 @@ export class ContabilidadService {
     const companyId = this.dbs.getCompanyId();
     const userId = getRequestContext()?.userId ?? null;
     await this.dbs.db.transaction(async (tx) => {
+      if (estado === 'abierto') {
+        // Un mes de un ejercicio cerrado no se reabre: se revierte el cierre.
+        await tx.execute(
+          sql`select pg_advisory_xact_lock_shared(hashtext(${claveBloqueoEjercicio(companyId, ejercicio)}))`,
+        );
+        const [cerrado] = await tx
+          .select({ id: fiscalYearClosings.id })
+          .from(fiscalYearClosings)
+          .where(
+            and(
+              eq(fiscalYearClosings.companyId, companyId),
+              eq(fiscalYearClosings.year, ejercicio),
+              eq(fiscalYearClosings.status, 'cerrado'),
+            ),
+          )
+          .limit(1);
+        if (cerrado) throw ejercicioCerrado(ejercicio);
+      }
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtext(${`periodo:${companyId}:${ejercicio}:${mes}`}))`,
       );
@@ -889,6 +953,108 @@ export class ContabilidadService {
     });
     const lista = await this.periodos(ejercicio);
     return lista[mes - 1];
+  }
+
+  /**
+   * Fija el estado de varios meses de un ejercicio dentro de la transacción
+   * del cierre del ejercicio. Devuelve los meses que cambiaron de estado.
+   */
+  async fijarPeriodosEnTx(
+    tx: Tx,
+    companyId: string,
+    ejercicio: number,
+    meses: readonly number[],
+    estado: 'abierto' | 'cerrado',
+  ): Promise<number[]> {
+    if (meses.length === 0) return [];
+    const actuales = await tx
+      .select({ month: fiscalPeriods.month, status: fiscalPeriods.status })
+      .from(fiscalPeriods)
+      .where(
+        and(
+          eq(fiscalPeriods.companyId, companyId),
+          eq(fiscalPeriods.year, ejercicio),
+        ),
+      );
+    const estadoDe = (m: number) =>
+      actuales.find((a) => a.month === m)?.status ?? 'abierto';
+    const cambian = meses.filter((m) => estadoDe(m) !== estado);
+    if (cambian.length === 0) return [];
+    const userId = getRequestContext()?.userId ?? null;
+    const cerrado = estado === 'cerrado';
+    await tx
+      .insert(fiscalPeriods)
+      .values(
+        cambian.map((month) => ({
+          companyId,
+          year: ejercicio,
+          month,
+          status: estado,
+          closedAt: cerrado ? new Date() : null,
+          closedBy: cerrado ? userId : null,
+        })),
+      )
+      .onConflictDoUpdate({
+        target: [
+          fiscalPeriods.companyId,
+          fiscalPeriods.year,
+          fiscalPeriods.month,
+        ],
+        set: {
+          status: estado,
+          closedAt: cerrado ? new Date() : null,
+          closedBy: cerrado ? userId : null,
+          updatedAt: new Date(),
+        },
+      });
+    return cambian;
+  }
+
+  /**
+   * Saldos (debe y haber) por cuenta y obra de los asientos de un ejercicio,
+   * anulados y contra-asientos incluidos (se compensan entre sí).
+   */
+  async saldosEjercicio(
+    ex: DbOrTx,
+    companyId: string,
+    ejercicio: number,
+  ): Promise<
+    {
+      cuenta: string;
+      nombre: string;
+      projectId: string | null;
+      debe: string;
+      haber: string;
+    }[]
+  > {
+    return ex
+      .select({
+        cuenta: ledgerAccounts.code,
+        nombre: ledgerAccounts.name,
+        projectId: journalEntryLines.projectId,
+        debe: sql<string>`sum(${journalEntryLines.debit})`,
+        haber: sql<string>`sum(${journalEntryLines.credit})`,
+      })
+      .from(journalEntryLines)
+      .innerJoin(
+        journalEntries,
+        eq(journalEntries.id, journalEntryLines.entryId),
+      )
+      .innerJoin(
+        ledgerAccounts,
+        eq(ledgerAccounts.id, journalEntryLines.accountId),
+      )
+      .where(
+        and(
+          eq(journalEntryLines.companyId, companyId),
+          eq(journalEntries.fiscalYear, ejercicio),
+        ),
+      )
+      .groupBy(
+        ledgerAccounts.code,
+        ledgerAccounts.name,
+        journalEntryLines.projectId,
+      );
   }
 
   /* ─────────────────────────── interfaz contable ─────────────────────────── */

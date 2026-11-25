@@ -31,6 +31,7 @@ import {
   paymentMilestones,
   projectBudgetControls,
   projectPhases,
+  projectCostEstimates,
   projects,
   purchaseOrders,
   type DbOrTx,
@@ -75,7 +76,11 @@ import {
 } from '../common/request-context';
 import { verificarVersion } from '../common/version';
 import { DbService } from '../db/db.service';
-import { costeAlmacen, costeAmortizacion } from './costes-imputados';
+import {
+  costeAlmacen,
+  costeAmortizacion,
+  costeAvales,
+} from './costes-imputados';
 
 /** Estados de pedido que aún comprometen coste. */
 const PEDIDOS_ABIERTOS = ['emitido', 'servido_parcial', 'servido'] as const;
@@ -95,7 +100,8 @@ type Origen =
   | 'partesPersonal'
   | 'partesMaquinaria'
   | 'almacen'
-  | 'amortizacion';
+  | 'amortizacion'
+  | 'avales';
 
 interface Rango {
   desde?: string;
@@ -111,6 +117,8 @@ interface Magnitudes {
   certificado: bigint;
   facturado: bigint;
   cobro: { baseObra: string; totalVencimientos: string; liquidado: string }[];
+  /** Estimación al cierre manual vigente a la fecha (null: automática). */
+  estimacion: string | null;
 }
 
 function vacias(): Magnitudes {
@@ -122,6 +130,7 @@ function vacias(): Magnitudes {
     certificado: 0n,
     facturado: 0n,
     cobro: [],
+    estimacion: null,
   };
 }
 
@@ -131,6 +140,7 @@ const ORIGEN_CERO = (): Record<Origen, bigint> => ({
   partesMaquinaria: 0n,
   almacen: 0n,
   amortizacion: 0n,
+  avales: 0n,
 });
 
 function enRango(col: PgColumn, r: Rango): SQL[] {
@@ -342,10 +352,34 @@ export class ControlPresupuestarioService {
         .groupBy(partesMaquinaria.projectId, partesMaquinaria.phaseId),
     );
     // Almacén y amortización: mismas consultas que la economía de obra.
-    const [almacen, amortizacion] = await Promise.all([
+    const [almacen, amortizacion, avales, estimaciones] = await Promise.all([
       costeAlmacen(ex, ids, { rango }),
       costeAmortizacion(ex, ids, { rango }),
+      costeAvales(ex, ids, { rango }),
+      // EAC vigente a la fecha: la versión más alta con efecto ≤ hasta.
+      ex
+        .selectDistinctOn([projectCostEstimates.projectId], {
+          projectId: projectCostEstimates.projectId,
+          coste: projectCostEstimates.estimatedCost,
+        })
+        .from(projectCostEstimates)
+        .where(
+          and(
+            inArray(projectCostEstimates.projectId, ids),
+            ...(rango.hasta
+              ? [lte(projectCostEstimates.effectiveDate, rango.hasta)]
+              : []),
+          ),
+        )
+        .orderBy(
+          projectCostEstimates.projectId,
+          desc(projectCostEstimates.version),
+        ),
     ]);
+    for (const e of estimaciones) {
+      const o = de(e.projectId);
+      if (o) o.estimacion = e.coste;
+    }
     const sinPartida = (origen: Origen, mapa: Map<string, bigint>) => {
       for (const [projectId, v] of mapa) {
         const o = de(projectId);
@@ -357,6 +391,7 @@ export class ControlPresupuestarioService {
     };
     sinPartida('almacen', almacen);
     sinPartida('amortizacion', amortizacion);
+    sinPartida('avales', avales);
 
     // Comprometido: pedidos abiertos con lo facturado vía albaranes.
     const pedidos = await ex
@@ -509,10 +544,12 @@ export class ControlPresupuestarioService {
         partesMaquinaria: centsToNumeric(real.partesMaquinaria),
         almacen: centsToNumeric(real.almacen),
         amortizacion: centsToNumeric(real.amortizacion),
+        avales: centsToNumeric(real.avales),
       },
       certificado: centsToNumeric(d.certificado),
       facturado: centsToNumeric(d.facturado),
       cobrado: cobradoEnBase(d.cobro),
+      estimacionCierre: d.estimacion,
     };
   }
 
@@ -530,6 +567,20 @@ export class ControlPresupuestarioService {
   }
 
   /**
+   * Cuadro de márgenes completo de una obra a una fecha (una sola carga):
+   * coste real con avales y estimación al cierre vigente a esa fecha.
+   */
+  async cuadroObraHasta(
+    ex: DbOrTx,
+    projectId: string,
+    contrato: string | null,
+    hasta?: string,
+  ) {
+    const datos = await this.cargar(ex, [projectId], hasta ? { hasta } : {});
+    return cuadroMargenesObra(this.entrada(contrato, datos.get(projectId)!));
+  }
+
+  /**
    * Coste real a origen y coste estimado al cierre de una obra a una fecha,
    * del mismo cuadro de márgenes (una sola carga). Lo usa la provisión por
    * pérdidas previstas: pérdida total = coste estimado − contrato.
@@ -540,10 +591,7 @@ export class ControlPresupuestarioService {
     contrato: string | null,
     hasta: string,
   ): Promise<{ costeReal: string; costeEstimadoCierre: string }> {
-    const datos = await this.cargar(ex, [projectId], { hasta });
-    const cuadro = cuadroMargenesObra(
-      this.entrada(contrato, datos.get(projectId)!),
-    );
+    const cuadro = await this.cuadroObraHasta(ex, projectId, contrato, hasta);
     return {
       costeReal: centsToNumeric(toCents(cuadro.costeReal)),
       costeEstimadoCierre: centsToNumeric(toCents(cuadro.costeEstimadoCierre)),

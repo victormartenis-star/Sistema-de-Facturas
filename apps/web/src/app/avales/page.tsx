@@ -7,6 +7,8 @@ import {
   DIRECCION_AVAL_LABELS,
   ESTADOS_AVAL,
   ESTADO_AVAL_LABELS,
+  LIQUIDACIONES_EJECUCION_AVAL,
+  LIQUIDACION_EJECUCION_AVAL_LABELS,
   TIPOS_AVAL,
   TIPO_AVAL_LABELS,
   TIPO_MOVIMIENTO_AVAL_LABELS,
@@ -14,6 +16,8 @@ import {
   type AvalDto,
   type DireccionAval,
   type EstadoAval,
+  type LineaAvalDto,
+  type LiquidacionEjecucionAval,
   type TipoAval,
 } from '@erp/shared';
 import { avalesApi, formatDate, formatEur, projectsApi } from '@/lib/api';
@@ -304,9 +308,243 @@ export default function AvalesPage() {
         </div>
       )}
 
+      <LineasAval />
       <NuevoAvalModal open={nuevo} onClose={() => setNuevo(false)} />
       <DetalleAvalModal id={abierto} onClose={() => setAbierto(null)} />
     </div>
+  );
+}
+
+/**
+ * Líneas de avales por entidad (límite de riesgo concedido): dispuesto por
+ * los avales emitidos vivos y disponible. Un alta que la supere se rechaza
+ * con BANK_GUARANTEE_LIMIT_EXCEEDED.
+ */
+function LineasAval() {
+  const [entidad, setEntidad] = useState('');
+  const [limite, setLimite] = useState('');
+  const [editando, setEditando] = useState<LineaAvalDto | null>(null);
+  const [nuevoLimite, setNuevoLimite] = useState('');
+  const clave = useRef(nuevoUuid());
+  const [guarda] = useState(crearGuardaEnvio);
+  const { can } = usePermisos();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const avisarError = useAvisarError();
+  const lineas = useQuery({
+    queryKey: ['avales', 'lineas'],
+    queryFn: () => avalesApi.lineas(),
+  });
+  const refrescar = () => {
+    void qc.invalidateQueries({ queryKey: ['avales', 'lineas'] });
+  };
+  const crear = useMutation({
+    mutationFn: () =>
+      avalesApi.crearLinea(
+        { entidad: entidad.trim(), limite: importe(limite) },
+        clave.current,
+      ),
+    onSuccess: (l) => {
+      clave.current = nuevoUuid();
+      setEntidad('');
+      setLimite('');
+      toast(`Línea de ${l.entidad} creada`);
+      refrescar();
+    },
+    onError: (e) => avisarError(e, refrescar),
+  });
+  const actualizar = useMutation({
+    mutationFn: (p: {
+      l: LineaAvalDto;
+      cambios: { limite?: number; activa?: boolean };
+    }) => avalesApi.actualizarLinea(p.l.id, p.cambios, p.l.version),
+    onSuccess: (l) => {
+      setEditando(null);
+      toast(`Línea de ${l.entidad} actualizada`);
+      refrescar();
+    },
+    onError: (e) => avisarError(e, refrescar),
+  });
+  const ocupado = crear.isPending || actualizar.isPending;
+  useEffect(() => {
+    if (!ocupado) guarda.liberar();
+  }, [ocupado, guarda]);
+  const filas = lineas.data ?? [];
+
+  return (
+    <section className="mt-8">
+      <h2 className="mb-1 text-sm font-semibold">
+        Líneas de avales por entidad
+      </h2>
+      <p className="mb-2 text-xs text-gray-500">
+        Límite de riesgo que cada banco concede. Lo consumen los avales emitidos
+        vivos de esa entidad; sin línea no hay límite.
+      </p>
+      {lineas.isError && (
+        <ErrorBanner message={(lineas.error as Error).message} />
+      )}
+      {filas.length > 0 && (
+        <div className="mb-3 overflow-x-auto rounded-xl border bg-white shadow-sm">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-left text-xs text-gray-500">
+              <tr>
+                <th className="px-3 py-2">Entidad</th>
+                <th className="px-3 py-2 text-right">Límite</th>
+                <th className="px-3 py-2 text-right">Dispuesto</th>
+                <th className="px-3 py-2 text-right">Disponible</th>
+                <th className="px-3 py-2 text-right">Uso</th>
+                <th className="px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {filas.map((l) => (
+                <tr key={l.id} className="border-t border-gray-100">
+                  <td className="px-3 py-2">
+                    {l.entidad}
+                    {!l.activa && (
+                      <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-gray-500">
+                        Inactiva
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {formatEur(l.limite)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {formatEur(l.dispuesto)}
+                  </td>
+                  <td
+                    className={`px-3 py-2 text-right tabular-nums ${l.disponible < 0 ? 'text-red-700' : ''}`}
+                  >
+                    {formatEur(l.disponible)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {l.usoPct === null ? '—' : `${l.usoPct.toFixed(1)} %`}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <Autorizado accion="editar" recurso="aval">
+                      {editando?.id === l.id ? (
+                        <form
+                          className="flex justify-end gap-1"
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            if (
+                              !can('editar', 'aval') ||
+                              !nuevoLimite.trim() ||
+                              ocupado ||
+                              !guarda.intentar()
+                            )
+                              return;
+                            actualizar.mutate({
+                              l,
+                              cambios: { limite: importe(nuevoLimite) },
+                            });
+                          }}
+                        >
+                          <input
+                            className={`${inputCls} w-28`}
+                            inputMode="decimal"
+                            value={nuevoLimite}
+                            onChange={(e) => setNuevoLimite(e.target.value)}
+                            aria-label="Nuevo límite"
+                          />
+                          <button
+                            type="submit"
+                            className={btnPrimaryCls}
+                            disabled={ocupado}
+                          >
+                            Guardar
+                          </button>
+                        </form>
+                      ) : (
+                        <span className="flex justify-end gap-1">
+                          <button
+                            type="button"
+                            className={btnGhostCls}
+                            onClick={() => {
+                              setEditando(l);
+                              setNuevoLimite(String(l.limite));
+                            }}
+                          >
+                            Límite
+                          </button>
+                          <button
+                            type="button"
+                            className={btnGhostCls}
+                            disabled={ocupado}
+                            onClick={() => {
+                              if (
+                                !can('editar', 'aval') ||
+                                ocupado ||
+                                !guarda.intentar()
+                              )
+                                return;
+                              actualizar.mutate({
+                                l,
+                                cambios: { activa: !l.activa },
+                              });
+                            }}
+                          >
+                            {l.activa ? 'Desactivar' : 'Activar'}
+                          </button>
+                        </span>
+                      )}
+                    </Autorizado>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <Autorizado accion="crear" recurso="aval">
+        <form
+          className="flex flex-wrap items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (
+              !can('crear', 'aval') ||
+              !entidad.trim() ||
+              !limite.trim() ||
+              ocupado ||
+              !guarda.intentar()
+            )
+              return;
+            crear.mutate();
+          }}
+        >
+          <div>
+            <label className={labelCls} htmlFor="ln-entidad">
+              Entidad
+            </label>
+            <input
+              id="ln-entidad"
+              className={fieldCls}
+              value={entidad}
+              onChange={(e) => setEntidad(e.target.value)}
+              maxLength={120}
+              required
+            />
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="ln-limite">
+              Límite (€)
+            </label>
+            <input
+              id="ln-limite"
+              inputMode="decimal"
+              className={fieldCls}
+              value={limite}
+              onChange={(e) => setLimite(e.target.value)}
+              required
+            />
+          </div>
+          <button type="submit" className={btnPrimaryCls} disabled={ocupado}>
+            {crear.isPending ? 'Creando…' : 'Nueva línea'}
+          </button>
+        </form>
+      </Autorizado>
+    </section>
   );
 }
 
@@ -576,6 +814,8 @@ function DetalleAvalModal({
   const [imp, setImp] = useState('');
   const [motivo, setMotivo] = useState('');
   const [nuevaFecha, setNuevaFecha] = useState('');
+  const [liquidacion, setLiquidacion] =
+    useState<LiquidacionEjecucionAval>('tesoreria');
   const clave = useRef(nuevoUuid());
   const [guarda] = useState(crearGuardaEnvio);
   const { can } = usePermisos();
@@ -601,7 +841,13 @@ function DetalleAvalModal({
         case 'ejecutar':
           return avalesApi.ejecutar(
             a.id,
-            { fecha, importe: importeOpcional(imp), motivo: motivo.trim() },
+            {
+              fecha,
+              importe: importeOpcional(imp),
+              motivo: motivo.trim(),
+              liquidacion:
+                a.direccion === 'emitido' ? liquidacion : 'tesoreria',
+            },
             a.version,
             c,
           );
@@ -840,11 +1086,34 @@ function DetalleAvalModal({
                     />
                   </div>
                 )}
+                {accion === 'ejecutar' && a.direccion === 'emitido' && (
+                  <div className="sm:col-span-2">
+                    <label className={labelCls} htmlFor="mv-liq">
+                      Liquidación
+                    </label>
+                    <select
+                      id="mv-liq"
+                      className={fieldCls}
+                      value={liquidacion}
+                      onChange={(e) =>
+                        setLiquidacion(
+                          e.target.value as LiquidacionEjecucionAval,
+                        )
+                      }
+                    >
+                      {LIQUIDACIONES_EJECUCION_AVAL.map((l) => (
+                        <option key={l} value={l}>
+                          {LIQUIDACION_EJECUCION_AVAL_LABELS[l]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <div className="flex items-center justify-between gap-2 sm:col-span-4">
                   <p className="text-xs text-gray-500">
                     {accion === 'ejecutar'
                       ? a.direccion === 'emitido'
-                        ? 'Se contabiliza 6780 (obra) a 5720 en la fecha indicada.'
+                        ? `Se contabiliza 6780 (obra) a ${liquidacion === 'financiacion' ? '5200 (préstamo del banco)' : '5720'} en la fecha indicada.`
                         : 'Se contabiliza 5720 a 7780 (obra) en la fecha indicada.'
                       : accion === 'comision'
                         ? 'Se contabiliza 6260 (obra) a 5720.'

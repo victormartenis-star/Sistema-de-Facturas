@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ESTADO_CONTROL_LABELS,
   MODOS_CONTROL_PRESUPUESTARIO,
@@ -14,7 +14,15 @@ import {
   type FilaMargenObraDto,
   type ModoControlPresupuestario,
 } from '@erp/shared';
-import { costControlApi, formatDate, formatEur } from '@/lib/api';
+import {
+  costControlApi,
+  estimacionCierreApi,
+  formatDate,
+  formatEur,
+} from '@/lib/api';
+import { nuevoUuid } from '@/lib/api-error';
+import { crearGuardaEnvio } from '@/lib/envio-unico';
+import { usePermisos } from '@/lib/permisos';
 import { Autorizado } from '@/components/autorizado';
 import { IconAlertTriangle, IconTrendingUp } from '@/components/icons';
 import { useAvisarError, useToast } from '@/components/toast';
@@ -434,6 +442,10 @@ function DetalleObraModal({
                 etiqueta="Amortización"
                 valor={formatEur(o.costeRealDesglose.amortizacion)}
               />
+              <Linea
+                etiqueta="Avales (comisiones y ejecuciones)"
+                valor={formatEur(o.costeRealDesglose.avales)}
+              />
               <Linea etiqueta="Total" valor={formatEur(o.costeReal)} fuerte />
             </div>
             <div>
@@ -525,10 +537,199 @@ function DetalleObraModal({
             />
           )}
 
+          <PanelEstimacionCierre projectId={o.projectId} />
           <PanelControl projectId={o.projectId} control={control.data} />
         </div>
       )}
     </Modal>
+  );
+}
+
+/**
+ * Estimación al cierre (EAC) editable por obra: la efectiva alimenta el
+ * margen proyectado y la provisión por pérdidas. Cada cambio queda como
+ * versión con motivo, fecha de efecto y usuario.
+ */
+function PanelEstimacionCierre({ projectId }: { projectId: string }) {
+  const [coste, setCoste] = useState('');
+  const [motivo, setMotivo] = useState('');
+  const [fecha, setFecha] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
+  const clave = useRef(nuevoUuid());
+  const [guarda] = useState(crearGuardaEnvio);
+  const { can } = usePermisos();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const avisarError = useAvisarError();
+  const eac = useQuery({
+    queryKey: ['estimacion-cierre', projectId],
+    queryFn: () => estimacionCierreApi.obtener(projectId),
+  });
+  const refrescar = () => {
+    void qc.invalidateQueries({ queryKey: ['estimacion-cierre', projectId] });
+    void qc.invalidateQueries({ queryKey: ['margenes'] });
+  };
+  const m = useMutation({
+    mutationFn: (automatica: boolean) =>
+      estimacionCierreApi.fijar(
+        projectId,
+        {
+          costeEstimado: automatica
+            ? null
+            : Number(coste.trim().replace(',', '.')),
+          motivo: motivo.trim(),
+          fecha,
+        },
+        eac.data?.version ?? 0,
+        clave.current,
+      ),
+    onSuccess: (r) => {
+      clave.current = nuevoUuid();
+      setCoste('');
+      setMotivo('');
+      toast(
+        `Estimación al cierre: ${formatEur(r.costeEstimadoCierre)} (${r.origen === 'manual' ? 'manual' : 'automática'})`,
+      );
+      refrescar();
+    },
+    onError: (e) => avisarError(e, refrescar),
+  });
+  useEffect(() => {
+    if (!m.isPending) guarda.liberar();
+  }, [m.isPending, guarda]);
+
+  const e = eac.data;
+  const puede = can('editar', 'estimacion_cierre');
+  const enviar = (automatica: boolean) => {
+    if (!can('editar', 'estimacion_cierre') || m.isPending) return;
+    if (motivo.trim().length < 3) return;
+    if (!automatica && !(Number(coste.replace(',', '.')) >= 0 && coste.trim()))
+      return;
+    if (!guarda.intentar()) return;
+    m.mutate(automatica);
+  };
+
+  return (
+    <div className="rounded-lg border p-3">
+      <p className="mb-2 text-xs font-semibold uppercase text-gray-500">
+        Estimación al cierre (EAC)
+      </p>
+      {eac.isError && <ErrorBanner message={(eac.error as Error).message} />}
+      {e && (
+        <>
+          <div className="mb-3 grid gap-2 text-sm sm:grid-cols-4">
+            <Linea
+              etiqueta="Automática"
+              valor={formatEur(e.costeEstimadoCierreAutomatico)}
+            />
+            <Linea
+              etiqueta={`Efectiva (${e.origen === 'manual' ? 'manual' : 'automática'})`}
+              valor={formatEur(e.costeEstimadoCierre)}
+              fuerte
+            />
+            <Linea etiqueta="Coste real" valor={formatEur(e.costeReal)} />
+            <Linea
+              etiqueta="Margen proyectado"
+              valor={
+                e.margenProyectado === null
+                  ? '—'
+                  : formatEur(e.margenProyectado)
+              }
+            />
+          </div>
+          {e.ajustadaAlReal && (
+            <p className="mb-2 text-xs text-amber-700">
+              La estimación manual quedó por debajo del coste real y se eleva a
+              él: revísala.
+            </p>
+          )}
+          {puede && (
+            <form
+              className="grid gap-2 sm:grid-cols-4"
+              onSubmit={(ev) => {
+                ev.preventDefault();
+                enviar(false);
+              }}
+            >
+              <div>
+                <label className={labelCls} htmlFor="eac-coste">
+                  Nuevo coste al cierre (€)
+                </label>
+                <input
+                  id="eac-coste"
+                  inputMode="decimal"
+                  className={fieldCls}
+                  value={coste}
+                  onChange={(ev) => setCoste(ev.target.value)}
+                />
+              </div>
+              <div>
+                <label className={labelCls} htmlFor="eac-fecha">
+                  Fecha de efecto
+                </label>
+                <input
+                  id="eac-fecha"
+                  type="date"
+                  className={fieldCls}
+                  value={fecha}
+                  onChange={(ev) => setFecha(ev.target.value)}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className={labelCls} htmlFor="eac-motivo">
+                  Motivo
+                </label>
+                <input
+                  id="eac-motivo"
+                  className={fieldCls}
+                  value={motivo}
+                  onChange={(ev) => setMotivo(ev.target.value)}
+                  minLength={3}
+                  maxLength={240}
+                  required
+                />
+              </div>
+              <div className="flex justify-end gap-2 sm:col-span-4">
+                {e.origen === 'manual' && (
+                  <button
+                    type="button"
+                    className={btnGhostCls}
+                    disabled={m.isPending || motivo.trim().length < 3}
+                    onClick={() => enviar(true)}
+                  >
+                    Volver al cálculo automático
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  className={btnPrimaryCls}
+                  disabled={
+                    m.isPending || motivo.trim().length < 3 || !coste.trim()
+                  }
+                >
+                  {m.isPending ? 'Guardando…' : 'Fijar estimación'}
+                </button>
+              </div>
+            </form>
+          )}
+          {e.historial.length > 0 && (
+            <ul className="mt-3 space-y-1 text-xs text-gray-600">
+              {e.historial.map((h) => (
+                <li key={h.version}>
+                  v{h.version} · {formatDate(h.fecha)} ·{' '}
+                  {h.costeEstimado === null
+                    ? 'automática'
+                    : formatEur(h.costeEstimado)}{' '}
+                  · {h.motivo}
+                  {h.usuarioNombre && ` · ${h.usuarioNombre}`}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 

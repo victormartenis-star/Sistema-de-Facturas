@@ -2,22 +2,28 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
+  Post,
   Put,
   Query,
 } from '@nestjs/common';
 import {
   controlPresupuestarioUpdateSchema,
   cuadroMargenesQuerySchema,
+  estimacionCierreSetSchema,
   margenesObraQuerySchema,
   type ControlPresupuestarioUpdateInput,
   type CuadroMargenesQuery,
+  type EstimacionCierreSetInput,
   type MargenesObraQuery,
 } from '@erp/shared';
 import { Roles } from '../auth/roles';
+import { Idempotente } from '../common/idempotencia/idempotente.decorator';
 import { VersionEsperada } from '../common/version';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { EstimacionCierreService } from './estimacion-cierre.service';
 import { ControlPresupuestarioService } from './control-presupuestario.service';
 import { CostControlService } from './cost-control.service';
 
@@ -26,6 +32,7 @@ export class CostControlController {
   constructor(
     private readonly service: CostControlService,
     private readonly control: ControlPresupuestarioService,
+    private readonly eac: EstimacionCierreService,
   ) {}
 
   /**
@@ -86,5 +93,31 @@ export class CostControlController {
     @VersionEsperada() version: number | undefined,
   ) {
     return this.control.configurar(id, body, version);
+  }
+
+  /** Estimación al cierre (EAC) vigente, automática, efectiva e historial. */
+  @Get('projects/:id/estimacion-cierre')
+  @Roles('admin', 'gerente', 'administracion', 'lector', 'obra')
+  estimacionCierre(@Param('id', ParseUUIDPipe) id: string) {
+    return this.eac.obtener(id);
+  }
+
+  /**
+   * Fija o retira (`costeEstimado: null`) la estimación al cierre: nueva
+   * versión con motivo y fecha de efecto. `If-Match` con la versión vigente
+   * (sin cabecera si nunca se fijó) e `Idempotency-Key`. También el jefe de
+   * obra, en sus obras.
+   */
+  @Post('projects/:id/estimacion-cierre')
+  @Roles('admin', 'gerente', 'administracion', 'obra')
+  @Idempotente()
+  @HttpCode(200)
+  fijarEstimacionCierre(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(estimacionCierreSetSchema))
+    body: EstimacionCierreSetInput,
+    @VersionEsperada() version: number | undefined,
+  ) {
+    return this.eac.fijar(id, body, version);
   }
 }

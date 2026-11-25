@@ -71,6 +71,11 @@ const GESTION: NavItem[] = [
   { href: '/margenes', label: 'Márgenes y presupuesto', icon: IconTrendingUp },
   { href: '/contabilidad', label: 'Contabilidad', icon: IconCalculator },
   {
+    href: '/cierre-ejercicio',
+    label: 'Cierre del ejercicio',
+    icon: IconCalculator,
+  },
+  {
     href: '/obra-en-curso',
     label: 'Obra en curso (cierre)',
     icon: IconCalculator,

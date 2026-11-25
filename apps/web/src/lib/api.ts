@@ -41,6 +41,13 @@ import type {
   AvalComisionInput,
   ResumenAvalesDto,
   ResultadoAvisosAvalesDto,
+  LineaAvalDto,
+  LineaAvalCreateInput,
+  LineaAvalUpdateInput,
+  CierreEjercicioDto,
+  PropuestaCierreEjercicioDto,
+  EstimacionCierreObraDto,
+  EstimacionCierreSetInput,
   ResultadoCierreProvisionPerdidasDto,
   AjusteConsolidacionCreateInput,
   AjusteConsolidacionDto,
@@ -2572,4 +2579,76 @@ export const avalesApi = {
       body: JSON.stringify({ dias }),
       headers: idempotencyKey(clave),
     }),
+  lineas: () => request<LineaAvalDto[]>('/avales/lineas'),
+  crearLinea: (input: LineaAvalCreateInput, clave: string) =>
+    request<LineaAvalDto>('/avales/lineas', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: idempotencyKey(clave),
+    }),
+  actualizarLinea: (id: string, input: LineaAvalUpdateInput, version: number) =>
+    request<LineaAvalDto>(`/avales/lineas/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+      headers: ifMatch(version),
+    }),
+};
+
+/* ───────────────────── Cierre y apertura del ejercicio ───────────────────── */
+
+export const cierreEjercicioApi = {
+  listar: () => request<CierreEjercicioDto[]>('/contabilidad/ejercicios'),
+  propuesta: (ejercicio: number) =>
+    request<PropuestaCierreEjercicioDto>(
+      `/contabilidad/ejercicios/${ejercicio}/cierre`,
+    ),
+  cerrar: (ejercicio: number, clave: string) =>
+    request<CierreEjercicioDto>(
+      `/contabilidad/ejercicios/${ejercicio}/cerrar`,
+      {
+        method: 'POST',
+        headers: idempotencyKey(clave),
+      },
+    ),
+  revertir: (
+    ejercicio: number,
+    motivo: string,
+    version: number,
+    clave: string,
+  ) =>
+    request<CierreEjercicioDto>(
+      `/contabilidad/ejercicios/${ejercicio}/revertir`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ motivo }),
+        headers: { ...ifMatch(version), ...idempotencyKey(clave) },
+      },
+    ),
+};
+
+/* ───────────────────── Estimación al cierre (EAC) por obra ───────────────────── */
+
+export const estimacionCierreApi = {
+  obtener: (projectId: string) =>
+    request<EstimacionCierreObraDto>(
+      `/projects/${projectId}/estimacion-cierre`,
+    ),
+  /** Con versión 0 (nunca fijada) no se envía If-Match. */
+  fijar: (
+    projectId: string,
+    input: EstimacionCierreSetInput,
+    version: number,
+    clave: string,
+  ) =>
+    request<EstimacionCierreObraDto>(
+      `/projects/${projectId}/estimacion-cierre`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+        headers: {
+          ...(version > 0 ? ifMatch(version) : {}),
+          ...idempotencyKey(clave),
+        },
+      },
+    ),
 };
