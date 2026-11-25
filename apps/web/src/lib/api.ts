@@ -2572,6 +2572,18 @@ export const avalesApi = {
   resumen: (dias = 30) =>
     request<ResumenAvalesDto>(`/avales/resumen${qs({ dias })}`),
   detalle: (id: string) => request<AvalDetalleDto>(`/avales/${id}`),
+  /** Cambio de tasa con fecha de efecto (PATCH con If-Match). */
+  cambiarTasa: (
+    id: string,
+    tasaComisionAnualPct: number | null,
+    tasaVigenteDesde: string,
+    version: number,
+  ) =>
+    request<AvalDetalleDto>(`/avales/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ tasaComisionAnualPct, tasaVigenteDesde }),
+      headers: ifMatch(version),
+    }),
   crear: (input: AvalCreateInput, clave: string) =>
     request<AvalDetalleDto>('/avales', {
       method: 'POST',
@@ -2701,15 +2713,58 @@ export const cierreEjercicioApi = {
 /* ───────────────────── Conciliación de cierre (auxiliar ↔ mayor) ───────────────────── */
 
 export const conciliacionApi = {
-  consultar: () => request<ConciliacionCierreDto>('/contabilidad/conciliacion'),
+  consultar: (fecha?: string) =>
+    request<ConciliacionCierreDto>(
+      `/contabilidad/conciliacion${qs({ fecha })}`,
+    ),
   historial: () =>
     request<ConciliacionCierreDto[]>('/contabilidad/conciliacion/historial'),
-  registrar: (clave: string) =>
+  registrar: (fecha: string | undefined, clave: string) =>
     request<ConciliacionCierreDto>('/contabilidad/conciliacion', {
       method: 'POST',
+      body: JSON.stringify(fecha ? { fecha } : {}),
       headers: idempotencyKey(clave),
     }),
 };
+
+/**
+ * Descarga de las cuentas anuales (CSV o JSON canónico). Devuelve la huella
+ * SHA-256 del contenido, que también queda en la auditoría.
+ */
+export async function descargarCuentasAnuales(
+  ejercicio: number,
+  formato: 'csv' | 'json',
+): Promise<string | null> {
+  const session = readStoredSession();
+  const res = await fetch(
+    `${API_URL}/contabilidad/ejercicios/${ejercicio}/cuentas-anuales/exportar?formato=${formato}`,
+    {
+      headers: session?.accessToken
+        ? { Authorization: `Bearer ${session.accessToken}` }
+        : {},
+    },
+  );
+  if (!res.ok) {
+    let body: unknown = null;
+    try {
+      body = await res.json();
+    } catch {
+      // sin cuerpo JSON
+    }
+    throw errorDeRespuesta(res.status, body);
+  }
+  const nombre =
+    /filename="([^"]+)"/.exec(
+      res.headers.get('Content-Disposition') ?? '',
+    )?.[1] ?? `cuentas-anuales-${ejercicio}.${formato}`;
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nombre;
+  a.click();
+  URL.revokeObjectURL(url);
+  return res.headers.get('X-Content-SHA256');
+}
 
 /* ───────────────────── Estimación al cierre (EAC) por obra ───────────────────── */
 

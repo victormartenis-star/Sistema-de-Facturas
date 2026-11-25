@@ -497,8 +497,10 @@ function DevengosAval() {
                         {d.tramos.map((t) => (
                           <li key={t.desde}>
                             {formatDate(t.desde)}–{formatDate(t.hasta)} ·{' '}
-                            {formatEur(t.saldo)} × {t.dias} d ={' '}
-                            {formatEur(t.importe)}
+                            {formatEur(t.saldo)} × {t.dias} d
+                            {t.tasaAnualPct !== undefined &&
+                              ` × ${t.tasaAnualPct} %`}{' '}
+                            = {formatEur(t.importe)}
                           </li>
                         ))}
                       </ul>
@@ -1074,6 +1076,8 @@ function DetalleAvalModal({
   const [nuevaFecha, setNuevaFecha] = useState('');
   const [liquidacion, setLiquidacion] =
     useState<LiquidacionEjecucionAval>('tesoreria');
+  const [nuevaTasa, setNuevaTasa] = useState('');
+  const [tasaDesde, setTasaDesde] = useState(hoy);
   const clave = useRef(nuevoUuid());
   const [guarda] = useState(crearGuardaEnvio);
   const { can } = usePermisos();
@@ -1084,6 +1088,16 @@ function DetalleAvalModal({
     queryKey: ['aval', id],
     queryFn: () => avalesApi.detalle(id!),
     enabled: id !== null,
+  });
+  const cambioTasa = useMutation({
+    mutationFn: (a: AvalDetalleDto) =>
+      avalesApi.cambiarTasa(a.id, importe(nuevaTasa), tasaDesde, a.version),
+    onSuccess: (a) => {
+      setNuevaTasa('');
+      toast(`Tasa de ${a.referencia} cambiada desde ${formatDate(tasaDesde)}`);
+      refrescar();
+    },
+    onError: (e) => avisarError(e, refrescar),
   });
   const m = useMutation({
     mutationFn: (a: AvalDetalleDto) => {
@@ -1141,8 +1155,8 @@ function DetalleAvalModal({
     onError: (e) => avisarError(e, refrescar),
   });
   useEffect(() => {
-    if (!m.isPending) guarda.liberar();
-  }, [m.isPending, guarda]);
+    if (!m.isPending && !cambioTasa.isPending) guarda.liberar();
+  }, [m.isPending, cambioTasa.isPending, guarda]);
 
   const a = d.data;
   const vivo = a?.estado === 'vigente' || a?.estado === 'liberado_parcial';
@@ -1218,9 +1232,75 @@ function DetalleAvalModal({
                     {formatEur(a.devengoLiquidado)}
                   </span>
                 )}
+                {a.tasas.length > 1 && (
+                  <span className="block text-xs text-gray-500">
+                    Tasas:{' '}
+                    {a.tasas
+                      .map(
+                        (t) =>
+                          `${formatDate(t.fecha)} ${t.tasaAnualPct === null ? 'sin comisión' : `${t.tasaAnualPct} %`}`,
+                      )
+                      .join(' → ')}
+                  </span>
+                )}
               </dd>
             </div>
           </dl>
+
+          {a.direccion === 'emitido' && vivo && (
+            <Autorizado accion="editar" recurso="aval">
+              <form
+                className="mb-4 flex flex-wrap items-end gap-2 rounded-lg bg-gray-50 p-3"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (
+                    !can('editar', 'aval') ||
+                    !nuevaTasa.trim() ||
+                    !tasaDesde ||
+                    cambioTasa.isPending ||
+                    !guarda.intentar()
+                  )
+                    return;
+                  cambioTasa.mutate(a);
+                }}
+              >
+                <div>
+                  <label className={labelCls} htmlFor="tasa-nueva">
+                    Nueva tasa anual (%)
+                  </label>
+                  <input
+                    id="tasa-nueva"
+                    inputMode="decimal"
+                    className={fieldCls}
+                    value={nuevaTasa}
+                    onChange={(e) => setNuevaTasa(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className={labelCls} htmlFor="tasa-desde">
+                    Rige desde
+                  </label>
+                  <input
+                    id="tasa-desde"
+                    type="date"
+                    className={fieldCls}
+                    value={tasaDesde}
+                    onChange={(e) => setTasaDesde(e.target.value)}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className={btnGhostCls}
+                  disabled={cambioTasa.isPending || !nuevaTasa.trim()}
+                >
+                  {cambioTasa.isPending ? 'Guardando…' : 'Cambiar tasa'}
+                </button>
+                <p className="w-full text-xs text-gray-500">
+                  El devengo del mes del cambio se prorratea por tramos de tasa.
+                </p>
+              </form>
+            </Autorizado>
+          )}
 
           <div className="mb-4 max-h-56 overflow-y-auto rounded-lg border">
             <table className="w-full text-sm">

@@ -9,6 +9,10 @@ import {
   devengoAvalesSchema,
   devengoAutomaticoSchema,
   estimacionCierreSetSchema,
+  conciliacionCierreQuerySchema,
+  conciliacionCierreRegistrarSchema,
+  FORMATOS_EXPORTACION_CUENTAS,
+  type AvalDetalleDto,
   type ConciliacionCierreDto,
   type EjecucionDevengoDto,
   type ResultadoDevengoAutomaticoDto,
@@ -22,7 +26,7 @@ import {
   type PropuestaCierreEjercicioDto,
   type ResultadoDevengoAvalesDto,
 } from '@erp/shared';
-import { pedir, pedirVersionado, query } from '../api';
+import { pedir, pedirExportacion, pedirVersionado, query } from '../api';
 import { ejecutar } from '../comun';
 
 const ejercicio = z.number().int().min(2000).max(2100).describe('Año');
@@ -373,15 +377,70 @@ export function registrarCierre(server: McpServer) {
     {
       title: 'Conciliación de cierre auxiliar ↔ mayor',
       description:
-        'En vivo: devengos de aval pendientes ↔ 4100, amortización acumulada ' +
-        '↔ 281x, obra en curso ↔ 4309 − 4389 y provisión por pérdidas ↔ ' +
-        '4994, con diferencia y `cuadra` por partida.',
-      inputSchema: {},
+        'A una fecha de corte (`fecha`, por defecto hoy; nunca futura): ' +
+        'devengos de aval pendientes ↔ 4100, amortización acumulada ↔ 281x, ' +
+        'obra en curso ↔ 4309 − 4389, provisión por pérdidas ↔ 4994, ' +
+        'clientes ↔ 4300 + 4301, proveedores ↔ 4000 + 4001 y almacén ↔ ' +
+        'grupo 3, con diferencia y `cuadra` por partida. Error: ' +
+        'CLOSE_RECONCILIATION_DATE_INVALID.',
+      inputSchema: conciliacionCierreQuerySchema.shape,
       annotations: { readOnlyHint: true },
     },
-    async () =>
+    async (q) =>
       ejecutar(() =>
-        pedir<ConciliacionCierreDto>('/contabilidad/conciliacion'),
+        pedir<ConciliacionCierreDto>(`/contabilidad/conciliacion${query(q)}`),
+      ),
+  );
+
+  server.registerTool(
+    'exportar_cuentas_anuales',
+    {
+      title: 'Exportar las cuentas anuales',
+      description:
+        'Balance, PyG, ECPN, EFE y memoria abreviada del ejercicio en JSON ' +
+        'canónico (determinista) o CSV (`;`). Devuelve el contenido y su ' +
+        'huella SHA-256, que queda en la auditoría.',
+      inputSchema: {
+        ejercicio,
+        formato: z.enum(FORMATOS_EXPORTACION_CUENTAS).optional(),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ ejercicio: e, formato }) =>
+      ejecutar(() =>
+        pedirExportacion(
+          `/contabilidad/ejercicios/${e}/cuentas-anuales/exportar?formato=${formato ?? 'json'}`,
+        ),
+      ),
+  );
+
+  server.registerTool(
+    'cambiar_tasa_aval',
+    {
+      title: 'Cambiar la tasa de comisión de un aval',
+      description:
+        'Nueva tasa anual (%) con fecha de efecto (`tasaVigenteDesde`, por ' +
+        'defecto hoy); null quita la comisión. El devengo del mes del cambio ' +
+        'se prorratea por tramos de tasa. Lee la versión y envía If-Match. ' +
+        'Error: BANK_GUARANTEE_RATE_DATE_INVALID.',
+      inputSchema: {
+        id: z.string().uuid().describe('Id del aval'),
+        tasaComisionAnualPct: z.number().min(0).max(100).nullable(),
+        tasaVigenteDesde: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .optional(),
+      },
+      annotations: { readOnlyHint: false, idempotentHint: true },
+    },
+    async ({ id, ...body }) =>
+      ejecutar(() =>
+        pedirVersionado<AvalDetalleDto>(
+          `/avales/${id}`,
+          { method: 'PATCH', body: JSON.stringify(body) },
+          async () => (await pedir<AvalDetalleDto>(`/avales/${id}`)).version,
+          'aval',
+        ),
       ),
   );
 
@@ -390,15 +449,17 @@ export function registrarCierre(server: McpServer) {
     {
       title: 'Registrar la conciliación de cierre',
       description:
-        'Ejecuta la conciliación y la guarda como evidencia del cierre ' +
-        '(auditada). Admin, gerente y administración.',
-      inputSchema: {},
+        'Ejecuta la conciliación a la fecha de corte (por defecto hoy) y la ' +
+        'guarda como evidencia del cierre (auditada). Admin, gerente y ' +
+        'administración.',
+      inputSchema: conciliacionCierreRegistrarSchema.shape,
       annotations: { readOnlyHint: false, idempotentHint: false },
     },
-    async () =>
+    async (body) =>
       ejecutar(() =>
         pedir<ConciliacionCierreDto>('/contabilidad/conciliacion', {
           method: 'POST',
+          body: JSON.stringify(conciliacionCierreRegistrarSchema.parse(body)),
           headers: { 'Idempotency-Key': randomUUID() },
         }),
       ),

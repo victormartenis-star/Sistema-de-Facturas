@@ -9,6 +9,7 @@ import {
 import {
   cierreEjercicioApi,
   conciliacionApi,
+  descargarCuentasAnuales,
   formatDate,
   formatEur,
 } from '@/lib/api';
@@ -589,10 +590,25 @@ function AplicacionResultado({ ejercicio }: { ejercicio: number }) {
 
 /** Cuentas anuales: balance por masas y PyG (saldos antes del cierre). */
 function CuentasAnuales({ ejercicio }: { ejercicio: number }) {
+  const [exportando, setExportando] = useState(false);
+  const [huella, setHuella] = useState<string | null>(null);
+  const { can } = usePermisos();
+  const avisarError = useAvisarError();
   const ca = useQuery({
     queryKey: ['cierre-ejercicio', 'cuentas-anuales', ejercicio],
     queryFn: () => cierreEjercicioApi.cuentasAnuales(ejercicio),
   });
+  const exportar = async (formato: 'csv' | 'json') => {
+    if (!can('exportar') || exportando) return;
+    setExportando(true);
+    try {
+      setHuella(await descargarCuentasAnuales(ejercicio, formato));
+    } catch (e) {
+      avisarError(e);
+    } finally {
+      setExportando(false);
+    }
+  };
   const c = ca.data;
   const masa = (
     titulo: string,
@@ -775,6 +791,27 @@ function CuentasAnuales({ ejercicio }: { ejercicio: number }) {
                 <span className="tabular-nums">{formatEur(v)}</span>
               </p>
             ))}
+            {(
+              [
+                ['clientes', 'Clientes (facturado − cobrado)'],
+                ['proveedores', 'Proveedores y acreedores'],
+                ['administraciones', 'Administraciones públicas'],
+                ['existencias', 'Existencias'],
+                ['otros', 'Otros deudores y acreedores'],
+              ] as const
+            ).map(([k, e]) =>
+              c.efe.explotacion.capitalCorrienteDesglose[k] === 0 ? null : (
+                <p
+                  key={k}
+                  className="ml-3 flex justify-between gap-2 text-[11px] text-gray-500"
+                >
+                  <span>{e}</span>
+                  <span className="tabular-nums">
+                    {formatEur(c.efe.explotacion.capitalCorrienteDesglose[k])}
+                  </span>
+                </p>
+              ),
+            )}
             <p className="flex justify-between text-sm">
               <span>Flujos de explotación</span>
               <span className="tabular-nums">
@@ -804,6 +841,67 @@ function CuentasAnuales({ ejercicio }: { ejercicio: number }) {
           </div>
         </div>
       )}
+      {c && (
+        <div className="mt-4 rounded-xl border bg-white p-3 shadow-sm">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase text-gray-500">
+              Memoria abreviada
+              <span
+                className={`ml-2 ${c.memoria.coherente ? 'text-emerald-700' : 'text-red-700'}`}
+              >
+                {c.memoria.coherente
+                  ? 'coherente con los estados'
+                  : 'hay comprobaciones que no cuadran'}
+              </span>
+            </p>
+            <Autorizado accion="exportar">
+              <span className="flex gap-2">
+                {(['csv', 'json'] as const).map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    className={btnGhostCls}
+                    disabled={exportando}
+                    onClick={() => void exportar(f)}
+                  >
+                    Exportar {f.toUpperCase()}
+                  </button>
+                ))}
+              </span>
+            </Autorizado>
+          </div>
+          {huella && (
+            <p className="mb-2 break-all text-[11px] text-gray-500">
+              Huella SHA-256 de la última exportación: {huella}
+            </p>
+          )}
+          {c.memoria.notas.map((n) => (
+            <details
+              key={n.numero}
+              className="border-t border-gray-100 py-1 text-sm"
+            >
+              <summary className="cursor-pointer">
+                {n.numero}. {n.titulo}
+              </summary>
+              {n.texto.map((t, i) => (
+                <p key={i} className="ml-4 text-xs text-gray-600">
+                  {t}
+                </p>
+              ))}
+            </details>
+          ))}
+          <ul className="mt-2 text-xs">
+            {c.memoria.comprobaciones.map((x) => (
+              <li
+                key={x.clave}
+                className={x.ok ? 'text-emerald-700' : 'text-red-700'}
+              >
+                {x.ok ? '✓' : '✗'} {x.descripcion}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <ConciliacionCierre />
     </section>
   );
@@ -814,6 +912,9 @@ function CuentasAnuales({ ejercicio }: { ejercicio: number }) {
  * obra en curso, provisión por pérdidas). Registrarla deja evidencia.
  */
 function ConciliacionCierre() {
+  const [fecha, setFecha] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
   const clave = useRef(nuevoUuid());
   const [guarda] = useState(crearGuardaEnvio);
   const { can } = usePermisos();
@@ -821,15 +922,16 @@ function ConciliacionCierre() {
   const toast = useToast();
   const avisarError = useAvisarError();
   const vivo = useQuery({
-    queryKey: ['cierre-ejercicio', 'conciliacion'],
-    queryFn: () => conciliacionApi.consultar(),
+    queryKey: ['cierre-ejercicio', 'conciliacion', 'vivo', fecha],
+    queryFn: () => conciliacionApi.consultar(fecha || undefined),
   });
   const historial = useQuery({
     queryKey: ['cierre-ejercicio', 'conciliacion', 'historial'],
     queryFn: () => conciliacionApi.historial(),
   });
   const registrar = useMutation({
-    mutationFn: () => conciliacionApi.registrar(clave.current),
+    mutationFn: () =>
+      conciliacionApi.registrar(fecha || undefined, clave.current),
     onSuccess: (r) => {
       clave.current = nuevoUuid();
       toast(
@@ -861,6 +963,16 @@ function ConciliacionCierre() {
             </span>
           )}
         </p>
+        <label className="flex items-center gap-1 text-xs text-gray-600">
+          Fecha de corte
+          <input
+            type="date"
+            className={inputCls}
+            value={fecha}
+            max={new Date().toISOString().slice(0, 10)}
+            onChange={(e) => setFecha(e.target.value)}
+          />
+        </label>
         <Autorizado accion="cambiarEstado" recurso="contabilidad">
           <button
             type="button"

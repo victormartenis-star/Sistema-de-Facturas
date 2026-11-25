@@ -168,6 +168,46 @@ export async function pedir<T>(
   return cuerpo as T;
 }
 
+/**
+ * GET de una exportacion: el JSON vuelve como objeto y el CSV como texto
+ * (sin BOM), con la huella `X-Content-SHA256`. Errores igual que `pedir`.
+ */
+export async function pedirExportacion(
+  ruta: string,
+): Promise<{ contenido: unknown; sha256: string | null }> {
+  const requestId = randomUUID();
+  const res = await fetch(`${BASE_URL}${ruta}`, {
+    headers: {
+      'X-Request-Id': requestId,
+      ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
+    },
+  });
+  const texto = await res.text();
+  if (!res.ok) {
+    let cuerpo: unknown = texto;
+    try {
+      cuerpo = JSON.parse(texto);
+    } catch {
+      // cuerpo no JSON
+    }
+    throw new ErrorApi(
+      res.status,
+      cuerpo,
+      mensajeDe(
+        cuerpo,
+        res.status,
+        res.headers.get('x-request-id') ?? requestId,
+      ),
+      res.headers.get('x-request-id') ?? requestId,
+    );
+  }
+  const esJson = (res.headers.get('content-type') ?? '').includes('json');
+  return {
+    contenido: esJson ? JSON.parse(texto) : texto.replace(/^\uFEFF/, ''),
+    sha256: res.headers.get('x-content-sha256'),
+  };
+}
+
 /** Construye la query string omitiendo lo vacio. */
 export function query(params: Record<string, unknown>): string {
   const p = new URLSearchParams();
