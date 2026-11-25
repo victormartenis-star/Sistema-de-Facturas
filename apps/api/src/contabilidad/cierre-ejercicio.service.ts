@@ -8,6 +8,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import {
   fiscalYearClosings,
   journalEntries,
+  resultApplications,
   type DbOrTx,
   type FiscalYearClosing,
   type Tx,
@@ -392,6 +393,22 @@ export class CierreEjercicioService {
         throw new ConflictException({
           code: 'FISCAL_YEAR_NOT_LATEST',
           message: `Revierte antes el cierre de ${ejercicio + 1}: solo se revierte el último ejercicio cerrado`,
+        });
+      }
+      const [aplicada] = await tx
+        .select({ id: resultApplications.id })
+        .from(resultApplications)
+        .where(
+          and(
+            eq(resultApplications.companyId, companyId),
+            eq(resultApplications.year, ejercicio),
+            eq(resultApplications.status, 'aplicado'),
+          ),
+        );
+      if (aplicada) {
+        throw new ConflictException({
+          code: 'FISCAL_YEAR_RESULT_APPLIED',
+          message: `El resultado de ${ejercicio} está aplicado: anula antes la aplicación del resultado`,
         });
       }
       verificarVersion(c.version, version);

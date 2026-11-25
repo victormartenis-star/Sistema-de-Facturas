@@ -21,8 +21,14 @@ import {
   avalesAvisosSchema,
   avalesQuerySchema,
   avalesResumenQuerySchema,
+  devengoAnularSchema,
+  devengoAvalesQuerySchema,
+  devengoAvalesSchema,
   lineaAvalCreateSchema,
   lineaAvalUpdateSchema,
+  type DevengoAnularInput,
+  type DevengoAvalesInput,
+  type DevengoAvalesQuery,
   type LineaAvalCreateInput,
   type LineaAvalUpdateInput,
   type AvalAnularInput,
@@ -42,6 +48,7 @@ import { Idempotente } from '../common/idempotencia/idempotente.decorator';
 import { VersionEsperada } from '../common/version';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { AvalesService } from './avales.service';
+import { DevengoAvalesService } from './devengo-avales.service';
 
 /**
  * Avales bancarios y garantías. Lectura: admin, gerente, administración,
@@ -53,7 +60,10 @@ import { AvalesService } from './avales.service';
 @Controller('avales')
 @Roles('admin', 'gerente', 'administracion', 'lector', 'obra')
 export class AvalesController {
-  constructor(private readonly service: AvalesService) {}
+  constructor(
+    private readonly service: AvalesService,
+    private readonly devengo: DevengoAvalesService,
+  ) {}
 
   @Get()
   listar(@Query(new ZodValidationPipe(avalesQuerySchema)) q: AvalesQuery) {
@@ -67,6 +77,38 @@ export class AvalesController {
     q: AvalesResumenQuery,
   ) {
     return this.service.resumen(q);
+  }
+
+  /** Devengos mensuales de comisiones (por periodo o aval). */
+  @Get('devengos')
+  devengos(
+    @Query(new ZodValidationPipe(devengoAvalesQuerySchema))
+    q: DevengoAvalesQuery,
+  ) {
+    return this.devengo.listar(q);
+  }
+
+  /** Devenga un mes: un aval o todos los emitidos vivos con tasa. */
+  @Post('devengos')
+  @Roles('admin', 'gerente', 'administracion')
+  @Idempotente()
+  @HttpCode(200)
+  devengar(
+    @Body(new ZodValidationPipe(devengoAvalesSchema)) body: DevengoAvalesInput,
+  ) {
+    return this.devengo.devengar(body);
+  }
+
+  @Post('devengos/:id/anular')
+  @Roles('admin', 'gerente', 'administracion')
+  @Idempotente()
+  @HttpCode(200)
+  anularDevengo(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(devengoAnularSchema)) body: DevengoAnularInput,
+    @VersionEsperada() version: number | undefined,
+  ) {
+    return this.devengo.anular(id, body, version);
   }
 
   /** Líneas de avales por entidad con dispuesto, disponible y % de uso. */

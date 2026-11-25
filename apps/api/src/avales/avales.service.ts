@@ -52,6 +52,8 @@ import {
   comisionAval,
   diasHastaVencimiento,
   diferenciasAuditoria,
+  liquidacionComisionContraDevengo,
+  asientoLiquidacionComision,
   fromCents,
   lineaAvalCreateSchema,
   lineaAvalUpdateSchema,
@@ -167,6 +169,8 @@ function avalDto(f: Fila, hoy: string): AvalDto {
       g.commissionRatePct === null ? null : Number(g.commissionRatePct),
     periodicidadComisionMeses: g.commissionPeriodMonths,
     comisiones: fromCents(toCents(g.commissionsAmount)),
+    comisionDevengada: fromCents(toCents(g.accruedCommission)),
+    devengoLiquidado: fromCents(toCents(g.accrualSettled)),
     estado: g.status as EstadoAval,
     motivo: g.reason,
     notas: g.notes,
@@ -1100,19 +1104,31 @@ export class AvalesService {
         });
       }
       const movId = randomUUID();
+      // La liquidación salda primero lo devengado pendiente (4100); solo el
+      // exceso es gasto nuevo (6260): el coste de la obra no se duplica.
+      const reparto = liquidacionComisionContraDevengo({
+        importe,
+        devengado: g.accruedCommission,
+        liquidadoContraDevengo: g.accrualSettled,
+      });
       const asientoId = await this.asiento(
         tx,
         g,
         d.fecha,
         `Comisión de aval ${g.reference} (${g.issuer})`,
         movId,
-        asientoComisionAval(importe),
+        reparto.contraDevengo > 0
+          ? asientoLiquidacionComision(reparto)
+          : asientoComisionAval(importe),
       );
       const total = toCents(g.commissionsAmount) + toCents(importe);
+      const liquidado =
+        toCents(g.accrualSettled) + toCents(reparto.contraDevengo);
       await tx
         .update(bankGuarantees)
         .set({
           commissionsAmount: centsToNumeric(total),
+          accrualSettled: centsToNumeric(liquidado),
           version: g.version + 1,
           updatedAt: new Date(),
         })
@@ -1125,16 +1141,26 @@ export class AvalesService {
         saldo: g.outstandingAmount,
         asientoId,
       });
+      const antes = {
+        commissionsAmount: g.commissionsAmount,
+        accrualSettled: g.accrualSettled,
+      };
+      const despues = {
+        commissionsAmount: centsToNumeric(total),
+        accrualSettled: centsToNumeric(liquidado),
+      };
       await this.audit.registrar(tx, {
         entityType: 'bank_guarantee',
         entityId: id,
         action: 'update',
-        oldData: { commissionsAmount: g.commissionsAmount },
+        oldData: antes,
         newData: {
-          commissionsAmount: centsToNumeric(total),
+          ...despues,
           movimiento: 'comision',
           importe,
+          contraDevengo: reparto.contraDevengo,
           asientoId,
+          cambios: diferenciasAuditoria(antes, despues),
         },
       });
     });

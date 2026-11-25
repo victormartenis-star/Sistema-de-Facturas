@@ -120,6 +120,7 @@ describe('Cost control (integración) — GET /projects/:id/cost-control', () =>
       partesMaquinaria: 2_000,
       almacen: 0,
       amortizacion: 0,
+      avales: 0,
     });
     expect(res.body.currentMargin).toBeCloseTo(10_000, 2);
     expect(res.body.currentMarginPct).toBeCloseTo(33.33, 1);

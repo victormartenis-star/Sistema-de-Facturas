@@ -147,9 +147,21 @@ function Contenido({ d }: { d: ObraEconomicsDto }) {
             Partes de personal {formatEur(margen.costes.partesPersonal)} ·
             Partes de maquinaria {formatEur(margen.costes.partesMaquinaria)} ·
             Almacén {formatEur(margen.costes.almacen)} · Amortización{' '}
-            {formatEur(margen.costes.amortizacion)}
+            {formatEur(margen.costes.amortizacion)} · Avales{' '}
+            {formatEur(margen.costes.avales)}
           </p>
         </details>
+        <p className="mt-3 text-xs text-gray-600">
+          Estimación al cierre{' '}
+          {d.estimacionCierre.origen === 'manual' ? '(manual)' : '(automática)'}
+          :{' '}
+          <span className="font-semibold tabular-nums">
+            {formatEur(d.estimacionCierre.efectiva)}
+          </span>
+          {d.estimacionCierre.margenProyectado !== null &&
+            ` · margen proyectado ${formatEur(d.estimacionCierre.margenProyectado)} (${pct(d.estimacionCierre.margenProyectadoPct)})`}
+          {d.estimacionCierre.ajustadaAlReal && ' · elevada al coste real'}
+        </p>
       </Seccion>
 
       <Seccion titulo="Desviación frente a presupuesto">

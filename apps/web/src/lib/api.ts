@@ -48,6 +48,12 @@ import type {
   PropuestaCierreEjercicioDto,
   EstimacionCierreObraDto,
   EstimacionCierreSetInput,
+  CuentasAnualesDto,
+  PropuestaAplicacionResultadoDto,
+  AplicacionResultadoDto,
+  AplicacionResultadoInput,
+  DevengoAvalDto,
+  ResultadoDevengoAvalesDto,
   ResultadoCierreProvisionPerdidasDto,
   AjusteConsolidacionCreateInput,
   AjusteConsolidacionDto,
@@ -2579,6 +2585,23 @@ export const avalesApi = {
       body: JSON.stringify({ dias }),
       headers: idempotencyKey(clave),
     }),
+  devengos: (f: { periodo?: string; avalId?: string } = {}) =>
+    request<DevengoAvalDto[]>(`/avales/devengos${qs(f)}`),
+  devengar: (periodo: string, clave: string) =>
+    request<ResultadoDevengoAvalesDto>('/avales/devengos', {
+      method: 'POST',
+      body: JSON.stringify({ periodo }),
+      headers: idempotencyKey(clave),
+    }),
+  anularDevengo: (id: string, motivo: string, version: number, clave: string) =>
+    request<DevengoAvalDto>(`/avales/devengos/${id}/anular`, {
+      method: 'POST',
+      body: JSON.stringify({ motivo }),
+      headers: {
+        ...(version > 0 ? ifMatch(version) : {}),
+        ...idempotencyKey(clave),
+      },
+    }),
   lineas: () => request<LineaAvalDto[]>('/avales/lineas'),
   crearLinea: (input: LineaAvalCreateInput, clave: string) =>
     request<LineaAvalDto>('/avales/lineas', {
@@ -2622,6 +2645,44 @@ export const cierreEjercicioApi = {
         method: 'POST',
         body: JSON.stringify({ motivo }),
         headers: { ...ifMatch(version), ...idempotencyKey(clave) },
+      },
+    ),
+  cuentasAnuales: (ejercicio: number) =>
+    request<CuentasAnualesDto>(
+      `/contabilidad/ejercicios/${ejercicio}/cuentas-anuales`,
+    ),
+  aplicacion: (ejercicio: number) =>
+    request<PropuestaAplicacionResultadoDto>(
+      `/contabilidad/ejercicios/${ejercicio}/aplicacion-resultado`,
+    ),
+  aplicarResultado: (
+    ejercicio: number,
+    input: AplicacionResultadoInput,
+    clave: string,
+  ) =>
+    request<AplicacionResultadoDto>(
+      `/contabilidad/ejercicios/${ejercicio}/aplicar-resultado`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+        headers: idempotencyKey(clave),
+      },
+    ),
+  anularAplicacion: (
+    ejercicio: number,
+    motivo: string,
+    version: number,
+    clave: string,
+  ) =>
+    request<AplicacionResultadoDto>(
+      `/contabilidad/ejercicios/${ejercicio}/aplicacion-resultado/anular`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ motivo }),
+        headers: {
+          ...(version > 0 ? ifMatch(version) : {}),
+          ...idempotencyKey(clave),
+        },
       },
     ),
 };

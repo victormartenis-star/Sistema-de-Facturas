@@ -17,6 +17,7 @@ import {
   type DireccionAval,
   type EstadoAval,
   type LineaAvalDto,
+  type DevengoAvalDto,
   type LiquidacionEjecucionAval,
   type TipoAval,
 } from '@erp/shared';
@@ -308,10 +309,209 @@ export default function AvalesPage() {
         </div>
       )}
 
+      <DevengosAval />
       <LineasAval />
       <NuevoAvalModal open={nuevo} onClose={() => setNuevo(false)} />
       <DetalleAvalModal id={abierto} onClose={() => setAbierto(null)} />
     </div>
+  );
+}
+
+function mesAnterior(): string {
+  const d = new Date();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() - 1);
+  return d.toISOString().slice(0, 7);
+}
+
+/**
+ * Devengo mensual de comisiones de los avales emitidos con tasa (6260 obra a
+ * 4100). Un devengo por aval y mes; la liquidación del banco salda después
+ * lo devengado. Admin, gerente y administración.
+ */
+function DevengosAval() {
+  const [periodo, setPeriodo] = useState(mesAnterior);
+  const [anulando, setAnulando] = useState<DevengoAvalDto | null>(null);
+  const [motivo, setMotivo] = useState('');
+  const clave = useRef(nuevoUuid());
+  const [guarda] = useState(crearGuardaEnvio);
+  const { can } = usePermisos();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const avisarError = useAvisarError();
+  const valido = /^\d{4}-\d{2}$/.test(periodo);
+  const lista = useQuery({
+    queryKey: ['avales', 'devengos', periodo],
+    queryFn: () => avalesApi.devengos({ periodo }),
+    enabled: valido,
+  });
+  const refrescar = () => {
+    void qc.invalidateQueries({ queryKey: ['avales'] });
+    void qc.invalidateQueries({ queryKey: ['aval'] });
+    void qc.invalidateQueries({ queryKey: ['contabilidad'] });
+  };
+  const devengar = useMutation({
+    mutationFn: () => avalesApi.devengar(periodo, clave.current),
+    onSuccess: (r) => {
+      clave.current = nuevoUuid();
+      toast(
+        `${r.contabilizados} devengos contabilizados (${formatEur(r.importe)})` +
+          (r.omitidos.length
+            ? ` · ${r.omitidos.length} omitidos: ${r.omitidos[0].motivo}`
+            : ''),
+        r.omitidos.length ? 'error' : 'success',
+      );
+      refrescar();
+    },
+    onError: (e) => avisarError(e, refrescar),
+  });
+  const anular = useMutation({
+    mutationFn: (d: DevengoAvalDto) =>
+      avalesApi.anularDevengo(d.id, motivo.trim(), d.version, clave.current),
+    onSuccess: (d) => {
+      clave.current = nuevoUuid();
+      setAnulando(null);
+      setMotivo('');
+      toast(`Devengo de ${d.referencia} (${d.periodo}) anulado`);
+      refrescar();
+    },
+    onError: (e) => avisarError(e, refrescar),
+  });
+  const ocupado = devengar.isPending || anular.isPending;
+  useEffect(() => {
+    if (!ocupado) guarda.liberar();
+  }, [ocupado, guarda]);
+  const filas = lista.data ?? [];
+
+  return (
+    <section className="mt-8">
+      <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold">Devengo de comisiones</h2>
+          <p className="text-xs text-gray-500">
+            Saldo vivo × tasa anual × días del mes / 365, contabilizado 6260
+            (obra) a 4100. La liquidación del banco salda lo devengado.
+          </p>
+        </div>
+        <div className="flex items-end gap-2">
+          <input
+            type="month"
+            className={inputCls}
+            value={periodo}
+            onChange={(e) => setPeriodo(e.target.value)}
+            aria-label="Periodo"
+          />
+          <Autorizado accion="cambiarEstado" recurso="aval">
+            <button
+              type="button"
+              className={btnPrimaryCls}
+              disabled={!valido || ocupado}
+              onClick={() => {
+                if (
+                  !can('cambiarEstado', 'aval') ||
+                  !valido ||
+                  ocupado ||
+                  !guarda.intentar()
+                )
+                  return;
+                devengar.mutate();
+              }}
+            >
+              {devengar.isPending ? 'Devengando…' : 'Devengar el mes'}
+            </button>
+          </Autorizado>
+        </div>
+      </div>
+      {lista.isError && (
+        <ErrorBanner message={(lista.error as Error).message} />
+      )}
+      {filas.length > 0 && (
+        <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-left text-xs text-gray-500">
+              <tr>
+                <th className="px-3 py-2">Aval</th>
+                <th className="px-3 py-2">Tramo</th>
+                <th className="px-3 py-2 text-right">Saldo base</th>
+                <th className="px-3 py-2 text-right">Tasa</th>
+                <th className="px-3 py-2 text-right">Importe</th>
+                <th className="px-3 py-2">Estado</th>
+                <th className="px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {filas.map((d) => (
+                <tr key={d.id} className="border-t border-gray-100">
+                  <td className="px-3 py-2 font-medium">{d.referencia}</td>
+                  <td className="px-3 py-2 tabular-nums">
+                    {formatDate(d.desde)} – {formatDate(d.hasta)} ({d.dias} d)
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {formatEur(d.saldoBase)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {d.tasaAnualPct} %
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {formatEur(d.importe)}
+                  </td>
+                  <td className="px-3 py-2 text-xs">
+                    {d.estado === 'anulado'
+                      ? `Anulado: ${d.motivoAnulacion ?? ''}`
+                      : 'Contabilizado'}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    {d.estado === 'contabilizado' && (
+                      <Autorizado accion="anular" recurso="aval">
+                        {anulando?.id === d.id ? (
+                          <form
+                            className="flex justify-end gap-1"
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              if (
+                                !can('anular', 'aval') ||
+                                motivo.trim().length < 3 ||
+                                ocupado ||
+                                !guarda.intentar()
+                              )
+                                return;
+                              anular.mutate(d);
+                            }}
+                          >
+                            <input
+                              className={`${inputCls} w-40`}
+                              placeholder="Motivo"
+                              value={motivo}
+                              onChange={(e) => setMotivo(e.target.value)}
+                              aria-label="Motivo de la anulación"
+                            />
+                            <button
+                              type="submit"
+                              className={btnGhostCls}
+                              disabled={ocupado || motivo.trim().length < 3}
+                            >
+                              Anular
+                            </button>
+                          </form>
+                        ) : (
+                          <button
+                            type="button"
+                            className={btnGhostCls}
+                            onClick={() => setAnulando(d)}
+                          >
+                            Anular
+                          </button>
+                        )}
+                      </Autorizado>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -954,6 +1154,12 @@ function DetalleAvalModal({
                 {formatEur(a.comisiones)}
                 {a.tasaComisionAnualPct !== null &&
                   ` (${a.tasaComisionAnualPct} % anual)`}
+                {a.comisionDevengada > 0 && (
+                  <span className="block text-xs text-gray-500">
+                    Devengado {formatEur(a.comisionDevengada)} · liquidado{' '}
+                    {formatEur(a.devengoLiquidado)}
+                  </span>
+                )}
               </dd>
             </div>
           </dl>

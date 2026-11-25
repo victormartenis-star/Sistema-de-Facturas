@@ -32,13 +32,20 @@ import {
   computeRetencionesObra,
   prorratearRetencionesDeObra,
   computeSobrecostePorPartida,
+  evmConEstimacion,
   fromCents,
+  type CuadroMargenesCalculo,
   sumCents,
   toCents,
   todayIso,
 } from '@erp/shared';
 import { DbService } from '../db/db.service';
-import { costeAlmacen, costeAmortizacion } from './costes-imputados';
+import { ControlPresupuestarioService } from './control-presupuestario.service';
+import {
+  costeAlmacen,
+  costeAmortizacion,
+  costeAvales,
+} from './costes-imputados';
 
 type CosteFila = {
   projectId: string | null;
@@ -73,7 +80,10 @@ interface DatosEconomiaObra {
 
 @Injectable()
 export class CostControlService {
-  constructor(private readonly dbs: DbService) {}
+  constructor(
+    private readonly dbs: DbService,
+    private readonly control: ControlPresupuestarioService,
+  ) {}
 
   async get(projectId: string): Promise<CostControlDto> {
     const project = await this.findProject(projectId);
@@ -139,18 +149,32 @@ export class CostControlService {
       0,
     );
     // Almacén y amortización imputados (sin partida), como en el cuadro de márgenes.
-    const [almacenMap, amortizacionMap] = await Promise.all([
+    // Coste de avales y EAC manual: del cuadro de márgenes (misma fuente de
+    // verdad, que ya excluye los asientos de cierre del ejercicio).
+    const [almacenMap, amortizacionMap, cuadro] = await Promise.all([
       costeAlmacen(this.dbs.db, [projectId]),
       costeAmortizacion(this.dbs.db, [projectId]),
+      this.control.cuadroObraHasta(
+        this.dbs.db,
+        projectId,
+        project.contractAmount,
+      ),
     ]);
     const almacenTotal = fromCents(almacenMap.get(projectId) ?? 0n);
     const amortizacionTotal = fromCents(amortizacionMap.get(projectId) ?? 0n);
-    const ac =
-      facturasCompra +
-      partesPersonalTotal +
-      partesMaquinariaTotal +
-      almacenTotal +
-      amortizacionTotal;
+    const avalesTotal = cuadro.costeRealDesglose.avales;
+    const ac = fromCents(
+      sumCents(
+        [
+          facturasCompra,
+          partesPersonalTotal,
+          partesMaquinariaTotal,
+          almacenTotal,
+          amortizacionTotal,
+          avalesTotal,
+        ].map((v) => toCents(v)),
+      ),
+    );
 
     const actualByPhase = new Map<string, number>();
     for (const [phaseId, total] of [
@@ -177,6 +201,16 @@ export class CostControlService {
     const ev = lastCert ? Number(lastCert.cumulativeAmount) : 0;
 
     const result = computeCostControl({ bac, ac, ev });
+    const evm = evmConEstimacion({
+      bac: result.bac,
+      ac: result.ac,
+      ev: result.ev,
+      eacCalculada: result.eac,
+      eacManual:
+        cuadro.origenEstimacion === 'manual'
+          ? cuadro.costeEstimadoCierre
+          : null,
+    });
 
     const sobrecosteInput: SobrecostePartidaInput[] = phases.map((phase) => ({
       phaseId: phase.id,
@@ -206,12 +240,20 @@ export class CostControlService {
     return {
       projectId,
       ...result,
+      eac: evm.eac,
+      varianceAtCompletion: evm.varianceAtCompletion,
+      eacCalculada: evm.eacCalculada,
+      origenEac: evm.origenEac,
+      eacAjustadaAlReal: evm.eacAjustadaAlReal,
+      etc: evm.etc,
+      tcpi: evm.tcpi,
       acBreakdown: {
         facturasCompra: Math.round(facturasCompra * 100) / 100,
         partesPersonal: Math.round(partesPersonalTotal * 100) / 100,
         partesMaquinaria: Math.round(partesMaquinariaTotal * 100) / 100,
         almacen: almacenTotal,
         amortizacion: amortizacionTotal,
+        avales: avalesTotal,
       },
       sobrecostePorPartida,
       curvaS,
@@ -294,9 +336,19 @@ export class CostControlService {
     const resultado = new Map<string, ObraEconomicsDto>();
     if (ids.length === 0) return resultado;
     const obras = await this.findProjects(ids);
-    const datos = await this.cargarDatosEconomia(ids);
+    // Coste de avales y EAC del cuadro de márgenes: una carga por lotes.
+    const [datos, cuadros] = await Promise.all([
+      this.cargarDatosEconomia(ids),
+      this.control.cuadrosObras(
+        this.dbs.db,
+        ids.map((id) => ({ id, contrato: obras.get(id)!.contractAmount })),
+      ),
+    ]);
     for (const id of ids) {
-      resultado.set(id, this.componerEconomia(obras.get(id)!, datos.get(id)!));
+      resultado.set(
+        id,
+        this.componerEconomia(obras.get(id)!, datos.get(id)!, cuadros.get(id)!),
+      );
     }
     return resultado;
   }
@@ -557,6 +609,7 @@ export class CostControlService {
   private componerEconomia(
     project: typeof projects.$inferSelect,
     d: DatosEconomiaObra,
+    cuadro: CuadroMargenesCalculo,
   ): ObraEconomicsDto {
     const projectId = project.id;
     const phases = d.phases;
@@ -570,7 +623,8 @@ export class CostControlService {
       | 'partesPersonal'
       | 'partesMaquinaria'
       | 'almacen'
-      | 'amortizacion';
+      | 'amortizacion'
+      | 'avales';
     const costes = new Map<string | null, Record<Origen, bigint>>();
     const imputa = (
       rows: { phaseId: string | null; total: string }[],
@@ -583,6 +637,7 @@ export class CostControlService {
           partesMaquinaria: 0n,
           almacen: 0n,
           amortizacion: 0n,
+          avales: 0n,
         };
         fila[origen] += toCents(r.total);
         costes.set(r.phaseId, fila);
@@ -597,6 +652,18 @@ export class CostControlService {
       [{ phaseId: null, total: centsToNumeric(d.amortizacion) }],
       'amortizacion',
     );
+    // Avales: sin partida, del cuadro de márgenes (excluye asientos de cierre).
+    if (cuadro.costeRealDesglose.avales !== 0) {
+      imputa(
+        [
+          {
+            phaseId: null,
+            total: centsToNumeric(toCents(cuadro.costeRealDesglose.avales)),
+          },
+        ],
+        'avales',
+      );
+    }
 
     const cero = {
       facturasCompra: 0n,
@@ -604,6 +671,7 @@ export class CostControlService {
       partesMaquinaria: 0n,
       almacen: 0n,
       amortizacion: 0n,
+      avales: 0n,
     };
     const filaDe = (
       phaseId: string | null,
@@ -622,6 +690,7 @@ export class CostControlService {
         partesMaquinaria: fromCents(c.partesMaquinaria),
         almacen: fromCents(c.almacen),
         amortizacion: fromCents(c.amortizacion),
+        avales: fromCents(c.avales),
       };
     };
     const desviacionRows = phases.map((ph) =>
@@ -680,6 +749,7 @@ export class CostControlService {
         partesMaquinaria: totalOrigen('partesMaquinaria'),
         almacen: totalOrigen('almacen'),
         amortizacion: totalOrigen('amortizacion'),
+        avales: totalOrigen('avales'),
       },
       facturasCompraEnBorrador: fromCents(
         sumCents(borradorRows.map((r) => toCents(r.total))),
@@ -701,6 +771,14 @@ export class CostControlService {
         totalPresupuestado: fromCents(sumCents([...budgetByPhase.values()])),
         margenActualPct: margen.margenSobreCertificadoPct,
       }),
+      estimacionCierre: {
+        automatica: cuadro.costeEstimadoCierreAutomatico,
+        efectiva: cuadro.costeEstimadoCierre,
+        origen: cuadro.origenEstimacion,
+        ajustadaAlReal: cuadro.estimacionAjustadaAlReal,
+        margenProyectado: cuadro.margenProyectado,
+        margenProyectadoPct: cuadro.margenProyectadoPct,
+      },
     };
   }
 
@@ -764,11 +842,12 @@ export class CostControlService {
       );
 
     const actualByPeriod = new Map<string, number>();
-    const [almacenMes, amortizacionMes] = await Promise.all([
+    const [almacenMes, amortizacionMes, avalesMes] = await Promise.all([
       costeAlmacen(this.dbs.db, [projectId], { porMes: true }),
       costeAmortizacion(this.dbs.db, [projectId], { porMes: true }),
+      costeAvales(this.dbs.db, [projectId], { porMes: true }),
     ]);
-    for (const mapa of [almacenMes, amortizacionMes]) {
+    for (const mapa of [almacenMes, amortizacionMes, avalesMes]) {
       for (const [clave, v] of mapa) {
         const period = clave.slice(clave.indexOf('|') + 1);
         actualByPeriod.set(

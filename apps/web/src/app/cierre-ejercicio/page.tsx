@@ -297,6 +297,9 @@ export default function CierreEjercicioPage() {
         </>
       )}
 
+      {valido && <AplicacionResultado ejercicio={ejercicio} />}
+      {valido && <CuentasAnuales ejercicio={ejercicio} />}
+
       <h2 className="mt-8 mb-2 text-sm font-semibold">Historial de cierres</h2>
       {historial.isError && (
         <ErrorBanner message={(historial.error as Error).message} />
@@ -316,5 +319,354 @@ export default function CierreEjercicioPage() {
         </ul>
       )}
     </div>
+  );
+}
+
+/**
+ * Aplicación del resultado (129) del ejercicio cerrado: reparto entre los
+ * destinos admitidos (reserva legal mínima indicada), contabilizado en el
+ * ejercicio siguiente. Solo admin y gerente.
+ */
+function AplicacionResultado({ ejercicio }: { ejercicio: number }) {
+  const [importes, setImportes] = useState<Record<string, string>>({});
+  const [fecha, setFecha] = useState(`${ejercicio + 1}-06-30`);
+  const [acuerdo, setAcuerdo] = useState('');
+  const [motivo, setMotivo] = useState('');
+  const clave = useRef(nuevoUuid());
+  const [guarda] = useState(crearGuardaEnvio);
+  const { can } = usePermisos();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const avisarError = useAvisarError();
+  const prop = useQuery({
+    queryKey: ['cierre-ejercicio', 'aplicacion', ejercicio],
+    queryFn: () => cierreEjercicioApi.aplicacion(ejercicio),
+  });
+  useEffect(() => {
+    setFecha(`${ejercicio + 1}-06-30`);
+    setImportes({});
+  }, [ejercicio]);
+  const refrescar = () => {
+    void qc.invalidateQueries({ queryKey: ['cierre-ejercicio'] });
+    void qc.invalidateQueries({ queryKey: ['contabilidad'] });
+  };
+  const exito = (texto: string) => {
+    clave.current = nuevoUuid();
+    setImportes({});
+    setAcuerdo('');
+    setMotivo('');
+    toast(texto);
+    refrescar();
+  };
+  const aplicar = useMutation({
+    mutationFn: () =>
+      cierreEjercicioApi.aplicarResultado(
+        ejercicio,
+        {
+          fecha,
+          acuerdo: acuerdo.trim(),
+          reparto: Object.entries(importes)
+            .filter(([, v]) => v.trim() && Number(v.replace(',', '.')) > 0)
+            .map(([cuenta, v]) => ({
+              cuenta,
+              importe: Number(v.trim().replace(',', '.')),
+            })),
+        },
+        clave.current,
+      ),
+    onSuccess: () => exito(`Resultado de ${ejercicio} aplicado`),
+    onError: (e) => avisarError(e, refrescar),
+  });
+  const anular = useMutation({
+    mutationFn: (version: number) =>
+      cierreEjercicioApi.anularAplicacion(
+        ejercicio,
+        motivo.trim(),
+        version,
+        clave.current,
+      ),
+    onSuccess: () => exito(`Aplicación del resultado de ${ejercicio} anulada`),
+    onError: (e) => avisarError(e, refrescar),
+  });
+  const ocupado = aplicar.isPending || anular.isPending;
+  useEffect(() => {
+    if (!ocupado) guarda.liberar();
+  }, [ocupado, guarda]);
+
+  const p = prop.data;
+  if (!p || !p.cerrado || p.resultado === null) return null;
+  const vigente = p.aplicacionVigente;
+  const repartido = Object.values(importes).reduce(
+    (t, v) => t + Math.round((Number(v.replace(',', '.')) || 0) * 100),
+    0,
+  );
+  const objetivo = Math.round(Math.abs(p.resultado) * 100);
+
+  return (
+    <section className="mt-8 rounded-xl border bg-white p-4 shadow-sm">
+      <h2 className="text-sm font-semibold">
+        Aplicación del resultado de {ejercicio} ({formatEur(p.resultado)})
+      </h2>
+      <p className="mb-3 text-xs text-gray-500">
+        Capital {formatEur(p.capital)} · reserva legal{' '}
+        {formatEur(p.reservaLegal)} · reservas voluntarias{' '}
+        {formatEur(p.reservasVoluntarias)} · pérdidas pendientes{' '}
+        {formatEur(p.negativosAnteriores)}
+        {p.resultado > 0 &&
+          ` · reserva legal mínima ${formatEur(p.reservaLegalMinima)}`}
+      </p>
+      {prop.isError && <ErrorBanner message={(prop.error as Error).message} />}
+      {vigente ? (
+        <>
+          <ul className="mb-3 space-y-1 text-sm">
+            {vigente.reparto.map((r) => (
+              <li key={r.cuenta}>
+                {r.cuenta} {r.nombre}:{' '}
+                <span className="tabular-nums">{formatEur(r.importe)}</span>
+              </li>
+            ))}
+            <li className="text-xs text-gray-500">
+              {formatDate(vigente.fecha)} · {vigente.acuerdo}
+            </li>
+          </ul>
+          <Autorizado accion="anular" recurso="cierre_ejercicio">
+            <form
+              className="flex flex-wrap items-end gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (
+                  !can('anular', 'cierre_ejercicio') ||
+                  motivo.trim().length < 3 ||
+                  ocupado ||
+                  !guarda.intentar()
+                )
+                  return;
+                anular.mutate(vigente.version);
+              }}
+            >
+              <div className="min-w-64 flex-1">
+                <label className={labelCls} htmlFor="apl-motivo">
+                  Motivo de la anulación
+                </label>
+                <input
+                  id="apl-motivo"
+                  className={fieldCls}
+                  value={motivo}
+                  onChange={(e) => setMotivo(e.target.value)}
+                  minLength={3}
+                  maxLength={240}
+                  required
+                />
+              </div>
+              <button
+                type="submit"
+                className={btnGhostCls}
+                disabled={ocupado || motivo.trim().length < 3}
+              >
+                {anular.isPending ? 'Anulando…' : 'Anular la aplicación'}
+              </button>
+            </form>
+          </Autorizado>
+        </>
+      ) : (
+        <Autorizado
+          accion="cambiarEstado"
+          recurso="cierre_ejercicio"
+          alternativa={
+            <p className="text-sm text-gray-500">
+              Resultado pendiente de aplicar.
+            </p>
+          }
+        >
+          <form
+            className="grid gap-3 sm:grid-cols-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (
+                !can('cambiarEstado', 'cierre_ejercicio') ||
+                repartido !== objetivo ||
+                acuerdo.trim().length < 3 ||
+                ocupado ||
+                !guarda.intentar()
+              )
+                return;
+              aplicar.mutate();
+            }}
+          >
+            {p.destinos.map((dst) => (
+              <div key={dst.cuenta}>
+                <label className={labelCls} htmlFor={`apl-${dst.cuenta}`}>
+                  {dst.cuenta} {dst.nombre}
+                </label>
+                <input
+                  id={`apl-${dst.cuenta}`}
+                  inputMode="decimal"
+                  className={fieldCls}
+                  value={importes[dst.cuenta] ?? ''}
+                  onChange={(e) =>
+                    setImportes((v) => ({ ...v, [dst.cuenta]: e.target.value }))
+                  }
+                />
+              </div>
+            ))}
+            <div>
+              <label className={labelCls} htmlFor="apl-fecha">
+                Fecha del acuerdo
+              </label>
+              <input
+                id="apl-fecha"
+                type="date"
+                className={fieldCls}
+                value={fecha}
+                onChange={(e) => setFecha(e.target.value)}
+                required
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className={labelCls} htmlFor="apl-acuerdo">
+                Acuerdo (acta de la junta)
+              </label>
+              <input
+                id="apl-acuerdo"
+                className={fieldCls}
+                value={acuerdo}
+                onChange={(e) => setAcuerdo(e.target.value)}
+                minLength={3}
+                maxLength={240}
+                required
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2 sm:col-span-3">
+              <p
+                className={`text-xs ${repartido === objetivo ? 'text-emerald-700' : 'text-amber-700'}`}
+              >
+                Repartido {formatEur(repartido / 100)} de{' '}
+                {formatEur(objetivo / 100)}
+              </p>
+              <button
+                type="submit"
+                className={btnPrimaryCls}
+                disabled={
+                  ocupado || repartido !== objetivo || acuerdo.trim().length < 3
+                }
+              >
+                {aplicar.isPending ? 'Aplicando…' : 'Aplicar el resultado'}
+              </button>
+            </div>
+          </form>
+        </Autorizado>
+      )}
+    </section>
+  );
+}
+
+/** Cuentas anuales: balance por masas y PyG (saldos antes del cierre). */
+function CuentasAnuales({ ejercicio }: { ejercicio: number }) {
+  const ca = useQuery({
+    queryKey: ['cierre-ejercicio', 'cuentas-anuales', ejercicio],
+    queryFn: () => cierreEjercicioApi.cuentasAnuales(ejercicio),
+  });
+  const c = ca.data;
+  const masa = (
+    titulo: string,
+    m: {
+      total: number;
+      cuentas: { cuenta: string; nombre: string; importe: number }[];
+    },
+  ) => (
+    <details className="text-sm">
+      <summary className="flex cursor-pointer justify-between gap-2 py-0.5">
+        <span>{titulo}</span>
+        <span className="font-semibold tabular-nums">{formatEur(m.total)}</span>
+      </summary>
+      <ul className="ml-4 text-xs text-gray-600">
+        {m.cuentas.map((x) => (
+          <li key={x.cuenta} className="flex justify-between gap-2">
+            <span>
+              {x.cuenta} {x.nombre}
+            </span>
+            <span className="tabular-nums">{formatEur(x.importe)}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+  return (
+    <section className="mt-8">
+      <h2 className="mb-2 text-sm font-semibold">
+        Cuentas anuales {ejercicio}
+        {c && !c.balance.cuadra && (
+          <span className="ml-2 text-xs text-red-700">
+            (el balance no cuadra)
+          </span>
+        )}
+      </h2>
+      {ca.isError && <ErrorBanner message={(ca.error as Error).message} />}
+      {ca.isLoading && <TableSkeleton rows={4} />}
+      {c && (
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div className="rounded-xl border bg-white p-3 shadow-sm">
+            <p className="mb-1 text-xs font-semibold uppercase text-gray-500">
+              Activo
+            </p>
+            {masa('Activo no corriente', c.balance.activoNoCorriente)}
+            {masa('Activo corriente', c.balance.activoCorriente)}
+            <p className="mt-1 flex justify-between border-t pt-1 text-sm font-semibold">
+              <span>Total activo</span>
+              <span className="tabular-nums">
+                {formatEur(c.balance.totalActivo)}
+              </span>
+            </p>
+          </div>
+          <div className="rounded-xl border bg-white p-3 shadow-sm">
+            <p className="mb-1 text-xs font-semibold uppercase text-gray-500">
+              Patrimonio neto y pasivo
+            </p>
+            {masa('Patrimonio neto', c.balance.patrimonioNeto)}
+            <p className="ml-4 text-xs text-gray-600">
+              incluye resultado del ejercicio{' '}
+              {formatEur(c.balance.resultadoEjercicio)}
+            </p>
+            {masa('Pasivo no corriente', c.balance.pasivoNoCorriente)}
+            {masa('Pasivo corriente', c.balance.pasivoCorriente)}
+            <p className="mt-1 flex justify-between border-t pt-1 text-sm font-semibold">
+              <span>Total PN y pasivo</span>
+              <span className="tabular-nums">
+                {formatEur(c.balance.totalPatrimonioNetoYPasivo)}
+              </span>
+            </p>
+          </div>
+          <div className="rounded-xl border bg-white p-3 shadow-sm">
+            <p className="mb-1 text-xs font-semibold uppercase text-gray-500">
+              Pérdidas y ganancias
+            </p>
+            {c.pyg.partidas
+              .filter((x) => x.importe !== 0)
+              .map((x) => (
+                <p key={x.clave} className="flex justify-between gap-2 text-sm">
+                  <span className="text-gray-600">{x.etiqueta}</span>
+                  <span className="tabular-nums">{formatEur(x.importe)}</span>
+                </p>
+              ))}
+            <p className="mt-1 flex justify-between border-t pt-1 text-sm">
+              <span>Resultado de explotación</span>
+              <span className="tabular-nums">
+                {formatEur(c.pyg.resultadoExplotacion)}
+              </span>
+            </p>
+            <p className="flex justify-between text-sm">
+              <span>Resultado financiero</span>
+              <span className="tabular-nums">
+                {formatEur(c.pyg.resultadoFinanciero)}
+              </span>
+            </p>
+            <p className="flex justify-between text-sm font-semibold">
+              <span>Resultado del ejercicio</span>
+              <span className="tabular-nums">{formatEur(c.pyg.resultado)}</span>
+            </p>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

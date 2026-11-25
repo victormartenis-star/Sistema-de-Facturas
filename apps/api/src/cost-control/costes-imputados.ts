@@ -140,13 +140,15 @@ export async function costeAmortizacion(
 export async function costeAvales(
   ex: DbOrTx,
   ids: string[],
-  opciones: { rango?: RangoFechas } = {},
-): Promise<Map<string, bigint>> {
-  const out = new Map<string, bigint>();
+  opciones: { rango?: RangoFechas; porMes?: boolean } = {},
+): Promise<Map<ClaveCoste, bigint>> {
+  const out = new Map<ClaveCoste, bigint>();
   if (ids.length === 0) return out;
+  const mes = sql<string>`to_char(${journalEntries.entryDate}, 'YYYY-MM')`;
   const filas = await ex
     .select({
       projectId: journalEntryLines.projectId,
+      mes: opciones.porMes ? mes : sql<string>`''`,
       total: sql<string>`coalesce(sum(${journalEntryLines.debit} - ${journalEntryLines.credit}), 0)`,
     })
     .from(journalEntryLines)
@@ -163,9 +165,13 @@ export async function costeAvales(
         ...rango(journalEntries.entryDate, opciones.rango ?? {}),
       ),
     )
-    .groupBy(journalEntryLines.projectId);
+    .groupBy(journalEntryLines.projectId, ...(opciones.porMes ? [mes] : []));
   for (const f of filas) {
-    if (f.projectId) out.set(f.projectId, toCents(f.total));
+    if (!f.projectId) continue;
+    out.set(
+      opciones.porMes ? claveObraMes(f.projectId, f.mes) : f.projectId,
+      toCents(f.total),
+    );
   }
   return out;
 }

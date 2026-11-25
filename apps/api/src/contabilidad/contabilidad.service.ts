@@ -1018,19 +1018,27 @@ export class ContabilidadService {
     ex: DbOrTx,
     companyId: string,
     ejercicio: number,
+    /**
+     * Sin la regularización ni el cierre del propio ejercicio (ni sus
+     * contra-asientos): los saldos «antes de cerrar» de las cuentas anuales.
+     */
+    opciones: { sinCierre?: boolean } = {},
   ): Promise<
     {
       cuenta: string;
       nombre: string;
+      tipo: string;
       projectId: string | null;
       debe: string;
       haber: string;
     }[]
   > {
+    const cierre = sql`('regularizacion_ejercicio', 'cierre_ejercicio')`;
     return ex
       .select({
         cuenta: ledgerAccounts.code,
         nombre: ledgerAccounts.name,
+        tipo: ledgerAccounts.type,
         projectId: journalEntryLines.projectId,
         debe: sql<string>`sum(${journalEntryLines.debit})`,
         haber: sql<string>`sum(${journalEntryLines.credit})`,
@@ -1048,13 +1056,58 @@ export class ContabilidadService {
         and(
           eq(journalEntryLines.companyId, companyId),
           eq(journalEntries.fiscalYear, ejercicio),
+          opciones.sinCierre
+            ? sql`${journalEntries.source} NOT IN ${cierre}
+                AND (${journalEntries.reversesId} IS NULL OR ${journalEntries.reversesId} NOT IN
+                  (select je.id from journal_entries je where je.source IN ${cierre}))`
+            : undefined,
         ),
       )
       .groupBy(
         ledgerAccounts.code,
         ledgerAccounts.name,
+        ledgerAccounts.type,
         journalEntryLines.projectId,
       );
+  }
+
+  /**
+   * Saldo deudor (debe − haber) por cuenta a una fecha, de todos los
+   * ejercicios: los cierres y aperturas se compensan, así que es el saldo
+   * vivo de cada cuenta en esa fecha. Con `prefijos`, solo esas cuentas.
+   */
+  async saldosAFecha(
+    ex: DbOrTx,
+    companyId: string,
+    fecha: string,
+    prefijos: readonly string[],
+  ): Promise<Map<string, bigint>> {
+    const filas = await ex
+      .select({
+        cuenta: ledgerAccounts.code,
+        saldo: sql<string>`coalesce(sum(${journalEntryLines.debit} - ${journalEntryLines.credit}), 0)`,
+      })
+      .from(journalEntryLines)
+      .innerJoin(
+        journalEntries,
+        eq(journalEntries.id, journalEntryLines.entryId),
+      )
+      .innerJoin(
+        ledgerAccounts,
+        eq(ledgerAccounts.id, journalEntryLines.accountId),
+      )
+      .where(
+        and(
+          eq(journalEntryLines.companyId, companyId),
+          lte(journalEntries.entryDate, fecha),
+          sql`(${sql.join(
+            prefijos.map((p) => sql`${ledgerAccounts.code} LIKE ${`${p}%`}`),
+            sql` OR `,
+          )})`,
+        ),
+      )
+      .groupBy(ledgerAccounts.code);
+    return new Map(filas.map((f) => [f.cuenta, toCents(f.saldo)]));
   }
 
   /* ─────────────────────────── interfaz contable ─────────────────────────── */

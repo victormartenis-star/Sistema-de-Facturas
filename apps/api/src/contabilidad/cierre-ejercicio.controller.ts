@@ -1,9 +1,14 @@
 import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
 import {
+  aplicacionResultadoAnularSchema,
+  aplicacionResultadoSchema,
   cierreEjercicioRevertirSchema,
   ejercicioParamSchema,
+  type AplicacionResultadoAnularInput,
+  type AplicacionResultadoInput,
   type CierreEjercicioRevertirInput,
 } from '@erp/shared';
+import { AplicacionResultadoService } from './aplicacion-resultado.service';
 import { Roles } from '../auth/roles';
 import { Idempotente } from '../common/idempotencia/idempotente.decorator';
 import { VersionEsperada } from '../common/version';
@@ -19,7 +24,10 @@ import { CierreEjercicioService } from './cierre-ejercicio.service';
 @Controller('contabilidad/ejercicios')
 @Roles('admin', 'gerente', 'administracion', 'lector')
 export class CierreEjercicioController {
-  constructor(private readonly service: CierreEjercicioService) {}
+  constructor(
+    private readonly service: CierreEjercicioService,
+    private readonly aplicacion: AplicacionResultadoService,
+  ) {}
 
   @Get()
   listar() {
@@ -44,6 +52,51 @@ export class CierreEjercicioController {
     ejercicio: number,
   ) {
     return this.service.cerrar(ejercicio);
+  }
+
+  /** Cuentas anuales: balance por masas y PyG (saldos antes del cierre). */
+  @Get(':ejercicio/cuentas-anuales')
+  cuentasAnuales(
+    @Param('ejercicio', new ZodValidationPipe(ejercicioParamSchema))
+    ejercicio: number,
+  ) {
+    return this.aplicacion.cuentasAnuales(ejercicio);
+  }
+
+  /** Resultado, saldos de PN, reserva legal mínima y destinos admitidos. */
+  @Get(':ejercicio/aplicacion-resultado')
+  propuestaAplicacion(
+    @Param('ejercicio', new ZodValidationPipe(ejercicioParamSchema))
+    ejercicio: number,
+  ) {
+    return this.aplicacion.propuesta(ejercicio);
+  }
+
+  @Post(':ejercicio/aplicar-resultado')
+  @Roles('admin', 'gerente')
+  @Idempotente()
+  @HttpCode(200)
+  aplicarResultado(
+    @Param('ejercicio', new ZodValidationPipe(ejercicioParamSchema))
+    ejercicio: number,
+    @Body(new ZodValidationPipe(aplicacionResultadoSchema))
+    body: AplicacionResultadoInput,
+  ) {
+    return this.aplicacion.aplicar(ejercicio, body);
+  }
+
+  @Post(':ejercicio/aplicacion-resultado/anular')
+  @Roles('admin', 'gerente')
+  @Idempotente()
+  @HttpCode(200)
+  anularAplicacion(
+    @Param('ejercicio', new ZodValidationPipe(ejercicioParamSchema))
+    ejercicio: number,
+    @Body(new ZodValidationPipe(aplicacionResultadoAnularSchema))
+    body: AplicacionResultadoAnularInput,
+    @VersionEsperada() version: number | undefined,
+  ) {
+    return this.aplicacion.anular(ejercicio, body, version);
   }
 
   @Post(':ejercicio/revertir')

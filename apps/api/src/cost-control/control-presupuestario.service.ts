@@ -567,6 +567,27 @@ export class ControlPresupuestarioService {
   }
 
   /**
+   * Cuadro de márgenes de varias obras con un número fijo de consultas (sin
+   * N+1): la fuente de verdad de coste real con avales y de la EAC que usan
+   * también la economía de obra y el EVM.
+   */
+  async cuadrosObras(
+    ex: DbOrTx,
+    obras: readonly { id: string; contrato: string | null }[],
+  ) {
+    const datos = await this.cargar(
+      ex,
+      obras.map((o) => o.id),
+    );
+    return new Map(
+      obras.map((o) => [
+        o.id,
+        cuadroMargenesObra(this.entrada(o.contrato, datos.get(o.id)!)),
+      ]),
+    );
+  }
+
+  /**
    * Cuadro de márgenes completo de una obra a una fecha (una sola carga):
    * coste real con avales y estimación al cierre vigente a esa fecha.
    */

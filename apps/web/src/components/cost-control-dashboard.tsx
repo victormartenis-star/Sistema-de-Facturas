@@ -64,10 +64,30 @@ export function CostControlDashboard({ projectId }: { projectId: string }) {
           detalle="Ganado / gastado — por debajo de 1 es sobrecoste"
         />
         <KpiCard
-          etiqueta="Estimación a fin de obra (EAC)"
+          etiqueta={`Estimación a fin de obra (EAC${cc.origenEac === 'manual' ? ' manual' : ''})`}
           valor={formatEur(cc.eac)}
           tono={cc.varianceAtCompletion >= 0 ? 'bueno' : 'malo'}
-          detalle={`${cc.varianceAtCompletion >= 0 ? 'Ahorro' : 'Sobrecoste'} previsto: ${formatEur(Math.abs(cc.varianceAtCompletion))}`}
+          detalle={
+            `${cc.varianceAtCompletion >= 0 ? 'Ahorro' : 'Sobrecoste'} previsto: ${formatEur(Math.abs(cc.varianceAtCompletion))}` +
+            (cc.origenEac === 'manual'
+              ? ` · por CPI: ${formatEur(cc.eacCalculada)}`
+              : '') +
+            (cc.eacAjustadaAlReal ? ' · elevada al coste real' : '')
+          }
+        />
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <KpiCard
+          etiqueta="Falta por gastar (ETC)"
+          valor={formatEur(cc.etc)}
+          detalle="EAC − coste real"
+        />
+        <KpiCard
+          etiqueta="TCPI"
+          valor={cc.tcpi !== null ? cc.tcpi.toFixed(2) : '—'}
+          tono={cc.tcpi === null ? 'neutro' : cc.tcpi <= 1 ? 'bueno' : 'aviso'}
+          detalle="Rendimiento necesario en lo que falta para cumplir el BAC"
         />
       </div>
 
@@ -75,7 +95,7 @@ export function CostControlDashboard({ projectId }: { projectId: string }) {
         <p className="mb-1 text-[11px] font-semibold tracking-wide text-gray-500 uppercase">
           Desglose del coste real imputado
         </p>
-        <div className="mt-2 grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
+        <div className="mt-2 grid grid-cols-2 gap-3 text-sm sm:grid-cols-6">
           <div>
             <p className="text-gray-500">Facturas de compra</p>
             <p className="font-semibold tabular-nums">
@@ -104,6 +124,12 @@ export function CostControlDashboard({ projectId }: { projectId: string }) {
             <p className="text-gray-500">Amortización imputada</p>
             <p className="font-semibold tabular-nums">
               {formatEur(cc.acBreakdown.amortizacion)}
+            </p>
+          </div>
+          <div>
+            <p className="text-gray-500">Avales (comisiones y ejecuciones)</p>
+            <p className="font-semibold tabular-nums">
+              {formatEur(cc.acBreakdown.avales)}
             </p>
           </div>
         </div>
