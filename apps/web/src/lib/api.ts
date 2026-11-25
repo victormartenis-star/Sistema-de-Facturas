@@ -32,6 +32,15 @@ import type {
   WipDto,
   PropuestaProvisionPerdidasDto,
   ProvisionPerdidasDto,
+  AvalCreateInput,
+  AvalDetalleDto,
+  AvalDto,
+  AvalEjecutarInput,
+  AvalLiberarInput,
+  AvalProrrogaInput,
+  AvalComisionInput,
+  ResumenAvalesDto,
+  ResultadoAvisosAvalesDto,
   ResultadoCierreProvisionPerdidasDto,
   AjusteConsolidacionCreateInput,
   AjusteConsolidacionDto,
@@ -2518,5 +2527,49 @@ export const provisionPerdidasApi = {
       method: 'POST',
       body: JSON.stringify({ motivo }),
       headers: { ...ifMatch(version), ...idempotencyKey(clave) },
+    }),
+};
+
+/* ───────────────────────── Avales bancarios y garantías ───────────────────────── */
+
+const accionAval =
+  <T>(ruta: string) =>
+  (id: string, input: T, version: number, clave: string) =>
+    request<AvalDetalleDto>(`/avales/${id}/${ruta}`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: { ...ifMatch(version), ...idempotencyKey(clave) },
+    });
+
+export const avalesApi = {
+  listar: (
+    f: {
+      projectId?: string;
+      estado?: string;
+      tipo?: string;
+      direccion?: string;
+      vivos?: string;
+      venceEnDias?: number;
+      q?: string;
+    } = {},
+  ) => request<AvalDto[]>(`/avales${qs(f)}`),
+  resumen: (dias = 30) =>
+    request<ResumenAvalesDto>(`/avales/resumen${qs({ dias })}`),
+  detalle: (id: string) => request<AvalDetalleDto>(`/avales/${id}`),
+  crear: (input: AvalCreateInput, clave: string) =>
+    request<AvalDetalleDto>('/avales', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: idempotencyKey(clave),
+    }),
+  liberar: accionAval<AvalLiberarInput>('liberar'),
+  ejecutar: accionAval<AvalEjecutarInput>('ejecutar'),
+  prorrogar: accionAval<AvalProrrogaInput>('prorrogar'),
+  comision: accionAval<AvalComisionInput>('comision'),
+  avisos: (dias: number, clave: string) =>
+    request<ResultadoAvisosAvalesDto>('/avales/avisos-vencimiento', {
+      method: 'POST',
+      body: JSON.stringify({ dias }),
+      headers: idempotencyKey(clave),
     }),
 };
