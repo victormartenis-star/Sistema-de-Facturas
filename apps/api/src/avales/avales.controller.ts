@@ -97,6 +97,15 @@ export class AvalesController {
   }
 
   /**
+   * Lotes del devengo automático (endpoint y tarea programada) con los avisos
+   * de los meses omitidos o saltados y su motivo, más recientes primero.
+   */
+  @Get('devengos/lotes')
+  lotesDevengo() {
+    return this.devengo.lotes();
+  }
+
+  /**
    * Devengo automático de todos los meses terminados pendientes hasta
    * `hasta` (por defecto, el mes anterior). Idempotente; lo ejecuta también
    * la tarea programada del día 1.

@@ -263,7 +263,9 @@ describe('Memoria abreviada, exportación y conciliación a fecha (integración)
       'obra_en_curso',
       'provision_perdidas',
       'clientes',
+      'clientes_retenciones',
       'proveedores',
+      'proveedores_retenciones',
       'almacen',
     ]);
 

@@ -3714,6 +3714,12 @@ export function estadoFlujosEfectivo(p: {
  * mayor. Una diferencia distinta de cero es un descuadre a investigar.
  */
 
+export interface DetalleConciliacion {
+  clave: string;
+  concepto: string;
+  importe: number;
+}
+
 export interface PartidaConciliacion {
   clave: string;
   etiqueta: string;
@@ -3722,6 +3728,8 @@ export interface PartidaConciliacion {
   mayor: number;
   diferencia: number;
   cuadra: boolean;
+  /** Desglose informativo del auxiliar (p. ej. retención vencida / no vencida). */
+  detalle?: DetalleConciliacion[];
 }
 
 export function conciliar(
@@ -3731,6 +3739,7 @@ export function conciliar(
     cuentas: string;
     auxiliar: Importe;
     mayor: Importe;
+    detalle?: readonly { clave: string; concepto: string; importe: Importe }[];
   }[],
 ): { partidas: PartidaConciliacion[]; cuadra: boolean; descuadres: number } {
   const out = partidas.map((x) => {
@@ -3744,8 +3753,74 @@ export function conciliar(
       mayor: fromCents(m),
       diferencia: fromCents(m - a),
       cuadra: a === m,
+      ...(x.detalle
+        ? {
+            detalle: x.detalle.map((d) => ({
+              clave: d.clave,
+              concepto: d.concepto,
+              importe: fromCents(toCents(d.importe)),
+            })),
+          }
+        : {}),
     };
   });
   const descuadres = out.filter((x) => !x.cuadra).length;
   return { partidas: out, cuadra: descuadres === 0, descuadres };
+}
+
+/** Vencimiento de retención de garantía de un tercero (importe y liquidado a la fecha). */
+export interface RetencionPendiente {
+  importe: Importe;
+  /** Liquidado (vigente) hasta la fecha de corte. */
+  liquidado: Importe;
+  /** Fecha de liberación prevista (vencimiento del plazo de garantía). */
+  vencimiento: string;
+}
+
+export interface SaldoTerceroAFecha {
+  /** Pendiente ordinario (cuenta 4300 / 4000). */
+  ordinario: number;
+  /** Retención de garantía pendiente (cuenta 4301 / 4001). */
+  retencion: number;
+  /** Retención cuyo plazo de garantía venció a la fecha y sigue sin liquidar. */
+  retencionVencida: number;
+  /** Retención aún dentro del plazo de garantía. */
+  retencionNoVencida: number;
+  total: number;
+}
+
+/**
+ * Saldo de clientes o proveedores a una fecha de corte, separando lo
+ * ordinario de la retención de garantía (en SAP, operación CME / indicador de
+ * mayor especial; en Oracle, «retainage»). La factura lleva al mayor total −
+ * retención a 4300/4000 y la retención a 4301/4001, y cada cobro o pago salda
+ * la cuenta de su vencimiento (ordinario o retención):
+ *  - ordinario = facturado − retenido − liquidado ordinario;
+ *  - retención = retenido − liquidado de retención, del que se separa la parte
+ *    cuyo plazo venció a la fecha (`vencimiento ≤ fecha`).
+ * En céntimos exactos; los saldos de signo contrario (sobrecobro) se respetan.
+ */
+export function saldoTerceroAFecha(x: {
+  fecha: string;
+  facturado: Importe;
+  retenido: Importe;
+  liquidadoOrdinario: Importe;
+  liquidadoRetencion: Importe;
+  retenciones: readonly RetencionPendiente[];
+}): SaldoTerceroAFecha {
+  const ordinario =
+    toCents(x.facturado) - toCents(x.retenido) - toCents(x.liquidadoOrdinario);
+  const retencion = toCents(x.retenido) - toCents(x.liquidadoRetencion);
+  const vencida = sumCents(
+    x.retenciones
+      .filter((r) => r.vencimiento <= x.fecha)
+      .map((r) => toCents(r.importe) - toCents(r.liquidado)),
+  );
+  return {
+    ordinario: fromCents(ordinario),
+    retencion: fromCents(retencion),
+    retencionVencida: fromCents(vencida),
+    retencionNoVencida: fromCents(retencion - vencida),
+    total: fromCents(ordinario + retencion),
+  };
 }

@@ -315,6 +315,51 @@ function celda(v: string | number | null): string {
  * filas `seccion;partida;concepto;importe`, `;` como separador y saltos
  * `\r\n`. Determinista: el orden de las filas sale del contenido.
  */
+/** Versión del formato de exportación (cambia si cambian secciones o claves). */
+export const VERSION_FORMATO_CUENTAS = 'erp-dintel/cuentas-anuales@2';
+
+/** Identificación estatutaria de las cuentas anuales. */
+export interface IdentificacionCuentas {
+  formato: string;
+  empresa: string;
+  nif: string | null;
+  ejercicio: number;
+  fechaCierre: string;
+  moneda: 'EUR';
+  modelo: 'abreviado';
+  marco: string;
+}
+
+/** Estado del cierre del ejercicio y evidencia de conciliación a su fecha. */
+export interface EstadoCierreCuentas {
+  cerrado: boolean;
+  resultadoAplicado: boolean;
+  conciliacion: {
+    /** 31-12 del ejercicio (o hoy, si el ejercicio no ha terminado). */
+    fecha: string;
+    cuadra: boolean;
+    descuadres: number;
+    partidas: { clave: string; diferencia: number }[];
+  } | null;
+}
+
+export function identificacionCuentas(p: {
+  empresa: string;
+  nif: string | null;
+  ejercicio: number;
+}): IdentificacionCuentas {
+  return {
+    formato: VERSION_FORMATO_CUENTAS,
+    empresa: p.empresa,
+    nif: p.nif,
+    ejercicio: p.ejercicio,
+    fechaCierre: `${p.ejercicio}-12-31`,
+    moneda: 'EUR',
+    modelo: 'abreviado',
+    marco: 'PGC 2007 (RD 1514/2007), modelos abreviados',
+  };
+}
+
 export function cuentasAnualesACsv(ca: {
   ejercicio: number;
   balance: CuentasAnualesCalculo['balance'];
@@ -322,10 +367,31 @@ export function cuentasAnualesACsv(ca: {
   ecpn: { filas: FilaEcpn[] };
   efe: EstadoFlujosEfectivo;
   memoria: MemoriaAbreviada;
+  identificacion?: IdentificacionCuentas;
+  cierre?: EstadoCierreCuentas;
+  aplicacion?: {
+    reparto: { cuenta: string; nombre: string; importe: number }[];
+  } | null;
 }): string {
   const filas: (string | number | null)[][] = [
     ['seccion', 'partida', 'concepto', 'importe'],
   ];
+  const id = ca.identificacion;
+  if (id) {
+    filas.push(['identificacion', 'formato', 'version', id.formato]);
+    filas.push(['identificacion', 'empresa', 'denominacion', id.empresa]);
+    filas.push(['identificacion', 'empresa', 'nif', id.nif]);
+    filas.push([
+      'identificacion',
+      'ejercicio',
+      'ejercicio',
+      String(id.ejercicio),
+    ]);
+    filas.push(['identificacion', 'ejercicio', 'fecha_cierre', id.fechaCierre]);
+    filas.push(['identificacion', 'presentacion', 'moneda', id.moneda]);
+    filas.push(['identificacion', 'presentacion', 'modelo', id.modelo]);
+    filas.push(['identificacion', 'presentacion', 'marco', id.marco]);
+  }
   const masa = (
     seccion: string,
     nombre: string,
@@ -394,8 +460,40 @@ export function cuentasAnualesACsv(ca: {
   for (const [k, v] of Object.entries(ca.memoria.indicadores)) {
     filas.push(['memoria', 'indicadores', k, v === null ? null : String(v)]);
   }
+  for (const n of ca.memoria.notas) {
+    filas.push(['memoria', `nota_${n.numero}`, 'titulo', n.titulo]);
+    for (const [k, v] of Object.entries(n.cifras ?? {})) {
+      filas.push(['memoria', `nota_${n.numero}`, k, v]);
+    }
+  }
   for (const c of ca.memoria.comprobaciones) {
     filas.push(['memoria', 'comprobacion', c.clave, c.ok ? 'ok' : 'error']);
+  }
+  for (const r of ca.aplicacion?.reparto ?? []) {
+    filas.push(['aplicacion', r.cuenta, r.nombre, r.importe]);
+  }
+  const ci = ca.cierre;
+  if (ci) {
+    filas.push(['cierre', 'estado', 'cerrado', ci.cerrado ? 'si' : 'no']);
+    filas.push([
+      'cierre',
+      'estado',
+      'resultado_aplicado',
+      ci.resultadoAplicado ? 'si' : 'no',
+    ]);
+    if (ci.conciliacion) {
+      const k = ci.conciliacion;
+      filas.push(['cierre', 'conciliacion', 'fecha', k.fecha]);
+      filas.push([
+        'cierre',
+        'conciliacion',
+        'cuadra',
+        k.cuadra ? 'ok' : 'error',
+      ]);
+      for (const p of k.partidas) {
+        filas.push(['cierre', 'conciliacion', p.clave, p.diferencia]);
+      }
+    }
   }
   return filas.map((f) => f.map(celda).join(';')).join('\r\n') + '\r\n';
 }

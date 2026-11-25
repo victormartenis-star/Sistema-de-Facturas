@@ -7,9 +7,11 @@ import {
 } from '@erp/db';
 import {
   conciliar,
+  saldoTerceroAFecha,
   todayIso,
   type ConciliacionCierreDto,
   type PartidaConciliacion,
+  type SaldoTerceroAFecha,
 } from '@erp/shared';
 import { AuditService } from '../audit/audit.service';
 import { usuarioPersistible } from '../common/request-context';
@@ -39,8 +41,13 @@ const FACTURAS_CONTABLES = `('aprobada', 'pagada', 'rectificada')`;
  *  - amortización acumulada de los activos no dados de baja a la fecha ↔ 281x;
  *  - obra en curso vigente (último cierre hasta la fecha) ↔ 4309 − 4389;
  *  - provisión por pérdidas vigente ↔ 4994;
- *  - clientes: facturas de venta contabilizables − cobros vigentes ↔ 4300 + 4301;
- *  - proveedores: facturas de compra − pagos vigentes ↔ 4000 + 4001;
+ *  - clientes: facturas de venta contabilizables (total − retención) − cobros
+ *    ordinarios vigentes ↔ 4300; retenciones de garantía − cobros de retención
+ *    ↔ 4301, con el detalle vencida / no vencida a la fecha;
+ *  - proveedores: igual con las compras y los pagos ↔ 4000 y 4001;
+ *  Separar las partidas (como el indicador CME de SAP o el «retainage» de
+ *  Oracle) hace aflorar un cobro de retención llevado a 4300 o al revés, que
+ *  en una partida conjunta se compensaría.
  *  - almacén: valor del kárdex (sin traspasos, que netean) ↔ grupo 3.
  * Las anulaciones fechan su contra-asiento como el original, así que lo
  * anulado se excluye del auxiliar en cualquier fecha. Guardarla deja
@@ -89,8 +96,10 @@ export class ConciliacionCierreService {
       provMayor,
       clientesAux,
       clientesMayor,
+      clientesRetMayor,
       proveedoresAux,
       proveedoresMayor,
+      proveedoresRetMayor,
       almacenAux,
       almacenMayor,
     ] = await Promise.all([
@@ -122,9 +131,11 @@ export class ConciliacionCierreService {
           order by project_id, year desc, month desc) p`),
       mayor((c) => sql`${c} like '4994%'`, true),
       this.terceros(ex, companyId, fecha, 'venta', 'cobro'),
-      mayor((c) => sql`${c} like '4300%' or ${c} like '4301%'`, false),
+      mayor((c) => sql`${c} like '4300%'`, false),
+      mayor((c) => sql`${c} like '4301%'`, false),
       this.terceros(ex, companyId, fecha, 'compra', 'pago'),
-      mayor((c) => sql`${c} like '4000%' or ${c} like '4001%'`, true),
+      mayor((c) => sql`${c} like '4000%'`, true),
+      mayor((c) => sql`${c} like '4001%'`, true),
       uno(sql`select coalesce(sum(total_value), 0)::text as v from stock_movements
         where company_id = ${companyId} and type <> 'traspaso'
           and movement_date <= ${fecha}`),
@@ -163,17 +174,35 @@ export class ConciliacionCierreService {
         },
         {
           clave: 'clientes',
-          etiqueta: 'Clientes: facturas emitidas pendientes de cobro',
-          cuentas: '4300 + 4301',
-          auxiliar: clientesAux,
+          etiqueta:
+            'Clientes: facturas emitidas pendientes de cobro (sin retención)',
+          cuentas: '4300',
+          auxiliar: clientesAux.ordinario,
           mayor: clientesMayor,
         },
         {
+          clave: 'clientes_retenciones',
+          etiqueta: 'Clientes: retenciones de garantía pendientes de cobro',
+          cuentas: '4301',
+          auxiliar: clientesAux.retencion,
+          mayor: clientesRetMayor,
+          detalle: detalleRetencion(clientesAux),
+        },
+        {
           clave: 'proveedores',
-          etiqueta: 'Proveedores: facturas recibidas pendientes de pago',
-          cuentas: '4000 + 4001',
-          auxiliar: proveedoresAux,
+          etiqueta:
+            'Proveedores: facturas recibidas pendientes de pago (sin retención)',
+          cuentas: '4000',
+          auxiliar: proveedoresAux.ordinario,
           mayor: proveedoresMayor,
+        },
+        {
+          clave: 'proveedores_retenciones',
+          etiqueta: 'Proveedores: retenciones de garantía pendientes de pago',
+          cuentas: '4001',
+          auxiliar: proveedoresAux.retencion,
+          mayor: proveedoresRetMayor,
+          detalle: detalleRetencion(proveedoresAux),
         },
         {
           clave: 'almacen',
@@ -187,8 +216,11 @@ export class ConciliacionCierreService {
   }
 
   /**
-   * Pendiente de un tercero a la fecha: total de las facturas contabilizables
-   * emitidas hasta la fecha menos las liquidaciones vigentes hasta la fecha.
+   * Saldo de un tercero a la fecha, separando ordinario y retención de
+   * garantía: facturas contabilizables emitidas hasta la fecha (total y
+   * retención) menos las liquidaciones vigentes hasta la fecha de cada tipo
+   * de vencimiento; y, por vencimiento de retención, lo liquidado a la fecha
+   * y su fecha de liberación (vencida / no vencida).
    */
   private async terceros(
     ex: DbOrTx,
@@ -196,20 +228,52 @@ export class ConciliacionCierreService {
     fecha: string,
     kind: 'venta' | 'compra',
     direccion: 'cobro' | 'pago',
-  ): Promise<string> {
-    const r = await ex.execute(sql`
-      with fac as (
-        select id, total_amount from invoices
+  ) {
+    const fac = sql`select id, total_amount, retention_amount from invoices
         where company_id = ${companyId} and kind = ${kind}
           and status in ${sql.raw(FACTURAS_CONTABLES)}
-          and deleted_at is null and issue_date <= ${fecha})
-      select ((select coalesce(sum(total_amount), 0) from fac)
-        - (select coalesce(sum(ps.amount), 0) from payment_settlements ps
-            join payment_milestones pm on pm.id = ps.milestone_id
-            where pm.invoice_id in (select id from fac)
-              and pm.direction = ${direccion}
-              and ps.status = 'vigente' and ps.settled_on <= ${fecha}))::text as v`);
-    return String((r.rows[0] as { v: string | null }).v ?? '0');
+          and deleted_at is null and issue_date <= ${fecha}`;
+    const [tot, ret] = await Promise.all([
+      ex.execute(sql`
+        with fac as (${fac})
+        select (select coalesce(sum(total_amount), 0) from fac)::text as facturado,
+          (select coalesce(sum(retention_amount), 0) from fac)::text as retenido,
+          coalesce(sum(ps.amount) filter (where pm.kind = 'ordinario'), 0)::text as ord,
+          coalesce(sum(ps.amount) filter (where pm.kind = 'retencion'), 0)::text as ret
+        from payment_settlements ps
+        join payment_milestones pm on pm.id = ps.milestone_id
+        where pm.invoice_id in (select id from fac)
+          and pm.direction = ${direccion}
+          and ps.status = 'vigente' and ps.settled_on <= ${fecha}`),
+      ex.execute(sql`
+        with fac as (${fac})
+        select pm.amount::text as importe, pm.due_date::text as vencimiento,
+          coalesce((select sum(ps.amount) from payment_settlements ps
+            where ps.milestone_id = pm.id and ps.status = 'vigente'
+              and ps.settled_on <= ${fecha}), 0)::text as liquidado
+        from payment_milestones pm
+        where pm.invoice_id in (select id from fac)
+          and pm.direction = ${direccion} and pm.kind = 'retencion'
+        order by pm.due_date, pm.id`),
+    ]);
+    const t = tot.rows[0] as {
+      facturado: string;
+      retenido: string;
+      ord: string;
+      ret: string;
+    };
+    return saldoTerceroAFecha({
+      fecha,
+      facturado: t.facturado,
+      retenido: t.retenido,
+      liquidadoOrdinario: t.ord,
+      liquidadoRetencion: t.ret,
+      retenciones: ret.rows as {
+        importe: string;
+        vencimiento: string;
+        liquidado: string;
+      }[],
+    });
   }
 
   /** Conciliación a una fecha (por defecto, hoy), sin guardar. */
@@ -262,3 +326,19 @@ export class ConciliacionCierreService {
 }
 
 type SQLPatron = (columna: ReturnType<typeof sql>) => ReturnType<typeof sql>;
+
+/** Retención pendiente a la fecha: plazo de garantía vencido y no vencido. */
+function detalleRetencion(s: SaldoTerceroAFecha) {
+  return [
+    {
+      clave: 'vencida',
+      concepto: 'Plazo de garantía vencido, pendiente de liquidar',
+      importe: s.retencionVencida,
+    },
+    {
+      clave: 'no_vencida',
+      concepto: 'Dentro del plazo de garantía',
+      importe: s.retencionNoVencida,
+    },
+  ];
+}

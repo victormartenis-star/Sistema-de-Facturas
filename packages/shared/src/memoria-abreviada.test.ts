@@ -11,7 +11,9 @@ import {
 import {
   cuentasAnualesACsv,
   cuentasAnualesAJson,
+  identificacionCuentas,
   indicadoresPatrimoniales,
+  VERSION_FORMATO_CUENTAS,
   memoriaAbreviada,
   movimientoMasa,
 } from './memoria-abreviada';
@@ -232,6 +234,75 @@ describe('exportación determinista', () => {
     expect(cuentasAnualesACsv(dto)).toBe(csv);
     const json = cuentasAnualesAJson(dto);
     expect(cuentasAnualesAJson(JSON.parse(json))).toBe(json);
+  });
+
+  it('CSV estatutario: identificación, notas, reparto y evidencia de cierre', () => {
+    const { cuentas, ecpn, efe, memoria } = caso();
+    const identificacion = identificacionCuentas({
+      empresa: 'Constructora; "Prueba" SL',
+      nif: 'B12345678',
+      ejercicio: 2025,
+    });
+    expect(identificacion).toMatchObject({
+      formato: VERSION_FORMATO_CUENTAS,
+      fechaCierre: '2025-12-31',
+      moneda: 'EUR',
+      modelo: 'abreviado',
+    });
+    const csv = cuentasAnualesACsv({
+      ejercicio: 2025,
+      ...cuentas,
+      ecpn,
+      efe,
+      memoria,
+      identificacion,
+      aplicacion: {
+        reparto: [
+          { cuenta: '1120', nombre: 'Reserva legal', importe: 460 },
+          { cuenta: '1130', nombre: 'Reservas voluntarias', importe: 4139.99 },
+        ],
+      },
+      cierre: {
+        cerrado: true,
+        resultadoAplicado: true,
+        conciliacion: {
+          fecha: '2025-12-31',
+          cuadra: false,
+          descuadres: 1,
+          partidas: [
+            { clave: 'clientes', diferencia: 0 },
+            { clave: 'clientes_retenciones', diferencia: -50 },
+          ],
+        },
+      },
+    });
+    const lineas = csv.trim().split('\r\n');
+    // La cabecera sigue primero; luego la identificación (con escape de `;` y `"`).
+    expect(lineas[0]).toBe('seccion;partida;concepto;importe');
+    expect(lineas[1]).toBe(
+      `identificacion;formato;version;${VERSION_FORMATO_CUENTAS}`,
+    );
+    expect(lineas).toContain(
+      'identificacion;empresa;denominacion;"Constructora; ""Prueba"" SL"',
+    );
+    expect(lineas).toContain('identificacion;empresa;nif;B12345678');
+    expect(lineas).toContain('memoria;nota_5;costeFinal;3000.00');
+    expect(lineas).toContain('memoria;nota_7;emitidosSaldoVivo;40000.00');
+    expect(lineas).toContain('aplicacion;1120;Reserva legal;460.00');
+    expect(lineas).toContain('cierre;estado;cerrado;si');
+    expect(lineas).toContain('cierre;conciliacion;cuadra;error');
+    expect(lineas).toContain('cierre;conciliacion;clientes_retenciones;-50.00');
+    // Sin datos estatutarios, el CSV anterior no cambia (compatibilidad).
+    const base = cuentasAnualesACsv({
+      ejercicio: 2025,
+      ...cuentas,
+      ecpn,
+      efe,
+      memoria,
+    });
+    expect(
+      base.split('\r\n').some((l) => l.startsWith('identificacion;')),
+    ).toBe(false);
   });
 });
 

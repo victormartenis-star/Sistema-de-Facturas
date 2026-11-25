@@ -360,13 +360,206 @@ export interface ResultadoDevengoAutomaticoDto {
   periodos: ResultadoDevengoAvalesDto[];
   contabilizados: number;
   importe: number;
+  /** Lote guardado de esta ejecución (null si no hay avales con tasa). */
+  loteId: string | null;
+  /** Meses omitidos o saltados, agrupados en rangos consecutivos por motivo. */
+  avisos: AvisoDevengoDto[];
+  /** Avisos de nivel `alerta` (requieren acción). */
+  alertas: number;
 }
 
 export interface ResultadoDevengoAvalesDto {
   periodo: string;
   contabilizados: number;
   importe: number;
-  omitidos: { avalId: string; referencia: string; motivo: string }[];
+  omitidos: {
+    avalId: string;
+    referencia: string;
+    motivo: string;
+    /** Código RFC 7807 del rechazo (FISCAL_PERIOD_CLOSED…). */
+    codigo?: string;
+  }[];
+  /** Avales candidatos del mes (emitidos con tasa que estuvieron vivos). */
+  candidatos?: number;
+  /** Candidatos ya devengados antes (idempotencia: no se repiten). */
+  yaDevengados?: number;
+  /** Registro de la ejecución del mes (`GET /avales/devengos/ejecuciones`). */
+  ejecucionId?: string;
+}
+
+/* ─────────────── avisos de meses omitidos en el devengo automático ───────────────
+ * Al estilo de SAP Accrual Engine (log de la ejecución) / Oracle Subledger
+ * Accounting (informe de excepciones): cada mes que el devengo automático o la
+ * tarea programada no devenga se explica con un motivo. Los meses ya devengados
+ * o sin avales son informativos; un período o ejercicio cerrado, un rechazo o
+ * un mes fuera de la ventana de recorrido son alertas que piden intervención.
+ */
+
+export const MOTIVOS_OMISION_DEVENGO = [
+  'ya_devengado',
+  'sin_avales',
+  'periodo_cerrado',
+  'ejercicio_cerrado',
+  'rechazado',
+  'fuera_de_ventana',
+] as const;
+export type MotivoOmisionDevengo = (typeof MOTIVOS_OMISION_DEVENGO)[number];
+
+export const MOTIVO_OMISION_DEVENGO_LABELS: Record<
+  MotivoOmisionDevengo,
+  string
+> = {
+  ya_devengado: 'Ya devengado',
+  sin_avales: 'Sin avales vivos con comisión',
+  periodo_cerrado: 'Período contable cerrado',
+  ejercicio_cerrado: 'Ejercicio cerrado',
+  rechazado: 'Rechazado',
+  fuera_de_ventana: 'Fuera de la ventana del devengo automático',
+};
+
+export type NivelAvisoDevengo = 'info' | 'alerta';
+
+export interface AvisoDevengoDto {
+  desde: string;
+  hasta: string;
+  meses: number;
+  motivo: MotivoOmisionDevengo;
+  nivel: NivelAvisoDevengo;
+  /** Casos aval × mes afectados (0 si no había avales). */
+  casos: number;
+  detalle: string;
+}
+
+/** Lo que el devengo automático sabe de cada mes recorrido. */
+export interface MesDevengoClasificable {
+  periodo: string;
+  candidatos: number;
+  contabilizados: number;
+  yaDevengados: number;
+  omitidos: readonly { codigo?: string }[];
+}
+
+const MOTIVO_POR_CODIGO: Record<string, MotivoOmisionDevengo> = {
+  FISCAL_PERIOD_CLOSED: 'periodo_cerrado',
+  FISCAL_YEAR_CLOSED: 'ejercicio_cerrado',
+};
+
+/**
+ * Motivo por el que un mes no se devengó por completo, o null si se devengó
+ * sin incidencias. Un mes con rechazos es alerta aunque devengara otros avales.
+ */
+export function motivoOmisionMes(
+  m: MesDevengoClasificable,
+): { motivo: MotivoOmisionDevengo; casos: number } | null {
+  if (m.omitidos.length > 0) {
+    const motivos = m.omitidos.map(
+      (o) => MOTIVO_POR_CODIGO[o.codigo ?? ''] ?? 'rechazado',
+    );
+    // Prioridad: ejercicio cerrado > período cerrado > otros rechazos.
+    const motivo = motivos.includes('ejercicio_cerrado')
+      ? 'ejercicio_cerrado'
+      : motivos.includes('periodo_cerrado')
+        ? 'periodo_cerrado'
+        : 'rechazado';
+    return { motivo, casos: m.omitidos.length };
+  }
+  if (m.contabilizados > 0) return null;
+  if (m.yaDevengados > 0)
+    return { motivo: 'ya_devengado', casos: m.yaDevengados };
+  return { motivo: 'sin_avales', casos: 0 };
+}
+
+const nivelDe = (m: MotivoOmisionDevengo): NivelAvisoDevengo =>
+  m === 'ya_devengado' || m === 'sin_avales' ? 'info' : 'alerta';
+
+const ACCION_AVISO: Record<MotivoOmisionDevengo, string> = {
+  ya_devengado: 'no se repite (idempotente)',
+  sin_avales: 'no había nada que devengar',
+  periodo_cerrado: 'reabre el período o devenga en el siguiente abierto',
+  ejercicio_cerrado: 'el ejercicio está cerrado: revisa el cierre',
+  rechazado: 'revisa el motivo de cada aval',
+  fuera_de_ventana: 'devéngalos a mano con POST /avales/devengos',
+};
+
+/**
+ * Avisos de una ejecución del devengo automático: clasifica cada mes
+ * recorrido (en orden) y los meses anteriores a la ventana con avales sin
+ * devengar, y agrupa meses consecutivos con el mismo motivo en un rango.
+ * Determinista: depende solo de la entrada.
+ */
+export function avisosDevengoAutomatico(
+  meses: readonly MesDevengoClasificable[],
+  fueraDeVentana: readonly { periodo: string; pendientes: number }[] = [],
+): AvisoDevengoDto[] {
+  const items: {
+    periodo: string;
+    motivo: MotivoOmisionDevengo;
+    casos: number;
+  }[] = [];
+  for (const f of fueraDeVentana) {
+    if (f.pendientes > 0) {
+      items.push({
+        periodo: f.periodo,
+        motivo: 'fuera_de_ventana',
+        casos: f.pendientes,
+      });
+    }
+  }
+  for (const m of meses) {
+    const r = motivoOmisionMes(m);
+    if (r) items.push({ periodo: m.periodo, ...r });
+  }
+  items.sort((a, b) =>
+    a.periodo < b.periodo ? -1 : a.periodo > b.periodo ? 1 : 0,
+  );
+  const avisos: AvisoDevengoDto[] = [];
+  for (const it of items) {
+    const ult = avisos[avisos.length - 1];
+    if (
+      ult &&
+      ult.motivo === it.motivo &&
+      mesSiguiente(ult.hasta) === it.periodo
+    ) {
+      ult.hasta = it.periodo;
+      ult.meses += 1;
+      ult.casos += it.casos;
+    } else {
+      avisos.push({
+        desde: it.periodo,
+        hasta: it.periodo,
+        meses: 1,
+        motivo: it.motivo,
+        nivel: nivelDe(it.motivo),
+        casos: it.casos,
+        detalle: '',
+      });
+    }
+  }
+  for (const a of avisos) {
+    const rango = a.meses === 1 ? a.desde : `${a.desde} a ${a.hasta}`;
+    const casos = a.casos > 0 ? ` (${a.casos} aval·mes)` : '';
+    a.detalle = `${rango}: ${MOTIVO_OMISION_DEVENGO_LABELS[a.motivo]}${casos}; ${ACCION_AVISO[a.motivo]}.`;
+  }
+  return avisos;
+}
+
+function mesSiguiente(periodo: string): string {
+  const [y, m] = periodo.split('-').map(Number);
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+}
+
+/** Lote de una ejecución del devengo automático (endpoint o tarea programada). */
+export interface LoteDevengoDto {
+  id: string;
+  disparo: DisparoDevengo;
+  fechaReferencia: string;
+  desde: string | null;
+  hasta: string;
+  contabilizados: number;
+  importe: number;
+  avisos: AvisoDevengoDto[];
+  alertas: number;
+  ejecutadoEn: string;
 }
 
 export const avalesQuerySchema = z.object({

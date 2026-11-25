@@ -46,6 +46,12 @@ export class DevengoSchedulerService {
             ),
         );
         total += r.contabilizados;
+        // Las omisiones que piden acción quedan en el lote (auditado) y en el log.
+        for (const a of r.avisos.filter((x) => x.nivel === 'alerta')) {
+          this.logger.warn(
+            `Devengo automático de avales, empresa ${e.id}: ${a.detalle}`,
+          );
+        }
       } catch (err) {
         this.logger.error(
           `Devengo automático de avales fallido en la empresa ${e.id}: ${String(err)}`,

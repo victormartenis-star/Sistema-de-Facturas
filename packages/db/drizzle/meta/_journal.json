@@ -456,6 +456,13 @@
       "when": 1795631215560,
       "tag": "0064_memoria_conciliacion_tasas",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1795644345281,
+      "tag": "0065_avisos_devengo_retenciones",
+      "breakpoints": true
     }
   ]
 }

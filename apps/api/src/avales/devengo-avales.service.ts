@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, ne, sql, SQL } from 'drizzle-orm';
 import {
+  bankGuaranteeAccrualBatches,
   bankGuaranteeAccrualRuns,
   bankGuaranteeAccruals,
   bankGuaranteeMovements,
@@ -15,12 +16,14 @@ import {
   bankGuarantees,
   type BankGuarantee,
   type BankGuaranteeAccrual,
+  type BankGuaranteeAccrualBatch,
   type BankGuaranteeAccrualRun,
   type Tx,
 } from '@erp/db';
 import {
   ESTADOS_AVAL_VIVOS,
   asientoDevengoComision,
+  avisosDevengoAutomatico,
   centsToNumeric,
   devengoAnularSchema,
   devengoAutomaticoSchema,
@@ -34,7 +37,9 @@ import {
   sumCents,
   toCents,
   todayIso,
+  type AvisoDevengoDto,
   type DevengoAnularInput,
+  type LoteDevengoDto,
   type DevengoAutomaticoInput,
   type DevengoAvalDto,
   type DevengoAvalesInput,
@@ -64,6 +69,23 @@ const conTasa = sql`(${bankGuarantees.commissionRatePct} is not null or exists (
   where br.guarantee_id = ${bankGuarantees.id} and br.rate_pct is not null))`;
 /** Meses hacia atrás que recorre como máximo el devengo automático. */
 const MAX_MESES_AUTOMATICO = 24;
+/** Meses previos a la ventana que se revisan para avisar de lo saltado. */
+const MAX_MESES_REVISION = 120;
+
+function loteDto(l: BankGuaranteeAccrualBatch): LoteDevengoDto {
+  return {
+    id: l.id,
+    disparo: l.trigger as DisparoDevengo,
+    fechaReferencia: l.referenceDate,
+    desde: l.periodFrom,
+    hasta: l.periodTo,
+    contabilizados: l.postedCount,
+    importe: fromCents(toCents(l.amount)),
+    avisos: l.warnings as AvisoDevengoDto[],
+    alertas: l.alertCount,
+    ejecutadoEn: l.createdAt.toISOString(),
+  };
+}
 
 function dto(a: BankGuaranteeAccrual, referencia: string): DevengoAvalDto {
   return {
@@ -432,14 +454,17 @@ export class DevengoAvalesService {
     disparo: DisparoDevengo,
     silenciarYaDevengados: boolean,
   ): Promise<ResultadoDevengoAvalesDto> {
+    const candidatos = await this.candidatos(periodo);
     const res: ResultadoDevengoAvalesDto = {
       periodo,
       contabilizados: 0,
       importe: 0,
       omitidos: [],
+      candidatos: candidatos.length,
+      yaDevengados: 0,
     };
     const importes: bigint[] = [];
-    for (const c of await this.candidatos(periodo)) {
+    for (const c of candidatos) {
       try {
         const id = await this.dbs.db.transaction((tx) =>
           this.devengarEnTx(tx, c.id, periodo),
@@ -452,32 +477,35 @@ export class DevengoAvalesService {
         const cuerpo = e.getResponse() as
           { message?: string; code?: string } | string;
         const code = typeof cuerpo === 'string' ? '' : (cuerpo.code ?? '');
-        if (
-          silenciarYaDevengados &&
-          (code === 'BANK_GUARANTEE_ACCRUAL_ALREADY_POSTED' ||
-            code === 'BANK_GUARANTEE_ACCRUAL_NOT_APPLICABLE')
-        ) {
-          continue;
+        if (silenciarYaDevengados) {
+          // Idempotencia: lo ya devengado no se repite ni es un rechazo; lo no
+          // aplicable (sin saldo ni tasa en el mes) tampoco es una omisión.
+          if (code === 'BANK_GUARANTEE_ACCRUAL_ALREADY_POSTED') {
+            res.yaDevengados! += 1;
+            continue;
+          }
+          if (code === 'BANK_GUARANTEE_ACCRUAL_NOT_APPLICABLE') continue;
         }
         res.omitidos.push({
           avalId: c.id,
           referencia: c.referencia,
           motivo:
             typeof cuerpo === 'string' ? cuerpo : (cuerpo.message ?? e.message),
+          ...(code ? { codigo: code } : {}),
         });
       }
     }
     res.importe = fromCents(sumCents(importes));
-    await this.registrarEjecucion(res, disparo);
-    return res;
+    const ejecucionId = await this.registrarEjecucion(res, disparo);
+    return { ...res, ejecucionId };
   }
 
   private async registrarEjecucion(
     res: ResultadoDevengoAvalesDto,
     disparo: DisparoDevengo,
-  ): Promise<void> {
+  ): Promise<string> {
     const [y, m] = res.periodo.split('-').map(Number);
-    await this.dbs.db.transaction(async (tx) => {
+    return this.dbs.db.transaction(async (tx) => {
       const [run] = await tx
         .insert(bankGuaranteeAccrualRuns)
         .values({
@@ -498,7 +526,92 @@ export class DevengoAvalesService {
         action: 'create',
         newData: run,
       });
+      return run.id;
     });
+  }
+
+  /**
+   * Meses anteriores a la ventana del devengo automático en los que algún
+   * aval candidato no tiene devengo vigente: quedarían saltados en silencio.
+   * Se revisan como máximo los `MAX_MESES_REVISION` meses previos.
+   */
+  private async fueraDeVentana(
+    desde: string,
+    primeroVentana: string,
+  ): Promise<{ periodo: string; pendientes: number }[]> {
+    const previos = mesesEntre(desde, primeroVentana)
+      .filter((p) => p < primeroVentana)
+      .slice(-MAX_MESES_REVISION);
+    const out: { periodo: string; pendientes: number }[] = [];
+    for (const periodo of previos) {
+      const ids = (await this.candidatos(periodo)).map((c) => c.id);
+      if (ids.length === 0) continue;
+      const [y, m] = periodo.split('-').map(Number);
+      const hechos = await this.dbs.db
+        .select({ id: bankGuaranteeAccruals.guaranteeId })
+        .from(bankGuaranteeAccruals)
+        .where(
+          and(
+            inArray(bankGuaranteeAccruals.guaranteeId, ids),
+            eq(bankGuaranteeAccruals.year, y),
+            eq(bankGuaranteeAccruals.month, m),
+            eq(bankGuaranteeAccruals.status, 'contabilizado'),
+          ),
+        );
+      out.push({ periodo, pendientes: ids.length - hechos.length });
+    }
+    return out;
+  }
+
+  /** Guarda el lote del devengo automático, enlaza sus ejecuciones y lo audita. */
+  private async registrarLote(
+    res: ResultadoDevengoAutomaticoDto,
+    referencia: string,
+    disparo: DisparoDevengo,
+    ejecuciones: string[],
+  ): Promise<string> {
+    return this.dbs.db.transaction(async (tx) => {
+      const [lote] = await tx
+        .insert(bankGuaranteeAccrualBatches)
+        .values({
+          companyId: this.dbs.getCompanyId(),
+          trigger: disparo,
+          referenceDate: referencia,
+          periodFrom: res.desde,
+          periodTo: res.hasta,
+          postedCount: res.contabilizados,
+          amount: centsToNumeric(toCents(res.importe)),
+          warnings: res.avisos,
+          alertCount: res.alertas,
+          createdBy: usuarioPersistible(),
+        })
+        .returning();
+      if (ejecuciones.length > 0) {
+        await tx
+          .update(bankGuaranteeAccrualRuns)
+          .set({ batchId: lote.id })
+          .where(inArray(bankGuaranteeAccrualRuns.id, ejecuciones));
+      }
+      await this.audit.registrar(tx, {
+        entityType: 'bank_guarantee_accrual_batch',
+        entityId: lote.id,
+        action: 'create',
+        newData: lote,
+        meta: { ejecuciones: ejecuciones.length, alertas: res.alertas },
+      });
+      return lote.id;
+    });
+  }
+
+  /** Lotes del devengo automático (manuales y programados), con sus avisos. */
+  async lotes(): Promise<LoteDevengoDto[]> {
+    const filas = await this.dbs.db
+      .select()
+      .from(bankGuaranteeAccrualBatches)
+      .where(eq(bankGuaranteeAccrualBatches.companyId, this.dbs.getCompanyId()))
+      .orderBy(desc(bankGuaranteeAccrualBatches.createdAt))
+      .limit(24);
+    return filas.map(loteDto);
   }
 
   /**
@@ -524,7 +637,10 @@ export class DevengoAvalesService {
    * Devengo automático: todos los meses terminados hasta `hasta` (por
    * defecto, el anterior al actual) desde el primero en que algún aval pudo
    * devengar (máximo 24 meses). Idempotente: los meses ya devengados no se
-   * repiten ni se informan; sí los rechazados de verdad (período cerrado).
+   * repiten. Cada mes no devengado del todo se explica en `avisos` (ya
+   * devengado o sin avales: info; período o ejercicio cerrado, rechazo o mes
+   * anterior a la ventana con avales sin devengar: alerta). La ejecución se
+   * guarda como lote auditado, también la de la tarea programada.
    */
   async automatico(
     input: DevengoAutomaticoInput,
@@ -551,20 +667,39 @@ export class DevengoAvalesService {
       periodos: [],
       contabilizados: 0,
       importe: 0,
+      loteId: null,
+      avisos: [],
+      alertas: 0,
     };
+    // Sin avales con tasa no hay nada que devengar ni lote que guardar.
     if (!primero?.desde) return res;
-    const meses = mesesEntre(primero.desde.slice(0, 7), hasta).slice(
-      -MAX_MESES_AUTOMATICO,
-    );
+    const todos = mesesEntre(primero.desde.slice(0, 7), hasta);
+    const meses = todos.slice(-MAX_MESES_AUTOMATICO);
     res.desde = meses[0] ?? null;
     const importes: bigint[] = [];
+    const ejecuciones: string[] = [];
     for (const periodo of meses) {
       const r = await this.devengarMes(periodo, disparo, true);
+      ejecuciones.push(r.ejecucionId!);
       res.periodos.push(r);
       res.contabilizados += r.contabilizados;
       importes.push(toCents(r.importe));
     }
     res.importe = fromCents(sumCents(importes));
+    res.avisos = avisosDevengoAutomatico(
+      res.periodos.map((p) => ({
+        periodo: p.periodo,
+        candidatos: p.candidatos ?? 0,
+        contabilizados: p.contabilizados,
+        yaDevengados: p.yaDevengados ?? 0,
+        omitidos: p.omitidos,
+      })),
+      todos.length > meses.length && res.desde
+        ? await this.fueraDeVentana(todos[0], res.desde)
+        : [],
+    );
+    res.alertas = res.avisos.filter((a) => a.nivel === 'alerta').length;
+    res.loteId = await this.registrarLote(res, ref, disparo, ejecuciones);
     return res;
   }
 

@@ -21,6 +21,8 @@ import type {
 import type { Transiciones } from './maquina-estados';
 import {
   FORMATOS_EXPORTACION_CUENTAS,
+  type EstadoCierreCuentas,
+  type IdentificacionCuentas,
   type MemoriaAbreviada,
 } from './memoria-abreviada';
 
@@ -134,6 +136,10 @@ export interface CuentasAnualesDto extends CuentasAnualesCalculo {
   efe: EstadoFlujosEfectivo;
   /** Memoria abreviada con indicadores y comprobaciones de coherencia. */
   memoria: MemoriaAbreviada;
+  /** Identificación estatutaria (entidad, NIF, ejercicio, marco, formato). */
+  identificacion: IdentificacionCuentas;
+  /** Estado del cierre y conciliación auxiliar ↔ mayor al 31-12. */
+  cierre: EstadoCierreCuentas;
 }
 
 export const exportacionCuentasQuerySchema = z.object({

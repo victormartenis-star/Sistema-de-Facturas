@@ -5345,6 +5345,8 @@ export const bankGuaranteeAccrualRuns = pgTable(
       .default('0'),
     skippedCount: integer('skipped_count').notNull().default(0),
     skipped: jsonb('skipped').notNull().default([]),
+    /** Lote del devengo automático al que pertenece (null: devengo manual de un mes). */
+    batchId: uuid('batch_id').references(() => bankGuaranteeAccrualBatches.id),
     createdBy: uuid('created_by').references(() => users.id),
     version: integer('version').notNull().default(1),
     createdAt: timestamp('created_at', { withTimezone: true })
@@ -5357,6 +5359,7 @@ export const bankGuaranteeAccrualRuns = pgTable(
       t.year,
       t.month,
     ),
+    index('bank_guarantee_accrual_runs_batch_idx').on(t.batchId),
     check(
       'bank_guarantee_accrual_runs_valores',
       sql`${t.month} BETWEEN 1 AND 12 AND ${t.trigger} IN ('manual', 'automatico')
@@ -5367,6 +5370,51 @@ export const bankGuaranteeAccrualRuns = pgTable(
 
 export type BankGuaranteeAccrualRun =
   typeof bankGuaranteeAccrualRuns.$inferSelect;
+
+/**
+ * Lotes del devengo automático de comisiones de aval (endpoint o tarea
+ * programada): rango recorrido, fecha de referencia, totales y avisos de los
+ * meses omitidos o saltados (motivo, nivel, casos). Evidencia auditada para
+ * que las omisiones de la tarea programada lleguen a la UI y al MCP.
+ */
+export const bankGuaranteeAccrualBatches = pgTable(
+  'bank_guarantee_accrual_batches',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    trigger: varchar('trigger', { length: 20 }).notNull(),
+    referenceDate: date('reference_date').notNull(),
+    periodFrom: varchar('period_from', { length: 7 }),
+    periodTo: varchar('period_to', { length: 7 }).notNull(),
+    postedCount: integer('posted_count').notNull().default(0),
+    amount: numeric('amount', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    warnings: jsonb('warnings').notNull().default([]),
+    alertCount: integer('alert_count').notNull().default(0),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('bank_guarantee_accrual_batches_company_created_idx').on(
+      t.companyId,
+      t.createdAt,
+    ),
+    check(
+      'bank_guarantee_accrual_batches_valores',
+      sql`${t.trigger} IN ('manual', 'automatico')
+        AND ${t.postedCount} >= 0 AND ${t.alertCount} >= 0`,
+    ),
+  ],
+);
+
+export type BankGuaranteeAccrualBatch =
+  typeof bankGuaranteeAccrualBatches.$inferSelect;
 
 /**
  * Conciliaciones de cierre auxiliar ↔ mayor guardadas (evidencia del cierre):

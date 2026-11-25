@@ -24,8 +24,11 @@ import {
   cuentasAnuales,
   cuentasAnualesACsv,
   cuentasAnualesAJson,
+  identificacionCuentas,
   memoriaAbreviada,
   movimientoMasa,
+  todayIso,
+  type EstadoCierreCuentas,
   type FormatoExportacionCuentas,
   diferenciasAuditoria,
   estadoCambiosPatrimonioNeto,
@@ -49,6 +52,7 @@ import { cambiarEstado } from '../common/cambiar-estado';
 import { getRequestContext } from '../common/request-context';
 import { verificarVersion } from '../common/version';
 import { DbService } from '../db/db.service';
+import { ConciliacionCierreService } from './conciliacion-cierre.service';
 import {
   ContabilidadService,
   claveBloqueoEjercicio,
@@ -93,6 +97,7 @@ export class AplicacionResultadoService {
     private readonly dbs: DbService,
     private readonly audit: AuditService,
     private readonly contabilidad: ContabilidadService,
+    private readonly conciliacion: ConciliacionCierreService,
   ) {}
 
   private async cierreVigente(
@@ -473,8 +478,9 @@ export class AplicacionResultadoService {
     const capital = anuales.balance.patrimonioNeto.cuentas
       .filter((c) => c.cuenta.startsWith('10'))
       .reduce((t, c) => t + toCents(c.importe), 0n);
+    const empresa = await this.datosEmpresa(companyId);
     const memoria = memoriaAbreviada({
-      empresa: await this.nombreEmpresa(companyId),
+      empresa: empresa.nombre,
       ejercicio,
       cuentas: anuales,
       ecpn,
@@ -512,15 +518,53 @@ export class AplicacionResultadoService {
       },
       efe,
       memoria,
+      identificacion: identificacionCuentas({
+        empresa: empresa.nombre,
+        nif: empresa.nif,
+        ejercicio,
+      }),
+      cierre: await this.estadoCierre(ejercicio, !!cierre, !!aplicacionDto),
     };
   }
 
-  private async nombreEmpresa(companyId: string): Promise<string> {
+  /**
+   * Estado del cierre y evidencia de conciliación auxiliar ↔ mayor al 31-12
+   * (o a hoy, si el ejercicio no ha terminado; null si aún no ha empezado).
+   */
+  private async estadoCierre(
+    ejercicio: number,
+    cerrado: boolean,
+    resultadoAplicado: boolean,
+  ): Promise<EstadoCierreCuentas> {
+    const hoy = todayIso();
+    const fecha = `${ejercicio}-12-31` < hoy ? `${ejercicio}-12-31` : hoy;
+    const conciliacion =
+      fecha < `${ejercicio}-01-01`
+        ? null
+        : await this.conciliacion.consultar(fecha);
+    return {
+      cerrado,
+      resultadoAplicado,
+      conciliacion: conciliacion && {
+        fecha: conciliacion.fecha,
+        cuadra: conciliacion.cuadra,
+        descuadres: conciliacion.descuadres,
+        partidas: conciliacion.partidas.map((p) => ({
+          clave: p.clave,
+          diferencia: p.diferencia,
+        })),
+      },
+    };
+  }
+
+  private async datosEmpresa(
+    companyId: string,
+  ): Promise<{ nombre: string; nif: string | null }> {
     const [c] = await this.dbs.db
-      .select({ nombre: companies.name })
+      .select({ nombre: companies.name, nif: companies.taxId })
       .from(companies)
       .where(eq(companies.id, companyId));
-    return c?.nombre ?? 'La sociedad';
+    return { nombre: c?.nombre ?? 'La sociedad', nif: c?.nif || null };
   }
 
   /**
