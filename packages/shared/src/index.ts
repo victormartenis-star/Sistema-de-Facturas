@@ -72,4 +72,5 @@ export * from './lotes';
 export * from './compras';
 export * from './talones';
 export * from './project-system';
+export * from './banca';
 export * from './consolidacion';

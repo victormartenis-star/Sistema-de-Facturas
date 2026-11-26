@@ -30,6 +30,12 @@ export const contactCreateSchema = z.object({
   email: z.string().trim().email('Email no válido').max(200).nullish(),
   phone: z.string().trim().max(30).nullish(),
   iban: normalizedId(34).nullish(),
+  /** Mandato SEPA (adeudos directos CORE): referencia y fecha de firma. */
+  sepaMandateRef: z.string().trim().max(35).nullish(),
+  sepaMandateDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha AAAA-MM-DD')
+    .nullish(),
   paymentTermsDays: z
     .number({ invalid_type_error: 'Debe ser un número' })
     .int('Debe ser un número entero')
@@ -53,6 +59,8 @@ export interface ContactDto {
   email: string | null;
   phone: string | null;
   iban: string | null;
+  sepaMandateRef?: string | null;
+  sepaMandateDate?: string | null;
   paymentTermsDays: number;
   defaultCategoryId: string | null;
   createdAt: string;

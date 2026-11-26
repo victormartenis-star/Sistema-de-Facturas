@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { daysBetween } from './calculo';
+import type { TipoConciliacion } from './banca';
 
 /**
  * Conciliación bancaria (Fase 14): importar un extracto (CSV genérico o
@@ -26,12 +27,24 @@ export interface BankTransactionDto extends ParsedBankTransaction {
   reconciledMilestoneId: string | null;
   reconciledAt: string | null;
   createdAt: string;
+  /** Con qué se concilió (null: pendiente). Fase 5, 0069. */
+  reconciliationKind?: TipoConciliacion | null;
+  reconciledSettlementId?: string | null;
+  reconciledRemittanceId?: string | null;
+  reconciledRemittanceItemId?: string | null;
+  reconciledCheckId?: string | null;
+  /** Comisión bancaria contabilizada al conciliar (6260 a 5720). */
+  feeAmount?: number;
+  statementId?: string | null;
+  version?: number;
 }
 
 export interface BankImportSummaryDto {
   total: number;
   imported: number;
   duplicates: number;
+  /** Extracto importado (o el mismo fichero ya importado). */
+  statementId?: string;
 }
 
 export const reconcileTransactionSchema = z.object({

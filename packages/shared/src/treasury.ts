@@ -237,6 +237,8 @@ export const bankAccountCreateSchema = z.object({
   name: z.string().trim().min(1, 'El nombre es obligatorio').max(200),
   kind: z.enum(BANK_ACCOUNT_KINDS).default('banco'),
   iban: z.string().trim().max(34).nullish(),
+  /** BIC del banco (opcional en SEPA: sin él, NOTPROVIDED). */
+  bic: z.string().trim().max(11).nullish(),
   currentBalance: z
     .number({ invalid_type_error: 'Debe ser un número' })
     .max(999_999_999_999.99)
@@ -254,6 +256,7 @@ export interface BankAccountDto {
   name: string;
   kind: BankAccountKind;
   iban: string | null;
+  bic?: string | null;
   currentBalance: number;
   isActive: boolean;
   createdAt: string;

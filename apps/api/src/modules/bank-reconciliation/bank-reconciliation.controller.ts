@@ -16,9 +16,15 @@ import {
   BANK_STATEMENT_FORMATS,
   BankStatementFormat,
   ReconcileTransactionInput,
+  conciliacionSchema,
+  desconciliacionSchema,
   reconcileTransactionSchema,
+  type ConciliacionInput,
+  type DesconciliacionInput,
 } from '@erp/shared';
 import { Roles } from '../../auth/roles';
+import { Idempotente } from '../../common/idempotencia/idempotente.decorator';
+import { VersionEsperada } from '../../common/version';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe';
 import { BankReconciliationService } from './bank-reconciliation.service';
 
@@ -85,5 +91,43 @@ export class BankReconciliationController {
   @HttpCode(204)
   async unreconcile(@Param('id', ParseUUIDPipe) id: string) {
     await this.service.unreconcile(id);
+  }
+
+  /* ───── Conciliación asistida (fase 5, 0069) ───── */
+
+  /** Sugerencias puntuadas contra vencimientos, liquidaciones, remesas, devoluciones y talones. */
+  @Get('asistida/sugerencias')
+  sugerencias(@Query('bankAccountId', ParseUUIDPipe) bankAccountId: string) {
+    return this.service.sugerencias(bankAccountId);
+  }
+
+  @Get('transacciones/:id')
+  movimiento(@Param('id', ParseUUIDPipe) id: string) {
+    return this.service.movimiento(id);
+  }
+
+  @Post('transacciones/:id/conciliacion')
+  @Roles('admin', 'gerente', 'administracion')
+  @Idempotente()
+  @HttpCode(200)
+  conciliar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(conciliacionSchema)) body: ConciliacionInput,
+    @VersionEsperada() version: number | undefined,
+  ) {
+    return this.service.conciliar(id, body, version);
+  }
+
+  @Post('transacciones/:id/desconciliacion')
+  @Roles('admin', 'gerente', 'administracion')
+  @Idempotente()
+  @HttpCode(200)
+  desconciliar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(desconciliacionSchema))
+    body: DesconciliacionInput,
+    @VersionEsperada() version: number | undefined,
+  ) {
+    return this.service.desconciliar(id, body, version);
   }
 }

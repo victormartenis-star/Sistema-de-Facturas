@@ -98,6 +98,7 @@ function bankAccountToDto(row: BankAccount): BankAccountDto {
     name: row.name,
     kind: row.kind as BankAccountDto['kind'],
     iban: row.iban,
+    bic: row.bic,
     currentBalance: Number(row.currentBalance),
     isActive: row.isActive,
     createdAt: row.createdAt.toISOString(),
@@ -177,6 +178,7 @@ export class TreasuryService {
           name: data.name,
           kind: data.kind,
           iban: data.iban ?? null,
+          bic: data.bic ? data.bic.toUpperCase() : null,
           currentBalance: data.currentBalance.toFixed(2),
           isActive: data.isActive,
         })
@@ -205,6 +207,9 @@ export class TreasuryService {
           ...(data.name !== undefined && { name: data.name }),
           ...(data.kind !== undefined && { kind: data.kind }),
           ...(data.iban !== undefined && { iban: data.iban ?? null }),
+          ...(data.bic !== undefined && {
+            bic: data.bic ? data.bic.toUpperCase() : null,
+          }),
           ...(data.currentBalance !== undefined && {
             currentBalance: data.currentBalance.toFixed(2),
           }),

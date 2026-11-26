@@ -8,5 +8,6 @@ import { TalonesService } from './talones.service';
   imports: [ContabilidadModule],
   controllers: [TalonesController],
   providers: [TalonesService],
+  exports: [TalonesService],
 })
 export class TalonesModule {}

@@ -61,6 +61,7 @@ export const ORIGENES_ASIENTO = [
   'aplicacion_resultado',
   'anticipo',
   'talon',
+  'conciliacion',
 ] as const;
 export type OrigenAsiento = (typeof ORIGENES_ASIENTO)[number];
 
@@ -86,6 +87,7 @@ export const ORIGEN_ASIENTO_LABELS: Record<OrigenAsiento, string> = {
   aplicacion_resultado: 'Aplicación del resultado',
   anticipo: 'Anticipo de cliente o a proveedor',
   talon: 'Compensación de talón',
+  conciliacion: 'Comisión bancaria (conciliación)',
 };
 
 export const ESTADOS_ASIENTO = ['contabilizado', 'anulado'] as const;

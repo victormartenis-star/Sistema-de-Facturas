@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
-import { TreasuryModule } from '../../treasury/treasury.module';
+import { ContabilidadModule } from '../../contabilidad/contabilidad.module';
+import { TalonesModule } from '../../talones/talones.module';
 import { BankReconciliationController } from './bank-reconciliation.controller';
 import { BankReconciliationService } from './bank-reconciliation.service';
 
 @Module({
-  imports: [TreasuryModule],
+  imports: [ContabilidadModule, TalonesModule],
   controllers: [BankReconciliationController],
   providers: [BankReconciliationService],
 })

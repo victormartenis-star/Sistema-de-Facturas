@@ -50,6 +50,8 @@ export const RECURSOS_UI = [
   'talon',
   /** Liberación y sustitución de retenciones, modificados de contrato: admin, gerente y administración. */
   'retencion',
+  /** Remesas SEPA y conciliación bancaria: admin, gerente y administración. */
+  'banca',
 ] as const;
 export type RecursoUi = (typeof RECURSOS_UI)[number];
 
@@ -80,7 +82,8 @@ export function can(
     recurso === 'cartera' ||
     recurso === 'compra' ||
     recurso === 'talon' ||
-    recurso === 'retencion';
+    recurso === 'retencion' ||
+    recurso === 'banca';
   if (restringida) return ROLES_RECTIFICAR.includes(rol);
   return true;
 }

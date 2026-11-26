@@ -88,7 +88,11 @@ describe('Bank Reconciliation (integración) — importación y conciliación as
         contentType: 'text/csv',
       })
       .expect(201);
-    expect(importRes.body).toEqual({ total: 1, imported: 1, duplicates: 0 });
+    expect(importRes.body).toMatchObject({
+      total: 1,
+      imported: 1,
+      duplicates: 0,
+    });
 
     const list = (
       await authed(app, admin.accessToken)
@@ -156,9 +160,11 @@ describe('Bank Reconciliation (integración) — importación y conciliación as
         .expect(201);
 
     const first = await attachAndImport();
-    expect(first.body).toEqual({ total: 1, imported: 1, duplicates: 0 });
+    expect(first.body).toMatchObject({ total: 1, imported: 1, duplicates: 0 });
     const second = await attachAndImport();
-    expect(second.body).toEqual({ total: 1, imported: 0, duplicates: 1 });
+    expect(second.body).toMatchObject({ total: 1, imported: 0, duplicates: 1 });
+    // El mismo fichero es el mismo extracto (huella SHA-256, 0069).
+    expect(second.body.statementId).toBe(first.body.statementId);
 
     const list = (
       await authed(app, admin.accessToken)

@@ -65,6 +65,8 @@ export interface DatosLiquidacion {
   };
   /** Talón con que se paga o cobra (se anula solo desde el talón). */
   talonId?: string;
+  /** Partida de remesa SEPA (se devuelve solo desde la remesa). */
+  remesaPartidaId?: string;
 }
 
 function liquidacionBloqueada(): ConflictException {
@@ -277,6 +279,7 @@ export async function registrarLiquidacion(
       advanceId: datos.noMonetaria?.anticipoId ?? null,
       nettingId: datos.noMonetaria?.compensacionId ?? null,
       checkId: datos.talonId ?? null,
+      remittanceItemId: datos.remesaPartidaId ?? null,
       createdBy: ctx.userId,
     })
     .returning();
@@ -373,6 +376,13 @@ export async function anularLiquidacion(
       code: 'CHECK_SETTLEMENT_LOCKED',
       message:
         'La liquidación se hizo con un talón: anúlalo, detenlo o devuélvelo desde Talones',
+    });
+  }
+  if (actual.remittanceItemId && !desdeDocumento) {
+    throw new ConflictException({
+      code: 'SEPA_SETTLEMENT_LOCKED',
+      message:
+        'La liquidación es de una remesa SEPA: registra la devolución de la partida desde Remesas',
     });
   }
   const { factura, vencimiento } = await bloquearVencimiento(

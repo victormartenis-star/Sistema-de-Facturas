@@ -495,8 +495,22 @@ export class TalonesService {
     version: number | undefined,
   ): Promise<TalonDto> {
     const d = talonAccionSchema.parse(input);
+    await this.dbs.db.transaction((tx) => this.accionEnTx(tx, id, d, version));
+    return this.talon(id);
+  }
+
+  /**
+   * La acción dentro de la transacción del llamador (la conciliación
+   * bancaria compensa el talón con el movimiento del extracto).
+   */
+  async accionEnTx(
+    tx: Tx,
+    id: string,
+    d: { accion: TalonAccionInput['accion']; fecha: string; motivo?: string },
+    version: number | undefined,
+  ): Promise<void> {
     const companyId = this.dbs.getCompanyId();
-    await this.dbs.db.transaction(async (tx) => {
+    {
       const [c] = await tx
         .select()
         .from(checks)
@@ -619,7 +633,6 @@ export class TalonesService {
         ),
         meta: { accion: d.accion, fecha: d.fecha, motivo: d.motivo ?? null },
       });
-    });
-    return this.talon(id);
+    }
   }
 }

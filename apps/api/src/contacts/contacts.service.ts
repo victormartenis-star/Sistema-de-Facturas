@@ -40,6 +40,8 @@ function toDto(row: Contact): ContactDto {
     email: row.email,
     phone: row.phone,
     iban: row.iban,
+    sepaMandateRef: row.sepaMandateRef,
+    sepaMandateDate: row.sepaMandateDate,
     paymentTermsDays: row.paymentTermsDays,
     defaultCategoryId: row.defaultCategoryId,
     createdAt: row.createdAt.toISOString(),
@@ -103,6 +105,8 @@ export class ContactsService {
           email: data.email ?? null,
           phone: data.phone ?? null,
           iban: data.iban || null,
+          sepaMandateRef: data.sepaMandateRef || null,
+          sepaMandateDate: data.sepaMandateDate || null,
           paymentTermsDays: data.paymentTermsDays,
           defaultCategoryId: data.defaultCategoryId ?? null,
         })
@@ -137,6 +141,12 @@ export class ContactsService {
             ...(data.email !== undefined && { email: data.email ?? null }),
             ...(data.phone !== undefined && { phone: data.phone ?? null }),
             ...(data.iban !== undefined && { iban: data.iban || null }),
+            ...(data.sepaMandateRef !== undefined && {
+              sepaMandateRef: data.sepaMandateRef || null,
+            }),
+            ...(data.sepaMandateDate !== undefined && {
+              sepaMandateDate: data.sepaMandateDate || null,
+            }),
             ...(data.paymentTermsDays !== undefined && {
               paymentTermsDays: data.paymentTermsDays,
             }),

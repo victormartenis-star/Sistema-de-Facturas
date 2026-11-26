@@ -128,6 +128,9 @@ export const contacts = pgTable(
     taxId: text('tax_id'),
     address: jsonb('address'),
     iban: text('iban'),
+    /** Mandato SEPA de adeudos directos CORE (0069). */
+    sepaMandateRef: varchar('sepa_mandate_ref', { length: 35 }),
+    sepaMandateDate: date('sepa_mandate_date'),
     email: text('email'),
     phone: text('phone'),
     paymentTermsDays: integer('payment_terms_days').notNull().default(30),
@@ -2995,6 +2998,8 @@ export const bankAccounts = pgTable('bank_accounts', {
   name: text('name').notNull(),
   kind: bankAccountKindEnum('kind').notNull().default('banco'),
   iban: text('iban'),
+  /** BIC del banco para los ficheros SEPA (0069). */
+  bic: varchar('bic', { length: 11 }),
   currentBalance: numeric('current_balance', { precision: 14, scale: 2 })
     .notNull()
     .default('0'),
@@ -3524,6 +3529,36 @@ export const bankTransactions = pgTable(
       () => paymentMilestones.id,
     ),
     reconciledAt: timestamp('reconciled_at', { withTimezone: true }),
+    /** Extracto del que procede (0069). */
+    statementId: uuid('statement_id').references(
+      (): AnyPgColumn => bankStatements.id,
+    ),
+    /**
+     * Con qué se concilió (0069): vencimiento, liquidacion, remesa,
+     * devolucion, talon o comision. Null = pendiente.
+     */
+    reconciliationKind: varchar('reconciliation_kind', { length: 20 }),
+    reconciledSettlementId: uuid('reconciled_settlement_id').references(
+      (): AnyPgColumn => paymentSettlements.id,
+    ),
+    reconciledRemittanceId: uuid('reconciled_remittance_id').references(
+      (): AnyPgColumn => sepaRemittances.id,
+    ),
+    reconciledRemittanceItemId: uuid(
+      'reconciled_remittance_item_id',
+    ).references((): AnyPgColumn => sepaRemittanceItems.id),
+    reconciledCheckId: uuid('reconciled_check_id').references(
+      (): AnyPgColumn => checks.id,
+    ),
+    /** Comisión bancaria contabilizada al conciliar (6260 a 5720). */
+    feeAmount: numeric('fee_amount', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    feeEntryId: uuid('fee_entry_id').references(
+      (): AnyPgColumn => journalEntries.id,
+    ),
+    reconciledBy: uuid('reconciled_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -3535,6 +3570,28 @@ export const bankTransactions = pgTable(
       t.transactionDate,
       t.amount,
       t.concept,
+    ),
+    index('bank_transactions_company_account_kind_idx').on(
+      t.companyId,
+      t.bankAccountId,
+      t.reconciliationKind,
+    ),
+    // Un documento se concilia con un solo movimiento: sin duplicidades.
+    uniqueIndex('bank_transactions_settlement_unique')
+      .on(t.reconciledSettlementId)
+      .where(sql`${t.reconciledSettlementId} IS NOT NULL`),
+    uniqueIndex('bank_transactions_remittance_unique')
+      .on(t.reconciledRemittanceId)
+      .where(sql`${t.reconciledRemittanceId} IS NOT NULL`),
+    uniqueIndex('bank_transactions_remittance_item_unique')
+      .on(t.reconciledRemittanceItemId)
+      .where(sql`${t.reconciledRemittanceItemId} IS NOT NULL`),
+    uniqueIndex('bank_transactions_check_unique')
+      .on(t.reconciledCheckId)
+      .where(sql`${t.reconciledCheckId} IS NOT NULL`),
+    check(
+      'bank_transactions_conciliacion',
+      sql`${t.feeAmount} >= 0 AND (${t.reconciliationKind} IS NULL OR ${t.reconciliationKind} IN ('vencimiento', 'liquidacion', 'remesa', 'devolucion', 'talon', 'comision'))`,
     ),
   ],
 );
@@ -3676,6 +3733,7 @@ export const journalEntrySourceEnum = pgEnum('journal_entry_source', [
   'aplicacion_resultado',
   'anticipo',
   'talon',
+  'conciliacion',
 ]);
 
 export const journalEntryStatusEnum = pgEnum('journal_entry_status', [
@@ -3840,6 +3898,10 @@ export const paymentSettlements = pgTable(
     nettingId: uuid('netting_id').references(() => thirdPartyNettings.id),
     /** Talón con que se paga o cobra (contrapartida 5729 hasta su compensación, 0068). */
     checkId: uuid('check_id').references(() => checks.id),
+    /** Partida de remesa SEPA con que se paga o cobra (0069): se devuelve desde la remesa. */
+    remittanceItemId: uuid('remittance_item_id').references(
+      (): AnyPgColumn => sepaRemittanceItems.id,
+    ),
     reversalReason: varchar('reversal_reason', { length: 240 }),
     reversedAt: timestamp('reversed_at', { withTimezone: true }),
     reversedBy: uuid('reversed_by').references(() => users.id),
@@ -6298,3 +6360,175 @@ export const subcontractChanges = pgTable(
     ),
   ],
 );
+
+/* ───────────── Fase 5: Bank Accounting (remesas SEPA y extractos, 0069) ───────────── */
+
+export const sepaRemittanceTypeEnum = pgEnum('sepa_remittance_type', [
+  'transferencia',
+  'adeudo',
+]);
+
+export const sepaRemittanceStatusEnum = pgEnum('sepa_remittance_status', [
+  'borrador',
+  'generada',
+  'remitida',
+  'devuelta',
+  'anulada',
+]);
+
+/**
+ * Remesa SEPA: transferencias (pain.001) o adeudos directos CORE (pain.008)
+ * de una cuenta bancaria. El XML se guarda al generarse (con su hash) para
+ * descargarlo idéntico; al remitirse liquida los vencimientos de sus partidas.
+ */
+export const sepaRemittances = pgTable(
+  'sepa_remittances',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    number: varchar('number', { length: 35 }).notNull(),
+    type: sepaRemittanceTypeEnum('type').notNull(),
+    bankAccountId: uuid('bank_account_id')
+      .notNull()
+      .references(() => bankAccounts.id),
+    executionDate: date('execution_date').notNull(),
+    memo: varchar('memo', { length: 100 }),
+    totalAmount: numeric('total_amount', { precision: 14, scale: 2 }).notNull(),
+    itemCount: integer('item_count').notNull(),
+    status: sepaRemittanceStatusEnum('status').notNull().default('borrador'),
+    xml: text('xml'),
+    xmlHash: varchar('xml_hash', { length: 64 }),
+    generatedAt: timestamp('generated_at', { withTimezone: true }),
+    sentOn: date('sent_on'),
+    reason: varchar('reason', { length: 240 }),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('sepa_remittances_company_number_unique').on(
+      t.companyId,
+      t.number,
+    ),
+    index('sepa_remittances_company_status_idx').on(t.companyId, t.status),
+    index('sepa_remittances_company_account_idx').on(
+      t.companyId,
+      t.bankAccountId,
+    ),
+    check(
+      'sepa_remittances_valores',
+      sql`${t.totalAmount} > 0 AND ${t.itemCount} > 0 AND (${t.status} = 'borrador' OR ${t.status} = 'anulada' OR ${t.xmlHash} IS NOT NULL) AND (${t.status} <> 'anulada' OR ${t.reason} IS NOT NULL)`,
+    ),
+  ],
+);
+
+/** Partida de la remesa: un vencimiento por su saldo vivo, con los datos SEPA congelados. */
+export const sepaRemittanceItems = pgTable(
+  'sepa_remittance_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    remittanceId: uuid('remittance_id')
+      .notNull()
+      .references(() => sepaRemittances.id),
+    position: integer('position').notNull(),
+    milestoneId: uuid('milestone_id')
+      .notNull()
+      .references(() => paymentMilestones.id),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    endToEndId: varchar('end_to_end_id', { length: 35 }).notNull(),
+    name: varchar('name', { length: 200 }).notNull(),
+    iban: varchar('iban', { length: 34 }),
+    mandateRef: varchar('mandate_ref', { length: 35 }),
+    mandateDate: date('mandate_date'),
+    sequenceType: varchar('sequence_type', { length: 4 }),
+    remittanceInfo: varchar('remittance_info', { length: 140 }).notNull(),
+    /** incluida · devuelta (por el banco) · excluida (remesa anulada). */
+    status: varchar('status', { length: 10 }).notNull().default('incluida'),
+    settlementId: uuid('settlement_id').references(
+      (): AnyPgColumn => paymentSettlements.id,
+    ),
+    returnedOn: date('returned_on'),
+    returnReason: varchar('return_reason', { length: 240 }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('sepa_remittance_items_position_unique').on(
+      t.remittanceId,
+      t.position,
+    ),
+    uniqueIndex('sepa_remittance_items_e2e_unique').on(
+      t.companyId,
+      t.endToEndId,
+    ),
+    // Un vencimiento no va en dos remesas vivas a la vez.
+    uniqueIndex('sepa_remittance_items_milestone_live_unique')
+      .on(t.milestoneId)
+      .where(sql`${t.status} = 'incluida'`),
+    index('sepa_remittance_items_company_contact_idx').on(
+      t.companyId,
+      t.contactId,
+    ),
+    check(
+      'sepa_remittance_items_valores',
+      sql`${t.amount} > 0 AND ${t.status} IN ('incluida', 'devuelta', 'excluida') AND (${t.status} <> 'devuelta' OR (${t.returnedOn} IS NOT NULL AND ${t.returnReason} IS NOT NULL))`,
+    ),
+  ],
+);
+
+/** Extracto bancario importado (Norma 43 o CSV): agrupa sus movimientos. */
+export const bankStatements = pgTable(
+  'bank_statements',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    bankAccountId: uuid('bank_account_id')
+      .notNull()
+      .references(() => bankAccounts.id),
+    format: varchar('format', { length: 10 }).notNull(),
+    fileHash: varchar('file_hash', { length: 64 }).notNull(),
+    fromDate: date('from_date'),
+    toDate: date('to_date'),
+    lineCount: integer('line_count').notNull(),
+    importedCount: integer('imported_count').notNull(),
+    closingBalance: numeric('closing_balance', { precision: 14, scale: 2 }),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('bank_statements_account_hash_unique').on(
+      t.companyId,
+      t.bankAccountId,
+      t.fileHash,
+    ),
+    check(
+      'bank_statements_lineas',
+      sql`${t.lineCount} >= 0 AND ${t.importedCount} >= 0 AND ${t.importedCount} <= ${t.lineCount}`,
+    ),
+  ],
+);
+
+export type SepaRemittance = typeof sepaRemittances.$inferSelect;
+export type SepaRemittanceItem = typeof sepaRemittanceItems.$inferSelect;
+export type BankStatement = typeof bankStatements.$inferSelect;

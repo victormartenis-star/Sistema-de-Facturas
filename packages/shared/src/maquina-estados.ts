@@ -44,6 +44,12 @@ import {
   type EstadoTalonario,
 } from './talones';
 import { AVAL_TRANSITIONS } from './avales';
+import {
+  PARTIDA_REMESA_TRANSITIONS,
+  REMESA_TRANSITIONS,
+  type EstadoPartidaRemesa,
+  type EstadoRemesa,
+} from './banca';
 import type { EstadoCierreEjercicio } from './cierre-ejercicio';
 import { CIERRE_EJERCICIO_TRANSITIONS } from './cierre-ejercicio';
 import type { EstadoAplicacionResultado } from './aplicacion-resultado';
@@ -118,6 +124,9 @@ export interface EstadoPorEntidad {
   checkbook: EstadoTalonario;
   /** Liberación de retenciones (aval o hito): vigente → anulado. */
   retention_release: EstadoDocumentoCartera;
+  /** Remesa SEPA: borrador → generada → remitida → devuelta, o anulada. */
+  sepa_remittance: EstadoRemesa;
+  sepa_remittance_item: EstadoPartidaRemesa;
 }
 
 export type EntidadConEstado = keyof EstadoPorEntidad;
@@ -197,6 +206,10 @@ function tablaDe(entidad: EntidadConEstado): Record<string, readonly string[]> {
       return TALONARIO_TRANSITIONS;
     case 'retention_release':
       return DOCUMENTO_CARTERA_TRANSITIONS;
+    case 'sepa_remittance':
+      return REMESA_TRANSITIONS;
+    case 'sepa_remittance_item':
+      return PARTIDA_REMESA_TRANSITIONS;
   }
 }
 
