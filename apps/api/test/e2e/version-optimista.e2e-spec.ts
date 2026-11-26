@@ -217,7 +217,11 @@ describe('Versión optimista (integración) — If-Match', () => {
       ]),
     );
     expect(filas.map((f) => f.table_name)).not.toContain('invoice_lines');
-    for (const f of filas) {
+    // `project_cost_estimates.version` no es una versión optimista sino el
+    // número de revisión de la estimación al cierre (único con la obra, sin
+    // valor por defecto: lo asigna el servicio). Queda fuera de la convención.
+    const REVISIONES = new Set(['project_cost_estimates']);
+    for (const f of filas.filter((x) => !REVISIONES.has(x.table_name))) {
       expect(f.data_type).toBe('integer');
       expect(f.is_nullable).toBe('NO');
       expect(f.column_default).toBe('1');

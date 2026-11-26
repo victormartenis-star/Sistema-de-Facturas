@@ -477,10 +477,23 @@ export const invoiceLines = pgTable(
     phaseId: uuid('phase_id').references(() => projectPhases.id),
     categoryId: uuid('category_id').references(() => categories.id),
     sortOrder: integer('sort_order').notNull().default(0),
+    /** Línea de pedido facturada (cuadre a tres bandas por línea, 0067). */
+    purchaseOrderLineId: uuid('purchase_order_line_id').references(
+      () => purchaseOrderLines.id,
+    ),
+    quantity: numeric('quantity', { precision: 14, scale: 3 }),
+    unitPrice: numeric('unit_price', { precision: 14, scale: 4 }),
   },
   (t) => [
     index('invoice_lines_invoice_id_idx').on(t.invoiceId),
     index('invoice_lines_project_phase_idx').on(t.projectId, t.phaseId),
+    index('invoice_lines_po_line_idx')
+      .on(t.purchaseOrderLineId)
+      .where(sql`purchase_order_line_id IS NOT NULL`),
+    check(
+      'invoice_lines_po_line_coherence',
+      sql`${t.purchaseOrderLineId} IS NULL OR (${t.quantity} IS NOT NULL AND ${t.unitPrice} IS NOT NULL AND ${t.unitPrice} >= 0)`,
+    ),
   ],
 );
 
@@ -622,6 +635,30 @@ export const purchaseOrders = pgTable(
      */
     urgent: boolean('urgent').notNull().default(false),
     notes: text('notes'),
+    /** Tolerancias del cuadre a tres bandas de sus facturas (0067). */
+    priceTolerancePct: numeric('price_tolerance_pct', {
+      precision: 5,
+      scale: 2,
+    })
+      .notNull()
+      .default('2'),
+    priceToleranceAmount: numeric('price_tolerance_amount', {
+      precision: 14,
+      scale: 2,
+    })
+      .notNull()
+      .default('50'),
+    quantityTolerancePct: numeric('quantity_tolerance_pct', {
+      precision: 5,
+      scale: 2,
+    })
+      .notNull()
+      .default('0'),
+    /** Origen: solicitud de compra o petición de ofertas adjudicada. */
+    requisitionId: uuid('requisition_id').references(
+      () => purchaseRequisitions.id,
+    ),
+    rfqId: uuid('rfq_id').references(() => purchaseRfqs.id),
     closedAt: timestamp('closed_at', { withTimezone: true }),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
@@ -5704,3 +5741,331 @@ export const bankGuaranteeRates = pgTable(
 );
 
 export type BankGuaranteeRate = typeof bankGuaranteeRates.$inferSelect;
+
+/* ─────────────────── Procure-to-Pay (0067) ───────────────────
+ * Solicitud de compra (PR) → petición de ofertas (RFQ) → pedido con líneas
+ * (PO) → recepción (GR, con su albarán validado y la entrada en almacén) →
+ * factura con cuadre a tres bandas por línea. Reglas en `@erp/shared/compras`.
+ * Las cantidades recibidas y facturadas se derivan de los documentos (sin
+ * contadores que puedan desincronizarse).
+ */
+
+const LINEA_COMPRA_CHECK = (t: {
+  kind: unknown;
+  articleId: unknown;
+  quantity: unknown;
+}) =>
+  sql`${t.kind} IN ('material', 'servicio', 'subcontrata', 'gasto') AND ${t.quantity} > 0
+    AND (${t.articleId} IS NULL OR ${t.kind} = 'material')`;
+
+export const purchaseRequisitions = pgTable(
+  'purchase_requisitions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    seq: integer('seq').notNull(),
+    number: varchar('number', { length: 40 }).notNull(),
+    title: varchar('title', { length: 200 }).notNull(),
+    status: varchar('status', { length: 12 }).notNull().default('borrador'),
+    neededBy: date('needed_by'),
+    requestedBy: uuid('requested_by').references(() => users.id),
+    approvedBy: uuid('approved_by').references(() => users.id),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    rejectionReason: varchar('rejection_reason', { length: 240 }),
+    notes: text('notes'),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('purchase_requisitions_project_seq_unique').on(
+      t.projectId,
+      t.seq,
+    ),
+    index('purchase_requisitions_company_status_idx').on(t.companyId, t.status),
+    check(
+      'purchase_requisitions_status',
+      sql`${t.status} IN ('borrador', 'solicitada', 'aprobada', 'rechazada', 'convertida', 'anulada')`,
+    ),
+  ],
+);
+
+export type PurchaseRequisition = typeof purchaseRequisitions.$inferSelect;
+
+export const purchaseRequisitionLines = pgTable(
+  'purchase_requisition_lines',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    requisitionId: uuid('requisition_id')
+      .notNull()
+      .references(() => purchaseRequisitions.id),
+    lineNo: smallint('line_no').notNull(),
+    kind: varchar('kind', { length: 12 }).notNull(),
+    articleId: uuid('article_id').references(() => stockArticles.id),
+    description: varchar('description', { length: 500 }).notNull(),
+    unit: varchar('unit', { length: 10 }).notNull().default('ud'),
+    quantity: numeric('quantity', { precision: 14, scale: 3 }).notNull(),
+    estimatedUnitPrice: numeric('estimated_unit_price', {
+      precision: 14,
+      scale: 4,
+    }),
+    phaseId: uuid('phase_id').references(() => projectPhases.id),
+  },
+  (t) => [
+    uniqueIndex('purchase_requisition_lines_req_line_unique').on(
+      t.requisitionId,
+      t.lineNo,
+    ),
+    check('purchase_requisition_lines_valores', LINEA_COMPRA_CHECK(t)),
+  ],
+);
+
+export const purchaseRfqs = pgTable(
+  'purchase_rfqs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    requisitionId: uuid('requisition_id').references(
+      () => purchaseRequisitions.id,
+    ),
+    seq: integer('seq').notNull(),
+    number: varchar('number', { length: 40 }).notNull(),
+    title: varchar('title', { length: 200 }).notNull(),
+    status: varchar('status', { length: 12 }).notNull().default('abierta'),
+    deadline: date('deadline'),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('purchase_rfqs_project_seq_unique').on(t.projectId, t.seq),
+    index('purchase_rfqs_company_status_idx').on(t.companyId, t.status),
+    check(
+      'purchase_rfqs_status',
+      sql`${t.status} IN ('abierta', 'adjudicada', 'cancelada')`,
+    ),
+  ],
+);
+
+export type PurchaseRfq = typeof purchaseRfqs.$inferSelect;
+
+export const purchaseRfqLines = pgTable(
+  'purchase_rfq_lines',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    rfqId: uuid('rfq_id')
+      .notNull()
+      .references(() => purchaseRfqs.id),
+    requisitionLineId: uuid('requisition_line_id').references(
+      () => purchaseRequisitionLines.id,
+    ),
+    lineNo: smallint('line_no').notNull(),
+    kind: varchar('kind', { length: 12 }).notNull(),
+    articleId: uuid('article_id').references(() => stockArticles.id),
+    description: varchar('description', { length: 500 }).notNull(),
+    unit: varchar('unit', { length: 10 }).notNull().default('ud'),
+    quantity: numeric('quantity', { precision: 14, scale: 3 }).notNull(),
+    phaseId: uuid('phase_id').references(() => projectPhases.id),
+  },
+  (t) => [
+    uniqueIndex('purchase_rfq_lines_rfq_line_unique').on(t.rfqId, t.lineNo),
+    check('purchase_rfq_lines_valores', LINEA_COMPRA_CHECK(t)),
+  ],
+);
+
+/** Proveedor invitado a la petición, con las condiciones de su oferta. */
+export const purchaseRfqSuppliers = pgTable(
+  'purchase_rfq_suppliers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    rfqId: uuid('rfq_id')
+      .notNull()
+      .references(() => purchaseRfqs.id),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id),
+    leadTimeDays: integer('lead_time_days'),
+    validUntil: date('valid_until'),
+    terms: varchar('terms', { length: 500 }),
+    quotedAt: timestamp('quoted_at', { withTimezone: true }),
+    version: integer('version').notNull().default(1),
+  },
+  (t) => [
+    uniqueIndex('purchase_rfq_suppliers_rfq_contact_unique').on(
+      t.rfqId,
+      t.contactId,
+    ),
+    check(
+      'purchase_rfq_suppliers_plazo',
+      sql`${t.leadTimeDays} IS NULL OR ${t.leadTimeDays} >= 0`,
+    ),
+  ],
+);
+
+/** Precio ofertado por un proveedor para una línea de la petición. */
+export const purchaseRfqQuotes = pgTable(
+  'purchase_rfq_quotes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    rfqLineId: uuid('rfq_line_id')
+      .notNull()
+      .references(() => purchaseRfqLines.id),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id),
+    unitPrice: numeric('unit_price', { precision: 14, scale: 4 }).notNull(),
+    awarded: boolean('awarded').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('purchase_rfq_quotes_line_contact_unique').on(
+      t.rfqLineId,
+      t.contactId,
+    ),
+    uniqueIndex('purchase_rfq_quotes_line_awarded_unique')
+      .on(t.rfqLineId)
+      .where(sql`awarded = true`),
+    check('purchase_rfq_quotes_precio', sql`${t.unitPrice} >= 0`),
+  ],
+);
+
+/** Línea de pedido: material de almacén, servicio, subcontrata o gasto. */
+export const purchaseOrderLines = pgTable(
+  'purchase_order_lines',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => purchaseOrders.id),
+    lineNo: smallint('line_no').notNull(),
+    kind: varchar('kind', { length: 12 }).notNull(),
+    articleId: uuid('article_id').references(() => stockArticles.id),
+    description: varchar('description', { length: 500 }).notNull(),
+    unit: varchar('unit', { length: 10 }).notNull().default('ud'),
+    quantity: numeric('quantity', { precision: 14, scale: 3 }).notNull(),
+    unitPrice: numeric('unit_price', { precision: 14, scale: 4 }).notNull(),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    phaseId: uuid('phase_id').references(() => projectPhases.id),
+    /** Sin recepción (servicio, gasto): se factura directamente contra el pedido. */
+    requiresReceipt: boolean('requires_receipt').notNull().default(true),
+    requisitionLineId: uuid('requisition_line_id').references(
+      () => purchaseRequisitionLines.id,
+    ),
+    rfqQuoteId: uuid('rfq_quote_id').references(() => purchaseRfqQuotes.id),
+    version: integer('version').notNull().default(1),
+  },
+  (t) => [
+    uniqueIndex('purchase_order_lines_order_line_unique').on(
+      t.orderId,
+      t.lineNo,
+    ),
+    index('purchase_order_lines_company_article_idx')
+      .on(t.companyId, t.articleId)
+      .where(sql`article_id IS NOT NULL`),
+    check(
+      'purchase_order_lines_valores',
+      sql`${LINEA_COMPRA_CHECK(t)} AND ${t.unitPrice} >= 0 AND ${t.amount} >= 0`,
+    ),
+  ],
+);
+
+export type PurchaseOrderLine = typeof purchaseOrderLines.$inferSelect;
+
+/**
+ * Recepción de mercancías o servicios de un pedido (MIGO): registra el
+ * albarán del proveedor ya validado y, para el material de stock con
+ * almacén, su entrada en almacén (con lotes o series).
+ */
+export const goodsReceipts = pgTable(
+  'goods_receipts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => purchaseOrders.id),
+    deliveryNoteId: uuid('delivery_note_id')
+      .notNull()
+      .references(() => deliveryNotes.id),
+    warehouseId: uuid('warehouse_id').references(() => warehouses.id),
+    receiptDate: date('receipt_date').notNull(),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('goods_receipts_company_order_idx').on(t.companyId, t.orderId),
+    uniqueIndex('goods_receipts_delivery_note_unique').on(t.deliveryNoteId),
+    check('goods_receipts_importe', sql`${t.amount} >= 0`),
+  ],
+);
+
+export const goodsReceiptLines = pgTable(
+  'goods_receipt_lines',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    receiptId: uuid('receipt_id')
+      .notNull()
+      .references(() => goodsReceipts.id),
+    orderLineId: uuid('order_line_id')
+      .notNull()
+      .references(() => purchaseOrderLines.id),
+    quantity: numeric('quantity', { precision: 14, scale: 3 }).notNull(),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    stockMovementId: uuid('stock_movement_id').references(
+      () => stockMovements.id,
+    ),
+  },
+  (t) => [
+    index('goods_receipt_lines_order_line_idx').on(t.orderLineId),
+    index('goods_receipt_lines_receipt_idx').on(t.receiptId),
+    check(
+      'goods_receipt_lines_valores',
+      sql`${t.quantity} > 0 AND ${t.amount} >= 0`,
+    ),
+  ],
+);

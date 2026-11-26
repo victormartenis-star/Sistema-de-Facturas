@@ -83,6 +83,25 @@ import { getRequestContext } from '../common/request-context';
 import { DbService } from '../db/db.service';
 import { liquidarPendiente } from '../treasury/liquidaciones';
 import {
+  exigirCuadreEnAprobacion,
+  validarLineasFacturaCompra,
+} from '../compras/cuadre';
+
+/** Columnas del enlace de una línea de factura con su línea de pedido. */
+function lineaPedido(l: {
+  purchaseOrderLineId?: string | null;
+  quantity?: number | null;
+  unitPrice?: number | null;
+}) {
+  return l.purchaseOrderLineId
+    ? {
+        purchaseOrderLineId: l.purchaseOrderLineId,
+        quantity: (l.quantity ?? 0).toFixed(3),
+        unitPrice: (l.unitPrice ?? 0).toFixed(4),
+      }
+    : {};
+}
+import {
   condicionVersion,
   falloActualizacion,
   incrementarVersion,
@@ -317,6 +336,14 @@ export class InvoicesService {
     } catch (err) {
       this.rethrowDuplicateNumber(err, data.invoiceNumber);
     }
+    // Cuadre por línea (P2P): líneas enlazadas a pedido coherentes.
+    await validarLineasFacturaCompra(tx, {
+      companyId,
+      kind: data.kind,
+      contactId: data.contactId,
+      deliveryNoteIds: data.kind === 'compra' ? data.deliveryNoteIds : [],
+      lineas: data.lines,
+    });
     await tx.insert(invoiceLines).values(
       data.lines.map((l, i) => ({
         invoiceId: row.id,
@@ -327,6 +354,7 @@ export class InvoicesService {
         phaseId: l.phaseId ?? null,
         categoryId: l.categoryId ?? null,
         sortOrder: i,
+        ...lineaPedido(l),
       })),
     );
     if (data.kind === 'compra' && data.deliveryNoteIds.length > 0) {
@@ -390,6 +418,9 @@ export class InvoicesService {
         projectId: l.projectId,
         phaseId: l.phaseId,
         categoryId: l.categoryId,
+        purchaseOrderLineId: l.purchaseOrderLineId ?? null,
+        quantity: l.quantity ?? null,
+        unitPrice: l.unitPrice ?? null,
       }));
     const isp = data.isp ?? invoice.isp;
     const retentionPct = data.retentionPct ?? Number(invoice.retentionPct);
@@ -459,6 +490,14 @@ export class InvoicesService {
         );
       }
       if (data.lines) {
+        await validarLineasFacturaCompra(tx, {
+          companyId: invoice.companyId,
+          kind: invoice.kind,
+          contactId: data.contactId ?? invoice.contactId,
+          deliveryNoteIds:
+            invoice.kind === 'compra' ? (data.deliveryNoteIds ?? []) : [],
+          lineas: data.lines,
+        });
         await tx.delete(invoiceLines).where(eq(invoiceLines.invoiceId, id));
         await tx.insert(invoiceLines).values(
           data.lines.map((l, i) => ({
@@ -470,6 +509,7 @@ export class InvoicesService {
             phaseId: l.phaseId ?? null,
             categoryId: l.categoryId ?? null,
             sortOrder: i,
+            ...lineaPedido(l),
           })),
         );
       }
@@ -641,6 +681,13 @@ export class InvoicesService {
           message: `No se puede aprobar: la base de la factura (${base.toFixed(2)} €) no cuadra con el periodo certificado (${Number(cert.importePeriodo).toFixed(2)} €)`,
         });
       }
+    } else if (
+      invoice.kind === 'compra' &&
+      (await exigirCuadreEnAprobacion(tx, invoice))
+    ) {
+      // Cuadre a tres bandas por línea (pedido ↔ recepción ↔ factura):
+      // sustituye a la regla de albaranes; fuera de tolerancia ya ha lanzado
+      // P2P_MATCH_BLOCKED (factura bloqueada para pago).
     } else if (invoice.kind === 'compra') {
       const notes = await tx
         .select()
@@ -1497,6 +1544,9 @@ export class InvoicesService {
       phaseId: line.phaseId,
       phaseCode,
       categoryId: line.categoryId,
+      purchaseOrderLineId: line.purchaseOrderLineId,
+      quantity: line.quantity === null ? null : Number(line.quantity),
+      unitPrice: line.unitPrice === null ? null : Number(line.unitPrice),
     }));
   }
 

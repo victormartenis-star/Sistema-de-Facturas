@@ -69,4 +69,5 @@ export * from './aplicacion-resultado';
 export * from './memoria-abreviada';
 export * from './cartera';
 export * from './lotes';
+export * from './compras';
 export * from './consolidacion';

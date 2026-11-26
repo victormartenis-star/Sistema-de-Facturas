@@ -39,6 +39,7 @@ import { ContabilidadModule } from './contabilidad/contabilidad.module';
 import { ActivosModule } from './activos/activos.module';
 import { AlmacenModule } from './almacen/almacen.module';
 import { CarteraModule } from './cartera/cartera.module';
+import { ComprasModule } from './compras/compras.module';
 import { AprobacionesModule } from './aprobaciones/aprobaciones.module';
 import { HoldingModule } from './holding/holding.module';
 import { WipModule } from './wip/wip.module';
@@ -88,6 +89,7 @@ import { InformesModule } from './modules/informes/informes.module';
     TreasuryModule,
     ContabilidadModule,
     CarteraModule,
+    ComprasModule,
     ActivosModule,
     AlmacenModule,
     AprobacionesModule,

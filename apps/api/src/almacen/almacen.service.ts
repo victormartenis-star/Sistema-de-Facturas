@@ -1007,7 +1007,24 @@ export class AlmacenService {
   async entrada(input: EntradaStockInput): Promise<MovimientoStockDto[]> {
     const companyId = this.dbs.getCompanyId();
     const d = entradaStockSchema.parse(input);
-    const ids = await this.dbs.db.transaction(async (tx) => {
+    const ids = await this.dbs.db.transaction((tx) =>
+      this.entradaEnTx(tx, companyId, d),
+    );
+    return this.porIds(ids);
+  }
+
+  /**
+   * Entrada de material dentro de la transacción del llamador (la recepción
+   * de un pedido la usa con su albarán recién validado). Devuelve los ids de
+   * los movimientos por artículo.
+   */
+  async entradaEnTx(
+    tx: Tx,
+    companyId: string,
+    input: EntradaStockInput,
+  ): Promise<string[]> {
+    const d = entradaStockSchema.parse(input);
+    {
       const w = await this.cargarAlmacen(tx, companyId, d.almacenId);
       let albaran: {
         id: string;
@@ -1122,8 +1139,7 @@ export class AlmacenService {
         );
       }
       return creados;
-    });
-    return this.porIds(ids);
+    }
   }
 
   /**

@@ -17,6 +17,7 @@ import {
 import {
   DbOrTx,
   PurchaseOrder,
+  type Tx,
   contacts,
   deliveryNotes,
   projectPhases,
@@ -53,6 +54,7 @@ import {
   verificarVersion,
 } from '../common/version';
 import { ProveedoresService } from '../modules/proveedores/proveedores.service';
+import { facturadoPorLineasDePedidos } from '../compras/cuadre';
 
 /** Importes servidos y facturados de un pedido, sacados de sus albaranes. */
 interface Delivered {
@@ -205,6 +207,84 @@ export class PurchaseOrdersService {
       return row.id;
     });
     return this.get(id);
+  }
+
+  /**
+   * Alta de un pedido dentro de la transacción del llamador (compras con
+   * líneas: solicitud convertida, oferta adjudicada o pedido directo). Mismas
+   * reglas que `create`: proveedor existente y apto (PRL), control
+   * presupuestario por el importe y correlativo por obra.
+   */
+  async crearEnTx(
+    tx: Tx,
+    d: {
+      projectId: string;
+      contactId: string;
+      orderDate: string;
+      description: string;
+      amount: string;
+      phaseId?: string | null;
+      expectedDate?: string | null;
+      notes?: string | null;
+      requisitionId?: string | null;
+      rfqId?: string | null;
+      tolerancias?: {
+        precioPct?: number;
+        precioImporte?: number;
+        cantidadPct?: number;
+      };
+    },
+  ): Promise<PurchaseOrder> {
+    const companyId = this.dbs.getCompanyId();
+    const project = await this.findProject(d.projectId);
+    await this.assertContactExists(d.contactId);
+    await this.proveedores.assertAptoParaPago(d.contactId, 'emitir el pedido');
+    await this.control.verificar(tx, {
+      projectId: d.projectId,
+      importe: d.amount,
+      operacion: 'pedido_compra',
+      referencia: project.code,
+    });
+    const [last] = await tx
+      .select({ seq: purchaseOrders.seq })
+      .from(purchaseOrders)
+      .where(
+        and(
+          eq(purchaseOrders.projectId, d.projectId),
+          isNull(purchaseOrders.deletedAt),
+        ),
+      )
+      .orderBy(desc(purchaseOrders.seq))
+      .limit(1);
+    const seq = (last?.seq ?? 0) + 1;
+    const [row] = await tx
+      .insert(purchaseOrders)
+      .values({
+        companyId,
+        projectId: d.projectId,
+        contactId: d.contactId,
+        seq,
+        orderNumber: buildOrderNumber(project.code, seq),
+        orderDate: d.orderDate,
+        phaseId: d.phaseId ?? null,
+        description: d.description,
+        amount: d.amount,
+        expectedDate: d.expectedDate ?? null,
+        notes: d.notes ?? null,
+        requisitionId: d.requisitionId ?? null,
+        rfqId: d.rfqId ?? null,
+        ...(d.tolerancias?.precioPct !== undefined && {
+          priceTolerancePct: d.tolerancias.precioPct.toFixed(2),
+        }),
+        ...(d.tolerancias?.precioImporte !== undefined && {
+          priceToleranceAmount: d.tolerancias.precioImporte.toFixed(2),
+        }),
+        ...(d.tolerancias?.cantidadPct !== undefined && {
+          quantityTolerancePct: d.tolerancias.cantidadPct.toFixed(2),
+        }),
+      })
+      .returning();
+    return row;
   }
 
   async update(
@@ -563,6 +643,19 @@ export class PurchaseOrdersService {
         invoicedAmount: round2(Number(r.invoiced)),
         count: Number(r.count),
       });
+    }
+    // Lo facturado directamente contra las líneas del pedido (0067) también
+    // es facturado: el pendiente de facturar y la provisión lo descuentan.
+    const porLineas = await facturadoPorLineasDePedidos(executor, orderIds);
+    for (const [orderId, importe] of porLineas) {
+      const d = map.get(orderId) ?? {
+        deliveredAmount: 0,
+        receivedAmount: 0,
+        invoicedAmount: 0,
+        count: 0,
+      };
+      d.invoicedAmount = round2(d.invoicedAmount + Number(importe));
+      map.set(orderId, d);
     }
     return map;
   }

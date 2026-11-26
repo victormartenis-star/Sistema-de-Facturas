@@ -393,13 +393,19 @@ export class ControlPresupuestarioService {
     sinPartida('amortizacion', amortizacion);
     sinPartida('avales', avales);
 
-    // Comprometido: pedidos abiertos con lo facturado vía albaranes.
+    // Comprometido: pedidos abiertos con lo facturado vía albaranes y lo
+    // facturado directamente contra sus líneas (cuadre a tres bandas, 0067).
+    // Una factura usa una de las dos vías, nunca ambas: no se descuenta dos veces.
     const pedidos = await ex
       .select({
         projectId: purchaseOrders.projectId,
         phaseId: purchaseOrders.phaseId,
         importe: purchaseOrders.amount,
-        ejecutado: sql<string>`coalesce((select sum(dn.amount) from delivery_notes dn where dn.order_id = ${COL_PEDIDO_ID} and dn.invoice_id is not null and dn.deleted_at is null), 0)`,
+        ejecutado: sql<string>`(coalesce((select sum(dn.amount) from delivery_notes dn where dn.order_id = ${COL_PEDIDO_ID} and dn.invoice_id is not null and dn.deleted_at is null), 0)
+          + coalesce((select sum(il.base_amount) from invoice_lines il
+              join purchase_order_lines pol on pol.id = il.purchase_order_line_id
+              join invoices i on i.id = il.invoice_id
+              where pol.order_id = ${COL_PEDIDO_ID} and i.status in ('aprobada', 'pagada') and i.deleted_at is null), 0))`,
       })
       .from(purchaseOrders)
       .where(

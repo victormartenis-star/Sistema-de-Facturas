@@ -470,6 +470,13 @@
       "when": 1795647078194,
       "tag": "0066_cartera_lotes_series",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1795693517271,
+      "tag": "0067_procure_to_pay",
+      "breakpoints": true
     }
   ]
 }

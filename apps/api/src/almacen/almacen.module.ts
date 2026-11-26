@@ -20,5 +20,7 @@ import { SolicitudesMaterialService } from './solicitudes-material.service';
   // Las solicitudes van antes: `almacen/solicitudes` no debe caer en otra ruta.
   controllers: [SolicitudesMaterialController, AlmacenController],
   providers: [AlmacenService, SolicitudesMaterialService, LotesService],
+  // La recepción de pedidos (compras) entra el material en almacén.
+  exports: [AlmacenService],
 })
 export class AlmacenModule {}

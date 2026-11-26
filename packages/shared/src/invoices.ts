@@ -251,6 +251,13 @@ export const invoiceLineSchema = z.object({
   projectId: z.string().uuid('Obra no válida').nullish(),
   phaseId: z.string().uuid('Partida no válida').nullish(),
   categoryId: z.string().uuid('Categoría no válida').nullish(),
+  /**
+   * Compras con cuadre a tres bandas: línea de pedido facturada, con su
+   * cantidad y precio (la base debe ser cantidad × precio).
+   */
+  purchaseOrderLineId: z.string().uuid().nullish(),
+  quantity: z.number().finite().positive().max(99_999_999_999).nullish(),
+  unitPrice: z.number().finite().min(0).max(9_999_999_999).nullish(),
 });
 
 export const invoiceRectifySchema = z
@@ -367,6 +374,9 @@ export interface InvoiceLineDto {
   phaseId: string | null;
   phaseCode: string | null;
   categoryId: string | null;
+  purchaseOrderLineId?: string | null;
+  quantity?: number | null;
+  unitPrice?: number | null;
 }
 
 export interface InvoiceDeliveryNoteRef {

@@ -40,6 +40,12 @@ export const RECURSOS_UI = [
   'cartera',
   /** Artículos con lote o serie y su trazabilidad (almacén). */
   'lote',
+  /** Solicitud de compra: la crea también el jefe de obra; aprobarla es de `compra`. */
+  'solicitud_compra',
+  /** Aprobar solicitudes, peticiones de ofertas, adjudicar y pedidos: admin, gerente y administración. */
+  'compra',
+  /** Recepción de mercancías y servicios: también el jefe de obra. */
+  'recepcion',
 ] as const;
 export type RecursoUi = (typeof RECURSOS_UI)[number];
 
@@ -67,7 +73,8 @@ export function can(
     (accion === 'devolver' && recurso === 'albaran') ||
     recurso === 'contabilidad' ||
     recurso === 'aval' ||
-    recurso === 'cartera';
+    recurso === 'cartera' ||
+    recurso === 'compra';
   if (restringida) return ROLES_RECTIFICAR.includes(rol);
   return true;
 }

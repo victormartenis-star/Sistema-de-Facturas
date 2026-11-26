@@ -31,6 +31,12 @@ import {
   DOCUMENTO_CARTERA_TRANSITIONS,
   type EstadoDocumentoCartera,
 } from './cartera';
+import {
+  PETICION_OFERTA_TRANSITIONS,
+  SOLICITUD_COMPRA_TRANSITIONS,
+  type EstadoPeticionOferta,
+  type EstadoSolicitudCompra,
+} from './compras';
 import { AVAL_TRANSITIONS } from './avales';
 import type { EstadoCierreEjercicio } from './cierre-ejercicio';
 import { CIERRE_EJERCICIO_TRANSITIONS } from './cierre-ejercicio';
@@ -98,6 +104,9 @@ export interface EstadoPorEntidad {
   /** Anticipos y compensaciones de la cartera: vigente → anulado. */
   third_party_advance: EstadoDocumentoCartera;
   third_party_netting: EstadoDocumentoCartera;
+  /** Solicitud de compra (PR) y petición de ofertas (RFQ). */
+  purchase_requisition: EstadoSolicitudCompra;
+  purchase_rfq: EstadoPeticionOferta;
 }
 
 export type EntidadConEstado = keyof EstadoPorEntidad;
@@ -167,6 +176,10 @@ function tablaDe(entidad: EntidadConEstado): Record<string, readonly string[]> {
     case 'third_party_advance':
     case 'third_party_netting':
       return DOCUMENTO_CARTERA_TRANSITIONS;
+    case 'purchase_requisition':
+      return SOLICITUD_COMPRA_TRANSITIONS;
+    case 'purchase_rfq':
+      return PETICION_OFERTA_TRANSITIONS;
   }
 }
 
