@@ -1651,36 +1651,62 @@ export const equipoEstadoEnum = pgEnum('equipo_estado', [
   'baja',
 ]);
 
-export const equipos = pgTable('equipos', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  companyId: uuid('company_id')
-    .notNull()
-    .references(() => companies.id),
-  nombre: text('nombre').notNull(),
-  /** Matrícula o nº de serie; libre porque no toda herramienta la tiene. */
-  matricula: text('matricula'),
-  tipo: equipoTipoEnum('tipo').notNull().default('maquina_pesada'),
-  ownership: parteMaquinariaOwnershipEnum('ownership')
-    .notNull()
-    .default('propia'),
-  /** Proveedor de alquiler; solo tiene sentido si ownership = 'alquilada'. */
-  proveedorAlquilerId: uuid('proveedor_alquiler_id').references(
-    () => proveedores.id,
-    { onDelete: 'set null' },
-  ),
-  estado: equipoEstadoEnum('estado').notNull().default('operativo'),
-  fechaAlta: date('fecha_alta'),
-  /** Fecha de baja definitiva; distinto de `deletedAt`, que es borrado lógico del registro. */
-  fechaBaja: date('fecha_baja'),
-  notas: text('notas'),
-  deletedAt: timestamp('deleted_at', { withTimezone: true }),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const equipos = pgTable(
+  'equipos',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    nombre: text('nombre').notNull(),
+    /** Matrícula o nº de serie; libre porque no toda herramienta la tiene. */
+    matricula: text('matricula'),
+    tipo: equipoTipoEnum('tipo').notNull().default('maquina_pesada'),
+    ownership: parteMaquinariaOwnershipEnum('ownership')
+      .notNull()
+      .default('propia'),
+    /** Proveedor de alquiler; solo tiene sentido si ownership = 'alquilada'. */
+    proveedorAlquilerId: uuid('proveedor_alquiler_id').references(
+      () => proveedores.id,
+      { onDelete: 'set null' },
+    ),
+    estado: equipoEstadoEnum('estado').notNull().default('operativo'),
+    fechaAlta: date('fecha_alta'),
+    /** Fecha de baja definitiva; distinto de `deletedAt`, que es borrado lógico del registro. */
+    fechaBaja: date('fecha_baja'),
+    notas: text('notas'),
+    /** Ficha EAM (fase 6, 0070): código interno, nº de serie y conjunto del que es componente. */
+    codigo: varchar('codigo', { length: 30 }),
+    numeroSerie: varchar('numero_serie', { length: 60 }),
+    padreId: uuid('padre_id').references((): AnyPgColumn => equipos.id),
+    /** Contadores vigentes (la historia está en `equipo_lecturas_contador`). */
+    contadorHoras: numeric('contador_horas', { precision: 12, scale: 2 })
+      .notNull()
+      .default('0'),
+    contadorKm: numeric('contador_km', { precision: 12, scale: 2 })
+      .notNull()
+      .default('0'),
+    contadorFecha: date('contador_fecha'),
+    version: integer('version').notNull().default(1),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('equipos_company_codigo_unique')
+      .on(t.companyId, t.codigo)
+      .where(sql`${t.codigo} IS NOT NULL`),
+    index('equipos_company_padre_idx').on(t.companyId, t.padreId),
+    check(
+      'equipos_eam',
+      sql`${t.contadorHoras} >= 0 AND ${t.contadorKm} >= 0 AND (${t.padreId} IS NULL OR ${t.padreId} <> ${t.id})`,
+    ),
+  ],
+);
 
 export const mantenimientoTipoEnum = pgEnum('mantenimiento_tipo', [
   'preventivo',
@@ -1706,6 +1732,10 @@ export const mantenimientosEquipo = pgTable('mantenimientos_equipo', {
   /** Próxima revisión prevista (preventivo/ITV); nulo en correctivos puntuales. */
   proximaRevisionFecha: date('proxima_revision_fecha'),
   descripcion: text('descripcion'),
+  /** Orden de trabajo que lo generó al cerrarse (0070): su coste ya está en la orden. */
+  ordenTrabajoId: uuid('orden_trabajo_id').references(
+    (): AnyPgColumn => ordenesTrabajo.id,
+  ),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
@@ -6532,3 +6562,235 @@ export const bankStatements = pgTable(
 export type SepaRemittance = typeof sepaRemittances.$inferSelect;
 export type SepaRemittanceItem = typeof sepaRemittanceItems.$inferSelect;
 export type BankStatement = typeof bankStatements.$inferSelect;
+
+/* ───────────── Fase 6: Enterprise Asset Management de maquinaria (0070) ───────────── */
+
+/** Historia de los contadores de un equipo (horas de motor y kilómetros). */
+export const equipoLecturasContador = pgTable(
+  'equipo_lecturas_contador',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    equipoId: uuid('equipo_id')
+      .notNull()
+      .references(() => equipos.id),
+    tipo: varchar('tipo', { length: 5 }).notNull(),
+    fecha: date('fecha').notNull(),
+    valor: numeric('valor', { precision: 12, scale: 2 }).notNull(),
+    anterior: numeric('anterior', { precision: 12, scale: 2 }),
+    /** manual · orden (al cerrar una orden de trabajo) · correccion. */
+    origen: varchar('origen', { length: 12 }).notNull(),
+    motivo: varchar('motivo', { length: 240 }),
+    ordenTrabajoId: uuid('orden_trabajo_id').references(
+      (): AnyPgColumn => ordenesTrabajo.id,
+    ),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('equipo_lecturas_company_equipo_idx').on(
+      t.companyId,
+      t.equipoId,
+      t.tipo,
+      t.fecha,
+    ),
+    check(
+      'equipo_lecturas_valores',
+      sql`${t.tipo} IN ('horas', 'km') AND ${t.valor} >= 0 AND ${t.origen} IN ('manual', 'orden', 'correccion') AND (${t.origen} <> 'correccion' OR ${t.motivo} IS NOT NULL)`,
+    ),
+  ],
+);
+
+/** Asignación de un equipo a una obra (una obra a la vez, sin solapes). */
+export const equipoAsignaciones = pgTable(
+  'equipo_asignaciones',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    equipoId: uuid('equipo_id')
+      .notNull()
+      .references(() => equipos.id),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id),
+    desde: date('desde').notNull(),
+    hasta: date('hasta'),
+    notas: varchar('notas', { length: 240 }),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('equipo_asignaciones_company_equipo_idx').on(
+      t.companyId,
+      t.equipoId,
+      t.desde,
+    ),
+    index('equipo_asignaciones_company_project_idx').on(
+      t.companyId,
+      t.projectId,
+    ),
+    check(
+      'equipo_asignaciones_fechas',
+      sql`${t.hasta} IS NULL OR ${t.hasta} >= ${t.desde}`,
+    ),
+  ],
+);
+
+/** Plan de mantenimiento preventivo por calendario y/o contador. */
+export const planesMantenimiento = pgTable(
+  'planes_mantenimiento',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    equipoId: uuid('equipo_id')
+      .notNull()
+      .references(() => equipos.id),
+    nombre: varchar('nombre', { length: 120 }).notNull(),
+    tipo: varchar('tipo', { length: 12 }).notNull().default('preventiva'),
+    periodicidadDias: integer('periodicidad_dias'),
+    intervaloHoras: numeric('intervalo_horas', { precision: 10, scale: 2 }),
+    intervaloKm: numeric('intervalo_km', { precision: 12, scale: 2 }),
+    avisoDias: integer('aviso_dias').notNull().default(15),
+    avisoHoras: numeric('aviso_horas', { precision: 10, scale: 2 })
+      .notNull()
+      .default('25'),
+    avisoKm: numeric('aviso_km', { precision: 12, scale: 2 })
+      .notNull()
+      .default('500'),
+    ultimaFecha: date('ultima_fecha'),
+    ultimaHoras: numeric('ultima_horas', { precision: 12, scale: 2 }),
+    ultimaKm: numeric('ultima_km', { precision: 12, scale: 2 }),
+    activo: boolean('activo').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('planes_mantenimiento_company_equipo_idx').on(
+      t.companyId,
+      t.equipoId,
+    ),
+    check(
+      'planes_mantenimiento_intervalos',
+      sql`${t.tipo} IN ('preventiva', 'itv', 'revision') AND (${t.periodicidadDias} IS NOT NULL OR ${t.intervaloHoras} IS NOT NULL OR ${t.intervaloKm} IS NOT NULL) AND coalesce(${t.periodicidadDias}, 1) > 0 AND coalesce(${t.intervaloHoras}, 1) > 0 AND coalesce(${t.intervaloKm}, 1) > 0`,
+    ),
+  ],
+);
+
+export const ordenTrabajoEstadoEnum = pgEnum('orden_trabajo_estado', [
+  'abierta',
+  'planificada',
+  'en_curso',
+  'cerrada',
+  'cancelada',
+]);
+
+/**
+ * Orden de trabajo de mantenimiento (preventiva, correctiva, ITV o
+ * revisión) de un equipo, con su parada y coste. La obra es atribución
+ * analítica: el coste no se carga al coste real de la obra (la maquinaria
+ * entra por los partes y lo externo por facturas de compra).
+ */
+export const ordenesTrabajo = pgTable(
+  'ordenes_trabajo',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    numero: varchar('numero', { length: 20 }).notNull(),
+    equipoId: uuid('equipo_id')
+      .notNull()
+      .references(() => equipos.id),
+    planId: uuid('plan_id').references(() => planesMantenimiento.id),
+    tipo: varchar('tipo', { length: 12 }).notNull(),
+    prioridad: varchar('prioridad', { length: 8 }).notNull().default('media'),
+    status: ordenTrabajoEstadoEnum('status').notNull().default('abierta'),
+    projectId: uuid('project_id').references(() => projects.id),
+    descripcion: text('descripcion').notNull(),
+    fechaAviso: date('fecha_aviso').notNull(),
+    fechaPlanificada: date('fecha_planificada'),
+    inicio: date('inicio'),
+    fin: date('fin'),
+    horasParada: numeric('horas_parada', { precision: 10, scale: 2 })
+      .notNull()
+      .default('0'),
+    horasManoObra: numeric('horas_mano_obra', { precision: 10, scale: 2 })
+      .notNull()
+      .default('0'),
+    tarifaManoObra: numeric('tarifa_mano_obra', { precision: 10, scale: 2 })
+      .notNull()
+      .default('0'),
+    costeManoObra: numeric('coste_mano_obra', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    costeRepuestos: numeric('coste_repuestos', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    costeExterno: numeric('coste_externo', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    costeTotal: numeric('coste_total', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    proveedorId: uuid('proveedor_id').references(() => proveedores.id),
+    lecturaHoras: numeric('lectura_horas', { precision: 12, scale: 2 }),
+    lecturaKm: numeric('lectura_km', { precision: 12, scale: 2 }),
+    notasCierre: text('notas_cierre'),
+    motivoCancelacion: varchar('motivo_cancelacion', { length: 240 }),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('ordenes_trabajo_company_numero_unique').on(
+      t.companyId,
+      t.numero,
+    ),
+    // Un plan preventivo tiene como mucho una orden viva.
+    uniqueIndex('ordenes_trabajo_plan_viva_unique')
+      .on(t.planId)
+      .where(
+        sql`${t.planId} IS NOT NULL AND ${t.status} IN ('abierta', 'planificada', 'en_curso')`,
+      ),
+    index('ordenes_trabajo_company_equipo_idx').on(
+      t.companyId,
+      t.equipoId,
+      t.status,
+    ),
+    index('ordenes_trabajo_company_project_idx').on(t.companyId, t.projectId),
+    check(
+      'ordenes_trabajo_valores',
+      sql`${t.tipo} IN ('preventiva', 'correctiva', 'itv', 'revision') AND ${t.prioridad} IN ('baja', 'media', 'alta', 'urgente') AND ${t.horasParada} >= 0 AND ${t.horasManoObra} >= 0 AND ${t.tarifaManoObra} >= 0 AND ${t.costeManoObra} >= 0 AND ${t.costeRepuestos} >= 0 AND ${t.costeExterno} >= 0 AND ${t.costeTotal} = ${t.costeManoObra} + ${t.costeRepuestos} + ${t.costeExterno} AND (${t.fin} IS NULL OR ${t.inicio} IS NULL OR ${t.fin} >= ${t.inicio}) AND (${t.status} <> 'cerrada' OR (${t.inicio} IS NOT NULL AND ${t.fin} IS NOT NULL)) AND (${t.status} <> 'cancelada' OR ${t.motivoCancelacion} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export type EquipoLecturaContador = typeof equipoLecturasContador.$inferSelect;
+export type EquipoAsignacion = typeof equipoAsignaciones.$inferSelect;
+export type PlanMantenimiento = typeof planesMantenimiento.$inferSelect;
+export type OrdenTrabajo = typeof ordenesTrabajo.$inferSelect;

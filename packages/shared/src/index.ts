@@ -73,4 +73,5 @@ export * from './compras';
 export * from './talones';
 export * from './project-system';
 export * from './banca';
+export * from './eam';
 export * from './consolidacion';

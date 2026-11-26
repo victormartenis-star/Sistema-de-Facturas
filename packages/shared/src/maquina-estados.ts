@@ -44,6 +44,7 @@ import {
   type EstadoTalonario,
 } from './talones';
 import { AVAL_TRANSITIONS } from './avales';
+import { ORDEN_TRABAJO_TRANSITIONS, type EstadoOrdenTrabajo } from './eam';
 import {
   PARTIDA_REMESA_TRANSITIONS,
   REMESA_TRANSITIONS,
@@ -127,6 +128,8 @@ export interface EstadoPorEntidad {
   /** Remesa SEPA: borrador → generada → remitida → devuelta, o anulada. */
   sepa_remittance: EstadoRemesa;
   sepa_remittance_item: EstadoPartidaRemesa;
+  /** Orden de trabajo de mantenimiento (EAM). */
+  orden_trabajo: EstadoOrdenTrabajo;
 }
 
 export type EntidadConEstado = keyof EstadoPorEntidad;
@@ -210,6 +213,8 @@ function tablaDe(entidad: EntidadConEstado): Record<string, readonly string[]> {
       return REMESA_TRANSITIONS;
     case 'sepa_remittance_item':
       return PARTIDA_REMESA_TRANSITIONS;
+    case 'orden_trabajo':
+      return ORDEN_TRABAJO_TRANSITIONS;
   }
 }
 

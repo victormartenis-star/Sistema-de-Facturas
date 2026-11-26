@@ -47,6 +47,7 @@ import { ComprasModule } from '../../src/compras/compras.module';
 import { ProjectSystemModule } from '../../src/project-system/project-system.module';
 import { TalonesModule } from '../../src/talones/talones.module';
 import { BancaModule } from '../../src/banca/banca.module';
+import { EamModule } from '../../src/eam/eam.module';
 import { UsersModule } from '../../src/users/users.module';
 import { SubcontratasModule } from '../../src/modules/subcontratas/subcontratas.module';
 
@@ -123,6 +124,7 @@ import { SubcontratasModule } from '../../src/modules/subcontratas/subcontratas.
     ComprasModule,
     TalonesModule,
     BancaModule,
+    EamModule,
     ProjectSystemModule,
     DashboardModule,
     CopilotoModule,

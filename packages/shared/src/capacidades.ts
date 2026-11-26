@@ -52,6 +52,10 @@ export const RECURSOS_UI = [
   'retencion',
   /** Remesas SEPA y conciliación bancaria: admin, gerente y administración. */
   'banca',
+  /** Ficha, jerarquía, planes preventivos y órdenes de trabajo: admin, gerente y administración. */
+  'mantenimiento',
+  /** Aviso de avería y lectura de contadores: también el jefe de obra. */
+  'aviso_averia',
 ] as const;
 export type RecursoUi = (typeof RECURSOS_UI)[number];
 
@@ -83,7 +87,8 @@ export function can(
     recurso === 'compra' ||
     recurso === 'talon' ||
     recurso === 'retencion' ||
-    recurso === 'banca';
+    recurso === 'banca' ||
+    recurso === 'mantenimiento';
   if (restringida) return ROLES_RECTIFICAR.includes(rol);
   return true;
 }
