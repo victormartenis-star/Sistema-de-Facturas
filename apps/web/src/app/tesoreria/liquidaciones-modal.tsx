@@ -238,7 +238,13 @@ export function LiquidacionesModal({
                             Se anula en Cartera
                           </span>
                         )}
+                      {s.status === 'vigente' && s.talonId && (
+                        <span className="text-xs text-gray-500">
+                          Se anula en Talones
+                        </span>
+                      )}
                       {s.status === 'vigente' &&
+                        !s.talonId &&
                         (s.origen ?? 'tesoreria') === 'tesoreria' && (
                           <Autorizado accion="anular">
                             <button

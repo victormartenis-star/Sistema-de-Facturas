@@ -79,6 +79,16 @@ import type {
   RecepcionCreateInput,
   SolicitudCompraCreateInput,
   SolicitudCompraDto,
+  LiberacionRetencionDto,
+  LiberacionRetencionInput,
+  ModificadoSubcontrataDto,
+  ModificadoSubcontrataInput,
+  RetencionesProyectoDto,
+  TalonAccionInput,
+  TalonCreateInput,
+  TalonDto,
+  TalonarioCreateInput,
+  TalonarioDto,
   ConciliacionCierreDto,
   ResultadoCierreProvisionPerdidasDto,
   AjusteConsolidacionCreateInput,
@@ -2394,6 +2404,92 @@ export const comprasApi = {
     ),
   cuadre: (invoiceId: string) =>
     request<CuadreFacturaDto | null>(`/compras/facturas/${invoiceId}/cuadre`),
+};
+
+/** Talonarios y talones / cheques bancarios. */
+export const talonesApi = {
+  talonarios: () => request<TalonarioDto[]>('/tesoreria/talonarios'),
+  crearTalonario: (input: TalonarioCreateInput, clave: string) =>
+    request<TalonarioDto>('/tesoreria/talonarios', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: idempotencyKey(clave),
+    }),
+  anularTalonario: (id: string, version: number) =>
+    request<TalonarioDto>(`/tesoreria/talonarios/${id}/anular`, {
+      method: 'POST',
+      headers: siVersion(version),
+    }),
+  talones: (direccion?: string) =>
+    request<TalonDto[]>(`/tesoreria/talones${qs({ direccion })}`),
+  emitir: (input: TalonCreateInput, clave: string) =>
+    request<TalonDto>('/tesoreria/talones', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: idempotencyKey(clave),
+    }),
+  accion: (
+    id: string,
+    input: TalonAccionInput,
+    version: number,
+    clave: string,
+  ) =>
+    request<TalonDto>(`/tesoreria/talones/${id}/acciones`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: { ...idempotencyKey(clave), ...siVersion(version) },
+    }),
+};
+
+/** Project System: retenciones, liberación por hito o aval y modificados. */
+export const projectSystemApi = {
+  retenciones: (projectId: string) =>
+    request<RetencionesProyectoDto>(
+      `/project-system/obras/${projectId}/retenciones`,
+    ),
+  liberaciones: (projectId: string) =>
+    request<LiberacionRetencionDto[]>(
+      `/project-system/obras/${projectId}/liberaciones`,
+    ),
+  liberar: (
+    projectId: string,
+    input: LiberacionRetencionInput,
+    clave: string,
+  ) =>
+    request<LiberacionRetencionDto>(
+      `/project-system/obras/${projectId}/liberaciones`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+        headers: idempotencyKey(clave),
+      },
+    ),
+  anularLiberacion: (id: string, motivo: string, version: number) =>
+    request<LiberacionRetencionDto>(
+      `/project-system/liberaciones/${id}/anular`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ motivo }),
+        headers: siVersion(version),
+      },
+    ),
+  modificados: (contratoId: string) =>
+    request<ModificadoSubcontrataDto[]>(
+      `/project-system/subcontratas/${contratoId}/modificados`,
+    ),
+  crearModificado: (
+    contratoId: string,
+    input: ModificadoSubcontrataInput,
+    clave: string,
+  ) =>
+    request<ModificadoSubcontrataDto[]>(
+      `/project-system/subcontratas/${contratoId}/modificados`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+        headers: idempotencyKey(clave),
+      },
+    ),
 };
 
 /** Lotes y números de serie del almacén. */

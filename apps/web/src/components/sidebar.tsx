@@ -73,7 +73,13 @@ const GESTION: NavItem[] = [
     label: 'Cartera clientes y proveedores',
     icon: IconWallet,
   },
+  { href: '/tesoreria/talones', label: 'Talones y cheques', icon: IconWallet },
   { href: '/avales', label: 'Avales y garantías', icon: IconShield },
+  {
+    href: '/project-system',
+    label: 'Project System (retenciones)',
+    icon: IconShield,
+  },
   { href: '/margenes', label: 'Márgenes y presupuesto', icon: IconTrendingUp },
   { href: '/contabilidad', label: 'Contabilidad', icon: IconCalculator },
   {
