@@ -62,6 +62,7 @@ const GESTION: NavItem[] = [
   { href: '/partes', label: 'Partes diarios', icon: IconCalendar },
   { href: '/equipos', label: 'Maquinaria y equipos', icon: IconTruck },
   { href: '/trabajadores', label: 'Trabajadores', icon: IconUsers },
+  { href: '/compras', label: 'Compras (P2P)', icon: IconClipboard },
   { href: '/pedidos', label: 'Pedidos', icon: IconClipboard },
   { href: '/aprobaciones', label: 'Aprobaciones', icon: IconCheck },
   { href: '/facturas', label: 'Facturas', icon: IconReceipt },

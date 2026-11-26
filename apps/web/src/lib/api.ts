@@ -68,6 +68,17 @@ import type {
   PartidasCarteraDto,
   TipoCartera,
   TrazaLoteDto,
+  AdjudicarPeticionInput,
+  ConvertirEnPedidoInput,
+  ConvertirEnPeticionInput,
+  CuadreFacturaDto,
+  FacturaPedidoCreateInput,
+  OfertaRegistrarInput,
+  PedidoCompraDetalleDto,
+  PeticionOfertaDto,
+  RecepcionCreateInput,
+  SolicitudCompraCreateInput,
+  SolicitudCompraDto,
   ConciliacionCierreDto,
   ResultadoCierreProvisionPerdidasDto,
   AjusteConsolidacionCreateInput,
@@ -2301,6 +2312,88 @@ export const carteraApi = {
       body: JSON.stringify({ motivo }),
       headers: siVersion(version),
     }),
+};
+
+/** Procure-to-Pay: solicitudes, peticiones de ofertas, pedidos, recepciones y cuadre. */
+export const comprasApi = {
+  solicitudes: (projectId?: string) =>
+    request<SolicitudCompraDto[]>(`/compras/solicitudes${qs({ projectId })}`),
+  crearSolicitud: (input: SolicitudCompraCreateInput, clave: string) =>
+    request<SolicitudCompraDto>('/compras/solicitudes', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: idempotencyKey(clave),
+    }),
+  accionSolicitud: (
+    id: string,
+    accion: 'enviar' | 'aprobar' | 'rechazar',
+    version: number,
+    motivo?: string,
+  ) =>
+    request<SolicitudCompraDto>(`/compras/solicitudes/${id}/${accion}`, {
+      method: 'POST',
+      body: JSON.stringify(accion === 'rechazar' ? { motivo } : {}),
+      headers: siVersion(version),
+    }),
+  aPedido: (
+    id: string,
+    input: ConvertirEnPedidoInput,
+    version: number,
+    clave: string,
+  ) =>
+    request<PedidoCompraDetalleDto>(`/compras/solicitudes/${id}/pedido`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: { ...idempotencyKey(clave), ...siVersion(version) },
+    }),
+  aPeticion: (
+    id: string,
+    input: ConvertirEnPeticionInput,
+    version: number,
+    clave: string,
+  ) =>
+    request<PeticionOfertaDto>(`/compras/solicitudes/${id}/peticion`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: { ...idempotencyKey(clave), ...siVersion(version) },
+    }),
+  peticiones: () => request<PeticionOfertaDto[]>('/compras/peticiones'),
+  registrarOferta: (id: string, input: OfertaRegistrarInput) =>
+    request<PeticionOfertaDto>(`/compras/peticiones/${id}/ofertas`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  adjudicar: (
+    id: string,
+    input: AdjudicarPeticionInput,
+    version: number,
+    clave: string,
+  ) =>
+    request<PeticionOfertaDto>(`/compras/peticiones/${id}/adjudicar`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: { ...idempotencyKey(clave), ...siVersion(version) },
+    }),
+  pedidos: () => request<PedidoCompraDetalleDto[]>('/compras/pedidos'),
+  pedido: (id: string) =>
+    request<PedidoCompraDetalleDto>(`/compras/pedidos/${id}`),
+  recibir: (id: string, input: RecepcionCreateInput, clave: string) =>
+    request<PedidoCompraDetalleDto>(`/compras/pedidos/${id}/recepciones`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: idempotencyKey(clave),
+    }),
+  facturar: (id: string, input: FacturaPedidoCreateInput, clave: string) =>
+    request<{ factura: InvoiceDto; cuadre: CuadreFacturaDto | null }>(
+      `/compras/pedidos/${id}/factura`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+        headers: idempotencyKey(clave),
+      },
+    ),
+  cuadre: (invoiceId: string) =>
+    request<CuadreFacturaDto | null>(`/compras/facturas/${invoiceId}/cuadre`),
 };
 
 /** Lotes y números de serie del almacén. */
