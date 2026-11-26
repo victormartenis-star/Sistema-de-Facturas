@@ -18,6 +18,8 @@ export interface ContactFormValues {
   email: string | null;
   phone: string | null;
   iban: string | null;
+  sepaMandateRef: string | null;
+  sepaMandateDate: string | null;
   paymentTermsDays: number;
   defaultCategoryId: string | null;
 }
@@ -41,6 +43,8 @@ interface FormState {
   email: string;
   phone: string;
   iban: string;
+  sepaMandateRef: string;
+  sepaMandateDate: string;
   paymentTermsDays: string;
   defaultCategoryId: string;
 }
@@ -53,6 +57,8 @@ const EMPTY: FormState = {
   email: '',
   phone: '',
   iban: '',
+  sepaMandateRef: '',
+  sepaMandateDate: '',
   paymentTermsDays: '30',
   defaultCategoryId: '',
 };
@@ -80,6 +86,8 @@ export function ContactFormModal({
             email: contact.email ?? '',
             phone: contact.phone ?? '',
             iban: contact.iban ?? '',
+            sepaMandateRef: contact.sepaMandateRef ?? '',
+            sepaMandateDate: contact.sepaMandateDate ?? '',
             paymentTermsDays: contact.paymentTermsDays.toString(),
             defaultCategoryId: contact.defaultCategoryId ?? '',
           }
@@ -113,6 +121,8 @@ export function ContactFormModal({
       email: form.email || null,
       phone: form.phone || null,
       iban: form.iban || null,
+      sepaMandateRef: form.sepaMandateRef || null,
+      sepaMandateDate: form.sepaMandateDate || null,
       paymentTermsDays: Number(form.paymentTermsDays),
       defaultCategoryId: form.defaultCategoryId || null,
     });
@@ -246,6 +256,37 @@ export function ContactFormModal({
               onChange={(e) => set('iban')(e.target.value)}
             />
             {errorFor('iban') && <p className={errCls}>{errorFor('iban')}</p>}
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className={labelCls} htmlFor="sepaMandateRef">
+                Mandato SEPA (adeudos)
+              </label>
+              <input
+                id="sepaMandateRef"
+                className={inputCls}
+                placeholder="MND-0001"
+                maxLength={35}
+                value={form.sepaMandateRef}
+                onChange={(e) => set('sepaMandateRef')(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="sepaMandateDate">
+                Firma del mandato
+              </label>
+              <input
+                id="sepaMandateDate"
+                type="date"
+                className={inputCls}
+                value={form.sepaMandateDate}
+                onChange={(e) => set('sepaMandateDate')(e.target.value)}
+              />
+              {errorFor('sepaMandateDate') && (
+                <p className={errCls}>{errorFor('sepaMandateDate')}</p>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

@@ -74,6 +74,17 @@ const GESTION: NavItem[] = [
     icon: IconWallet,
   },
   { href: '/tesoreria/talones', label: 'Talones y cheques', icon: IconWallet },
+  { href: '/tesoreria/remesas', label: 'Remesas SEPA', icon: IconWallet },
+  {
+    href: '/tesoreria/conciliacion-asistida',
+    label: 'Conciliación asistida',
+    icon: IconWallet,
+  },
+  {
+    href: '/tesoreria/liquidez',
+    label: 'Previsión de liquidez',
+    icon: IconWallet,
+  },
   { href: '/avales', label: 'Avales y garantías', icon: IconShield },
   {
     href: '/project-system',

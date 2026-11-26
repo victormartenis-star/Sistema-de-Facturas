@@ -1,4 +1,12 @@
 import { DOCUMENT_MAX_SIZE_MB } from '@erp/shared';
+import type {
+  ConciliacionInput,
+  DesconciliacionInput,
+  LiquidezDto,
+  RemesaCreateInput,
+  RemesaDto,
+  SugerenciasMovimientoDto,
+} from '@erp/shared';
 import {
   ApiError,
   errorDeRespuesta,
@@ -2440,6 +2448,119 @@ export const talonesApi = {
       headers: { ...idempotencyKey(clave), ...siVersion(version) },
     }),
 };
+
+/** Bank Accounting: remesas SEPA, conciliación asistida y previsión de liquidez. */
+export const bancaApi = {
+  remesas: (f: { estado?: string; tipo?: string } = {}) =>
+    request<RemesaDto[]>(`/tesoreria/remesas${qs(f)}`),
+  crearRemesa: (input: RemesaCreateInput, clave: string) =>
+    request<RemesaDto>('/tesoreria/remesas', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: idempotencyKey(clave),
+    }),
+  generar: (id: string, version: number, clave: string) =>
+    request<RemesaDto>(`/tesoreria/remesas/${id}/generar`, {
+      method: 'POST',
+      headers: { ...idempotencyKey(clave), ...siVersion(version) },
+    }),
+  remitir: (id: string, fecha: string, version: number, clave: string) =>
+    request<RemesaDto>(`/tesoreria/remesas/${id}/remitir`, {
+      method: 'POST',
+      body: JSON.stringify({ fecha }),
+      headers: { ...idempotencyKey(clave), ...siVersion(version) },
+    }),
+  anularRemesa: (id: string, motivo: string, version: number, clave: string) =>
+    request<RemesaDto>(`/tesoreria/remesas/${id}/anular`, {
+      method: 'POST',
+      body: JSON.stringify({ motivo }),
+      headers: { ...idempotencyKey(clave), ...siVersion(version) },
+    }),
+  devolverPartida: (
+    id: string,
+    partidaId: string,
+    input: { fecha: string; motivo: string },
+    version: number,
+    clave: string,
+  ) =>
+    request<RemesaDto>(
+      `/tesoreria/remesas/${id}/partidas/${partidaId}/devolver`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+        headers: { ...idempotencyKey(clave), ...siVersion(version) },
+      },
+    ),
+  sugerencias: (bankAccountId: string) =>
+    request<SugerenciasMovimientoDto[]>(
+      `/bank-reconciliation/asistida/sugerencias${qs({ bankAccountId })}`,
+    ),
+  conciliar: (
+    id: string,
+    input: ConciliacionInput,
+    version: number | undefined,
+    clave: string,
+  ) =>
+    request<BankTransactionDto>(
+      `/bank-reconciliation/transacciones/${id}/conciliacion`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+        headers: { ...idempotencyKey(clave), ...siVersion(version) },
+      },
+    ),
+  desconciliar: (
+    id: string,
+    input: DesconciliacionInput,
+    version: number | undefined,
+    clave: string,
+  ) =>
+    request<BankTransactionDto>(
+      `/bank-reconciliation/transacciones/${id}/desconciliacion`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+        headers: { ...idempotencyKey(clave), ...siVersion(version) },
+      },
+    ),
+  liquidez: (f: {
+    desde?: string;
+    horizontes?: string;
+    bankAccountId?: string;
+    projectId?: string;
+    plazoCobroDias?: number;
+    plazoPagoDias?: number;
+  }) => request<LiquidezDto>(`/tesoreria/liquidez${qs(f)}`),
+};
+
+/** Descarga el fichero SEPA XML guardado de una remesa. */
+export async function descargarRemesaXml(id: string): Promise<void> {
+  const session = readStoredSession();
+  const res = await fetch(`${API_URL}/tesoreria/remesas/${id}/xml`, {
+    headers: session?.accessToken
+      ? { Authorization: `Bearer ${session.accessToken}` }
+      : {},
+  });
+  if (!res.ok) {
+    let body: unknown = null;
+    try {
+      body = await res.json();
+    } catch {
+      // sin cuerpo JSON
+    }
+    throw errorDeRespuesta(res.status, body);
+  }
+  const nombre =
+    /filename="([^"]+)"/.exec(
+      res.headers.get('Content-Disposition') ?? '',
+    )?.[1] ?? `remesa-${id}.xml`;
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nombre;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 /** Project System: retenciones, liberación por hito o aval y modificados. */
 export const projectSystemApi = {
