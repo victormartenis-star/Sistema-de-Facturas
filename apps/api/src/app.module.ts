@@ -40,6 +40,8 @@ import { ActivosModule } from './activos/activos.module';
 import { AlmacenModule } from './almacen/almacen.module';
 import { CarteraModule } from './cartera/cartera.module';
 import { ComprasModule } from './compras/compras.module';
+import { ProjectSystemModule } from './project-system/project-system.module';
+import { TalonesModule } from './talones/talones.module';
 import { AprobacionesModule } from './aprobaciones/aprobaciones.module';
 import { HoldingModule } from './holding/holding.module';
 import { WipModule } from './wip/wip.module';
@@ -90,6 +92,8 @@ import { InformesModule } from './modules/informes/informes.module';
     ContabilidadModule,
     CarteraModule,
     ComprasModule,
+    TalonesModule,
+    ProjectSystemModule,
     ActivosModule,
     AlmacenModule,
     AprobacionesModule,

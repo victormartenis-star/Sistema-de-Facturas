@@ -126,6 +126,7 @@ function settlementToDto(
     createdAt: s.createdAt.toISOString(),
     version: s.version,
     origen: s.source as 'tesoreria' | 'anticipo' | 'compensacion',
+    talonId: s.checkId,
   };
 }
 

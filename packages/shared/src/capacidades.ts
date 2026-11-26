@@ -46,6 +46,10 @@ export const RECURSOS_UI = [
   'compra',
   /** Recepción de mercancías y servicios: también el jefe de obra. */
   'recepcion',
+  /** Talonarios y talones bancarios: admin, gerente y administración. */
+  'talon',
+  /** Liberación y sustitución de retenciones, modificados de contrato: admin, gerente y administración. */
+  'retencion',
 ] as const;
 export type RecursoUi = (typeof RECURSOS_UI)[number];
 
@@ -74,7 +78,9 @@ export function can(
     recurso === 'contabilidad' ||
     recurso === 'aval' ||
     recurso === 'cartera' ||
-    recurso === 'compra';
+    recurso === 'compra' ||
+    recurso === 'talon' ||
+    recurso === 'retencion';
   if (restringida) return ROLES_RECTIFICAR.includes(rol);
   return true;
 }

@@ -37,6 +37,12 @@ import {
   type EstadoPeticionOferta,
   type EstadoSolicitudCompra,
 } from './compras';
+import {
+  TALONARIO_TRANSITIONS,
+  TALON_TRANSITIONS,
+  type EstadoTalon,
+  type EstadoTalonario,
+} from './talones';
 import { AVAL_TRANSITIONS } from './avales';
 import type { EstadoCierreEjercicio } from './cierre-ejercicio';
 import { CIERRE_EJERCICIO_TRANSITIONS } from './cierre-ejercicio';
@@ -107,6 +113,11 @@ export interface EstadoPorEntidad {
   /** Solicitud de compra (PR) y petición de ofertas (RFQ). */
   purchase_requisition: EstadoSolicitudCompra;
   purchase_rfq: EstadoPeticionOferta;
+  /** Talón o cheque bancario y su talonario. */
+  check: EstadoTalon;
+  checkbook: EstadoTalonario;
+  /** Liberación de retenciones (aval o hito): vigente → anulado. */
+  retention_release: EstadoDocumentoCartera;
 }
 
 export type EntidadConEstado = keyof EstadoPorEntidad;
@@ -180,6 +191,12 @@ function tablaDe(entidad: EntidadConEstado): Record<string, readonly string[]> {
       return SOLICITUD_COMPRA_TRANSITIONS;
     case 'purchase_rfq':
       return PETICION_OFERTA_TRANSITIONS;
+    case 'check':
+      return TALON_TRANSITIONS;
+    case 'checkbook':
+      return TALONARIO_TRANSITIONS;
+    case 'retention_release':
+      return DOCUMENTO_CARTERA_TRANSITIONS;
   }
 }
 

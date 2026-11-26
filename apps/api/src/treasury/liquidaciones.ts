@@ -63,6 +63,8 @@ export interface DatosLiquidacion {
     anticipoId?: string;
     compensacionId?: string;
   };
+  /** Talón con que se paga o cobra (se anula solo desde el talón). */
+  talonId?: string;
 }
 
 function liquidacionBloqueada(): ConflictException {
@@ -274,6 +276,7 @@ export async function registrarLiquidacion(
       offsetAccount: datos.noMonetaria?.contrapartida ?? null,
       advanceId: datos.noMonetaria?.anticipoId ?? null,
       nettingId: datos.noMonetaria?.compensacionId ?? null,
+      checkId: datos.talonId ?? null,
       createdBy: ctx.userId,
     })
     .returning();
@@ -364,6 +367,13 @@ export async function anularLiquidacion(
   }
   if (actual.source !== 'tesoreria' && !desdeDocumento) {
     throw liquidacionBloqueada();
+  }
+  if (actual.checkId && !desdeDocumento) {
+    throw new ConflictException({
+      code: 'CHECK_SETTLEMENT_LOCKED',
+      message:
+        'La liquidación se hizo con un talón: anúlalo, detenlo o devuélvelo desde Talones',
+    });
   }
   const { factura, vencimiento } = await bloquearVencimiento(
     ctx,

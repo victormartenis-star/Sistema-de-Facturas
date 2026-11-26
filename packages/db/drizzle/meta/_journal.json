@@ -477,6 +477,13 @@
       "when": 1795693517271,
       "tag": "0067_procure_to_pay",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1795696130354,
+      "tag": "0068_talones_retenciones",
+      "breakpoints": true
     }
   ]
 }

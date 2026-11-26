@@ -49,6 +49,7 @@ export const PAYMENT_INSTRUMENTS = [
   'pagare',
   'efectivo',
   'domiciliacion',
+  'talon',
 ] as const;
 export type PaymentInstrument = (typeof PAYMENT_INSTRUMENTS)[number];
 
@@ -58,6 +59,7 @@ export const PAYMENT_INSTRUMENT_LABELS: Record<PaymentInstrument, string> = {
   pagare: 'Pagaré',
   efectivo: 'Efectivo',
   domiciliacion: 'Domiciliación',
+  talon: 'Talón / cheque',
 };
 
 export const setPaymentInstrumentSchema = z.object({
@@ -162,6 +164,8 @@ export interface SettlementDto {
    * compensación (se anulan desde su documento en la cartera).
    */
   origen?: 'tesoreria' | 'anticipo' | 'compensacion';
+  /** Talón con que se liquidó (se anula desde Talones). */
+  talonId?: string | null;
 }
 
 export interface MilestoneDetailDto extends MilestoneDto {

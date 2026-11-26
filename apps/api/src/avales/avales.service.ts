@@ -41,6 +41,7 @@ import {
   aplicarMovimientoAval,
   asientoComisionAval,
   asientoEjecucionAval,
+  motivoReduccionAvalSustituto,
   avalAnularSchema,
   avalComisionSchema,
   avalCreateSchema,
@@ -100,6 +101,7 @@ import {
 import { verificarVersion } from '../common/version';
 import { ContabilidadService } from '../contabilidad/contabilidad.service';
 import { DbService } from '../db/db.service';
+import { sustituidoPorAval } from '../project-system/retenciones';
 
 const hoyIso = () => new Date().toISOString().slice(0, 10);
 
@@ -1015,6 +1017,20 @@ export class AvalesService {
               code: r.codigo,
               message: r.mensaje,
             });
+      }
+      // Un aval que sustituye retenciones no se libera ni vence por debajo de
+      // lo que sustituye (ejecutarlo sí: es cobrar la garantía).
+      if (tipo !== 'ejecucion') {
+        const motivoSust = motivoReduccionAvalSustituto({
+          saldoVivoTras: r.saldoVivo,
+          sustituido: await sustituidoPorAval(tx, g.id),
+        });
+        if (motivoSust) {
+          throw new ConflictException({
+            code: 'PS_GUARANTEE_SUBSTITUTING',
+            message: motivoSust,
+          });
+        }
       }
       const movId = randomUUID();
       let asientoId: string | null = null;

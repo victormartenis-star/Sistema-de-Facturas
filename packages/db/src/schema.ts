@@ -770,6 +770,7 @@ export const paymentInstrumentEnum = pgEnum('payment_instrument', [
   'pagare',
   'efectivo',
   'domiciliacion',
+  'talon',
 ]);
 
 export const milestoneStatusEnum = pgEnum('milestone_status', [
@@ -3674,6 +3675,7 @@ export const journalEntrySourceEnum = pgEnum('journal_entry_source', [
   'apertura_ejercicio',
   'aplicacion_resultado',
   'anticipo',
+  'talon',
 ]);
 
 export const journalEntryStatusEnum = pgEnum('journal_entry_status', [
@@ -3836,6 +3838,8 @@ export const paymentSettlements = pgTable(
     offsetAccount: varchar('offset_account', { length: 10 }),
     advanceId: uuid('advance_id').references(() => thirdPartyAdvances.id),
     nettingId: uuid('netting_id').references(() => thirdPartyNettings.id),
+    /** Talón con que se paga o cobra (contrapartida 5729 hasta su compensación, 0068). */
+    checkId: uuid('check_id').references(() => checks.id),
     reversalReason: varchar('reversal_reason', { length: 240 }),
     reversedAt: timestamp('reversed_at', { withTimezone: true }),
     reversedBy: uuid('reversed_by').references(() => users.id),
@@ -6066,6 +6070,231 @@ export const goodsReceiptLines = pgTable(
     check(
       'goods_receipt_lines_valores',
       sql`${t.quantity} > 0 AND ${t.amount} >= 0`,
+    ),
+  ],
+);
+
+/* ─────────────── Talones y cheques bancarios (0068) ───────────────
+ * Talonarios por cuenta bancaria y talones emitidos (pago) o recibidos
+ * (cobro). Cada talón liquida un vencimiento con contrapartida 5729
+ * (talones en tránsito) y, al compensarse, 5729 ↔ 5720. Reglas en
+ * `@erp/shared/talones`.
+ */
+
+export const checkbooks = pgTable(
+  'checkbooks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    bankAccountId: uuid('bank_account_id')
+      .notNull()
+      .references(() => bankAccounts.id),
+    prefix: varchar('prefix', { length: 10 }).notNull().default(''),
+    firstNumber: integer('first_number').notNull(),
+    lastNumber: integer('last_number').notNull(),
+    nextNumber: integer('next_number').notNull(),
+    status: varchar('status', { length: 10 }).notNull().default('activo'),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('checkbooks_company_account_idx').on(t.companyId, t.bankAccountId),
+    check(
+      'checkbooks_rango',
+      sql`${t.firstNumber} >= 1 AND ${t.lastNumber} >= ${t.firstNumber}
+        AND ${t.nextNumber} BETWEEN ${t.firstNumber} AND ${t.lastNumber} + 1
+        AND ${t.status} IN ('activo', 'agotado', 'anulado')`,
+    ),
+  ],
+);
+
+export type Checkbook = typeof checkbooks.$inferSelect;
+
+export const checks = pgTable(
+  'checks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    direction: varchar('direction', { length: 10 }).notNull(),
+    checkbookId: uuid('checkbook_id').references(() => checkbooks.id),
+    sequence: integer('sequence'),
+    number: varchar('number', { length: 40 }).notNull(),
+    bankAccountId: uuid('bank_account_id')
+      .notNull()
+      .references(() => bankAccounts.id),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id),
+    milestoneId: uuid('milestone_id')
+      .notNull()
+      .references(() => paymentMilestones.id),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    issueDate: date('issue_date').notNull(),
+    dueDate: date('due_date'),
+    deliveredOn: date('delivered_on'),
+    clearedOn: date('cleared_on'),
+    voidedOn: date('voided_on'),
+    status: varchar('status', { length: 10 }).notNull().default('emitido'),
+    reason: varchar('reason', { length: 240 }),
+    memo: varchar('memo', { length: 240 }),
+    clearingEntryId: uuid('clearing_entry_id').references(
+      () => journalEntries.id,
+    ),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('checks_checkbook_sequence_unique')
+      .on(t.checkbookId, t.sequence)
+      .where(sql`checkbook_id IS NOT NULL`),
+    uniqueIndex('checks_account_direction_number_unique').on(
+      t.companyId,
+      t.bankAccountId,
+      t.direction,
+      t.number,
+    ),
+    index('checks_company_status_idx').on(t.companyId, t.status),
+    index('checks_milestone_idx').on(t.milestoneId),
+    check(
+      'checks_valores',
+      sql`${t.amount} > 0
+        AND ${t.direction} IN ('emitido', 'recibido')
+        AND ${t.status} IN ('emitido', 'entregado', 'cobrado', 'anulado', 'detenido', 'devuelto')
+        AND (${t.direction} = 'emitido') = (${t.checkbookId} IS NOT NULL AND ${t.sequence} IS NOT NULL)
+        AND (${t.dueDate} IS NULL OR ${t.dueDate} >= ${t.issueDate})
+        AND (${t.status} <> 'cobrado' OR ${t.clearedOn} IS NOT NULL)
+        AND (${t.status} NOT IN ('anulado', 'detenido', 'devuelto') OR (${t.voidedOn} IS NOT NULL AND ${t.reason} IS NOT NULL))`,
+    ),
+  ],
+);
+
+export type Check = typeof checks.$inferSelect;
+
+/* ─────────── Project System: retenciones y modificados (0068) ───────────
+ * Liberación de retenciones de garantía (vencimientos `retencion` de cobro o
+ * pago) por hito o por sustitución con aval: adelanta su vencimiento y guarda
+ * el anterior para poder deshacerla. Modificados del contrato de subcontrata.
+ */
+
+export const retentionReleases = pgTable(
+  'retention_releases',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    kind: varchar('kind', { length: 10 }).notNull(),
+    side: milestoneDirectionEnum('side').notNull(),
+    projectId: uuid('project_id').references(() => projects.id),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id),
+    guaranteeId: uuid('guarantee_id').references(() => bankGuarantees.id),
+    releaseDate: date('release_date').notNull(),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    reason: varchar('reason', { length: 240 }).notNull(),
+    status: varchar('status', { length: 10 }).notNull().default('vigente'),
+    cancelReason: varchar('cancel_reason', { length: 240 }),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('retention_releases_company_project_idx').on(
+      t.companyId,
+      t.projectId,
+    ),
+    index('retention_releases_guarantee_idx')
+      .on(t.guaranteeId)
+      .where(sql`guarantee_id IS NOT NULL`),
+    check(
+      'retention_releases_valores',
+      sql`${t.amount} > 0 AND ${t.kind} IN ('aval', 'hito')
+        AND (${t.kind} = 'aval') = (${t.guaranteeId} IS NOT NULL)
+        AND ${t.status} IN ('vigente', 'anulado')
+        AND (${t.status} = 'anulado') = (${t.cancelReason} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export type RetentionRelease = typeof retentionReleases.$inferSelect;
+
+export const retentionReleaseLines = pgTable(
+  'retention_release_lines',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    releaseId: uuid('release_id')
+      .notNull()
+      .references(() => retentionReleases.id),
+    milestoneId: uuid('milestone_id')
+      .notNull()
+      .references(() => paymentMilestones.id),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    previousDueDate: date('previous_due_date').notNull(),
+  },
+  (t) => [
+    index('retention_release_lines_release_idx').on(t.releaseId),
+    index('retention_release_lines_milestone_idx').on(t.milestoneId),
+    check('retention_release_lines_importe', sql`${t.amount} > 0`),
+  ],
+);
+
+export const subcontractChanges = pgTable(
+  'subcontract_changes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    contractId: uuid('contract_id')
+      .notNull()
+      .references(() => contratosSubcontrata.id),
+    number: integer('number').notNull(),
+    changeDate: date('change_date').notNull(),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    previousAmount: numeric('previous_amount', {
+      precision: 14,
+      scale: 2,
+    }).notNull(),
+    newAmount: numeric('new_amount', { precision: 14, scale: 2 }).notNull(),
+    reason: varchar('reason', { length: 500 }).notNull(),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('subcontract_changes_contract_number_unique').on(
+      t.contractId,
+      t.number,
+    ),
+    check(
+      'subcontract_changes_valores',
+      sql`${t.amount} <> 0 AND ${t.newAmount} > 0`,
     ),
   ],
 );

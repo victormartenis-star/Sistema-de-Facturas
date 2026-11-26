@@ -57,6 +57,7 @@ import {
   cuentaUpdateSchema,
   errorCuadre,
   esCuentaTercero,
+  CUENTA_TALONES_TRANSITO,
   filasSumasSaldos,
   fromCents,
   lineasContraAsiento,
@@ -439,6 +440,51 @@ export class ContabilidadService {
   async contabilizarEnTx(tx: Tx, a: NuevoAsiento): Promise<JournalEntry> {
     await this.asegurarPlan(tx, a.companyId);
     return this.contabilizar(tx, a);
+  }
+
+  /**
+   * Contabiliza una liquidación en el momento, dentro de la transacción del
+   * llamador (talones: respeta el período cerrado al emitir). La interfaz no
+   * la vuelve a contabilizar porque ya tiene asiento vivo.
+   */
+  async contabilizarLiquidacionEnTx(
+    tx: Tx,
+    companyId: string,
+    settlementId: string,
+  ): Promise<void> {
+    await this.asegurarPlan(tx, companyId);
+    await this.contabilizarLiquidacion(tx, companyId, settlementId);
+  }
+
+  /**
+   * Anula (contra-asiento a `fecha`) el asiento vivo de un origen, si existe.
+   * Devuelve el id del contra-asiento o null. La interfaz no vuelve a
+   * anularlo porque ya no está contabilizado.
+   */
+  async anularDeOrigenEnTx(
+    tx: Tx,
+    companyId: string,
+    origenes: OrigenAsiento[],
+    origenId: string,
+    motivo: string,
+    fecha: string,
+  ): Promise<string | null> {
+    const [vivo] = await tx
+      .select({ id: journalEntries.id })
+      .from(journalEntries)
+      .where(
+        and(
+          eq(journalEntries.companyId, companyId),
+          inArray(journalEntries.source, origenes),
+          eq(journalEntries.sourceId, origenId),
+          eq(journalEntries.status, 'contabilizado'),
+          isNull(journalEntries.reversesId),
+        ),
+      )
+      .limit(1);
+    if (!vivo) return null;
+    const contra = await this.anularEnTx(tx, companyId, vivo.id, motivo, fecha);
+    return contra.id;
   }
 
   async crearAsientoManual(input: AsientoCreateInput): Promise<AsientoDto> {
@@ -1425,6 +1471,7 @@ export class ContabilidadService {
         contactName: contacts.legalName,
         source: paymentSettlements.source,
         offsetAccount: paymentSettlements.offsetAccount,
+        checkId: paymentSettlements.checkId,
       })
       .from(paymentSettlements)
       .innerJoin(
@@ -1447,14 +1494,18 @@ export class ContabilidadService {
       amount: l.amount,
       invoiceNumber: l.invoiceNumber,
       contactName: l.contactName,
-      // Liquidación no monetaria: aplicación de anticipo o compensación.
-      contrapartida: l.offsetAccount ?? undefined,
+      // Liquidación no monetaria (anticipo, compensación) o por talón: el
+      // talón va a 5729 (en tránsito) hasta que el banco lo compensa.
+      contrapartida:
+        l.offsetAccount ?? (l.checkId ? CUENTA_TALONES_TRANSITO : undefined),
       detalle:
         l.source === 'anticipo'
           ? 'aplicación de anticipo'
           : l.source === 'compensacion'
             ? 'compensación'
-            : undefined,
+            : l.checkId
+              ? 'talón'
+              : undefined,
     });
     if (lineas.length < 2) return;
     await this.contabilizar(tx, {

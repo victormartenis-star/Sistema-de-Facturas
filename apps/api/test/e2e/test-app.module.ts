@@ -44,6 +44,8 @@ import { WipModule } from '../../src/wip/wip.module';
 import { AvalesModule } from '../../src/avales/avales.module';
 import { CarteraModule } from '../../src/cartera/cartera.module';
 import { ComprasModule } from '../../src/compras/compras.module';
+import { ProjectSystemModule } from '../../src/project-system/project-system.module';
+import { TalonesModule } from '../../src/talones/talones.module';
 import { UsersModule } from '../../src/users/users.module';
 import { SubcontratasModule } from '../../src/modules/subcontratas/subcontratas.module';
 
@@ -118,6 +120,8 @@ import { SubcontratasModule } from '../../src/modules/subcontratas/subcontratas.
     AvalesModule,
     CarteraModule,
     ComprasModule,
+    TalonesModule,
+    ProjectSystemModule,
     DashboardModule,
     CopilotoModule,
     UsersModule,

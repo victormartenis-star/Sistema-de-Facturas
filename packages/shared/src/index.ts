@@ -70,4 +70,6 @@ export * from './memoria-abreviada';
 export * from './cartera';
 export * from './lotes';
 export * from './compras';
+export * from './talones';
+export * from './project-system';
 export * from './consolidacion';

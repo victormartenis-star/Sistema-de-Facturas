@@ -132,8 +132,9 @@ describe('Contabilidad general (integración)', () => {
     const inexistente = await authed(app, token)
       .post('/contabilidad/asientos')
       .send(
+        // 5729 ya existe (talones en tránsito, 0068): se usa otra cuenta ausente.
         asiento([
-          { cuenta: '5729', debe: 100 },
+          { cuenta: '5798', debe: 100 },
           { cuenta: '1000', haber: 100 },
         ]),
       );

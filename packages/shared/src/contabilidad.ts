@@ -60,6 +60,7 @@ export const ORIGENES_ASIENTO = [
   'apertura_ejercicio',
   'aplicacion_resultado',
   'anticipo',
+  'talon',
 ] as const;
 export type OrigenAsiento = (typeof ORIGENES_ASIENTO)[number];
 
@@ -84,6 +85,7 @@ export const ORIGEN_ASIENTO_LABELS: Record<OrigenAsiento, string> = {
   apertura_ejercicio: 'Apertura del ejercicio',
   aplicacion_resultado: 'Aplicación del resultado',
   anticipo: 'Anticipo de cliente o a proveedor',
+  talon: 'Compensación de talón',
 };
 
 export const ESTADOS_ASIENTO = ['contabilizado', 'anulado'] as const;
@@ -220,6 +222,7 @@ export function planContableBase(): CuentaPlan[] {
     c('5700', 'Caja, euros', 'activo'),
     c('572', 'Bancos e instituciones de crédito c/c', 'activo'),
     c('5720', 'Bancos c/c', 'activo'),
+    c('5729', 'Bancos c/c, talones en tránsito', 'activo'),
     c('555', 'Partidas pendientes de aplicación', 'activo'),
     c('5550', 'Partidas pendientes de aplicación', 'activo'),
     c('600', 'Compras de materiales', 'gasto'),
