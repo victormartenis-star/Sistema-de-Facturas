@@ -61,6 +61,11 @@ const GESTION: NavItem[] = [
   { href: '/comparativos', label: 'Comparativos', icon: IconTrendingUp },
   { href: '/partes', label: 'Partes diarios', icon: IconCalendar },
   { href: '/equipos', label: 'Maquinaria y equipos', icon: IconTruck },
+  {
+    href: '/maquinaria',
+    label: 'Mantenimiento y explotación',
+    icon: IconTruck,
+  },
   { href: '/trabajadores', label: 'Trabajadores', icon: IconUsers },
   { href: '/compras', label: 'Compras (P2P)', icon: IconClipboard },
   { href: '/pedidos', label: 'Pedidos', icon: IconClipboard },

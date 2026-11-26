@@ -41,6 +41,7 @@ import { registrarCartera } from './tools/cartera';
 import { registrarCompras } from './tools/compras';
 import { registrarTalonesProyecto } from './tools/talones-proyecto';
 import { registrarBanca } from './tools/banca';
+import { registrarEam } from './tools/eam';
 
 async function main() {
   const server = new McpServer({
@@ -77,6 +78,7 @@ async function main() {
   registrarCompras(server);
   registrarTalonesProyecto(server);
   registrarBanca(server);
+  registrarEam(server);
 
   await server.connect(new StdioServerTransport());
   console.error(`[erp-mcp] conectado. API: ${BASE_URL}`);

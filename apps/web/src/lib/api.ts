@@ -1,5 +1,20 @@
 import { DOCUMENT_MAX_SIZE_MB } from '@erp/shared';
 import type {
+  AsignacionCreateInput,
+  AsignacionDto,
+  EquipoEamDto,
+  ExplotacionDto,
+  FichaEquipoInput,
+  LecturaContadorDto,
+  LecturaContadorInput,
+  OrdenAccionInput,
+  OrdenCreateInput,
+  OrdenTrabajoDto,
+  PlanCreateInput,
+  PlanMantenimientoDto,
+  PlanUpdateInput,
+} from '@erp/shared';
+import type {
   ConciliacionInput,
   DesconciliacionInput,
   LiquidezDto,
@@ -2447,6 +2462,92 @@ export const talonesApi = {
       body: JSON.stringify(input),
       headers: { ...idempotencyKey(clave), ...siVersion(version) },
     }),
+};
+
+/** EAM de maquinaria: ficha, contadores, asignaciones, planes, órdenes y explotación. */
+export const eamApi = {
+  equipos: (projectId?: string) =>
+    request<EquipoEamDto[]>(`/eam/equipos${qs({ projectId })}`),
+  equipo: (id: string) => request<EquipoEamDto>(`/eam/equipos/${id}`),
+  ficha: (id: string, input: FichaEquipoInput, version: number) =>
+    request<EquipoEamDto>(`/eam/equipos/${id}/ficha`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+      headers: siVersion(version),
+    }),
+  lecturas: (id: string) =>
+    request<LecturaContadorDto[]>(`/eam/equipos/${id}/lecturas`),
+  registrarLectura: (
+    id: string,
+    input: LecturaContadorInput,
+    version: number,
+    clave: string,
+  ) =>
+    request<EquipoEamDto>(`/eam/equipos/${id}/lecturas`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: { ...idempotencyKey(clave), ...siVersion(version) },
+    }),
+  asignaciones: (id: string) =>
+    request<AsignacionDto[]>(`/eam/equipos/${id}/asignaciones`),
+  asignar: (id: string, input: AsignacionCreateInput, clave: string) =>
+    request<AsignacionDto>(`/eam/equipos/${id}/asignaciones`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: idempotencyKey(clave),
+    }),
+  cerrarAsignacion: (id: string, hasta: string, version: number) =>
+    request<AsignacionDto>(`/eam/asignaciones/${id}/cerrar`, {
+      method: 'POST',
+      body: JSON.stringify({ hasta }),
+      headers: siVersion(version),
+    }),
+  planes: (id: string) =>
+    request<PlanMantenimientoDto[]>(`/eam/equipos/${id}/planes`),
+  crearPlan: (id: string, input: PlanCreateInput, clave: string) =>
+    request<PlanMantenimientoDto>(`/eam/equipos/${id}/planes`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: idempotencyKey(clave),
+    }),
+  actualizarPlan: (id: string, input: PlanUpdateInput, version: number) =>
+    request<PlanMantenimientoDto>(`/eam/planes/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+      headers: siVersion(version),
+    }),
+  generarOrdenes: (clave: string) =>
+    request<OrdenTrabajoDto[]>('/eam/planes/generar-ordenes', {
+      method: 'POST',
+      body: JSON.stringify({}),
+      headers: idempotencyKey(clave),
+    }),
+  ordenes: (
+    f: { equipoId?: string; projectId?: string; estado?: string } = {},
+  ) => request<OrdenTrabajoDto[]>(`/eam/ordenes${qs(f)}`),
+  crearOrden: (input: OrdenCreateInput, clave: string) =>
+    request<OrdenTrabajoDto>('/eam/ordenes', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: idempotencyKey(clave),
+    }),
+  accionOrden: (
+    id: string,
+    input: OrdenAccionInput,
+    version: number,
+    clave: string,
+  ) =>
+    request<OrdenTrabajoDto>(`/eam/ordenes/${id}/acciones`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: { ...idempotencyKey(clave), ...siVersion(version) },
+    }),
+  explotacion: (f: {
+    desde: string;
+    hasta: string;
+    projectId?: string;
+    jornadaHoras?: number;
+  }) => request<ExplotacionDto>(`/eam/explotacion${qs(f)}`),
 };
 
 /** Bank Accounting: remesas SEPA, conciliación asistida y previsión de liquidez. */
