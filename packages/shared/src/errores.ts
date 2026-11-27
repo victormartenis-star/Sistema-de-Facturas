@@ -47,6 +47,17 @@ export const TITULO_POR_CODIGO: Readonly<Record<string, string>> = {
   HOLDING_MEMBER_DUPLICATE: 'Sociedad ya integrada en el grupo',
   INTERCOMPANY_MISMATCH: 'Descuadre intercompañía',
   CONSOLIDATION_PERIOD_CLOSED: 'Periodo de consolidación cerrado',
+  CONSOLIDATION_INVESTMENT_REQUIRED:
+    'La puesta en equivalencia exige el coste de la inversión',
+  CONSOLIDATION_INVESTMENT_INVALID: 'Parámetros de inversión no válidos',
+  GROUP_COMPANY_NIF_DUPLICATE: 'Ya existe una sociedad con ese NIF',
+  GROUP_COMPANY_NOT_FOUND: 'Sociedad no encontrada',
+  GROUP_COMPANY_CURRENCY_LOCKED:
+    'La moneda funcional no se cambia con asientos registrados',
+  FX_RATE_MISSING: 'Falta un tipo de cambio de consolidación',
+  FX_RATE_DUPLICATE: 'Tipo de cambio duplicado',
+  FX_RATE_NOT_FOUND: 'Tipo de cambio no encontrado',
+  FX_SAME_CURRENCY: 'La moneda es la de presentación del grupo',
   MATERIAL_REQUEST_OVER_SERVED: 'Se sirve más de lo solicitado',
   WIP_ALREADY_POSTED: 'Obra en curso ya contabilizada en el periodo',
   WIP_PERIOD_OUT_OF_ORDER: 'Periodo anterior al último cierre de obra en curso',

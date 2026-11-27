@@ -39,18 +39,41 @@ export const projectStatusEnum = pgEnum('project_status', [
   'cerrada',
 ]);
 
-export const companies = pgTable('companies', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  name: text('name').notNull(),
-  taxId: text('tax_id').notNull(),
-  settings: jsonb('settings').notNull().default({}),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const companies = pgTable(
+  'companies',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    taxId: text('tax_id').notNull(),
+    settings: jsonb('settings').notNull().default({}),
+    /** Moneda funcional ISO 4217 (la de su mayor). */
+    functionalCurrency: char('functional_currency', { length: 3 })
+      .notNull()
+      .default('EUR'),
+    /**
+     * Sociedad que la dio de alta desde Group Reporting (`POST
+     * /holding/sociedades`). Las sociedades así creadas nunca son la empresa
+     * por defecto del registro público.
+     */
+    createdByCompanyId: uuid('created_by_company_id').references(
+      (): AnyPgColumn => companies.id,
+    ),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('companies_created_by_company_idx').on(t.createdByCompanyId),
+    check(
+      'companies_functional_currency',
+      sql`${t.functionalCurrency} ~ '^[A-Z]{3}$'`,
+    ),
+  ],
+);
 
 export const projects = pgTable(
   'projects',
@@ -4757,6 +4780,7 @@ export type UserCompanyGrant = typeof userCompanyGrants.$inferSelect;
 export const consolidationMethodEnum = pgEnum('consolidation_method', [
   'global',
   'proporcional',
+  'puesta_equivalencia',
 ]);
 
 export const corporateGroups = pgTable(
@@ -4803,6 +4827,20 @@ export const corporateGroupMembers = pgTable(
     method: consolidationMethodEnum('method').notNull().default('global'),
     startDate: date('start_date').notNull(),
     endDate: date('end_date'),
+    /** Fecha de toma de control (primera consolidación); null = `start_date`. */
+    acquisitionDate: date('acquisition_date'),
+    /** Coste de la participación en la dominante, en moneda de presentación. */
+    investmentCost: numeric('investment_cost', { precision: 14, scale: 2 }),
+    /** Cuenta 2xx de la dominante que recoge la participación (p. ej. 2403). */
+    investmentAccount: varchar('investment_account', { length: 10 }),
+    /**
+     * Patrimonio neto de la dependiente (100 %) a la toma de control, en su
+     * moneda funcional. Null = se calcula de su mayor a esa fecha.
+     */
+    equityAtAcquisition: numeric('equity_at_acquisition', {
+      precision: 14,
+      scale: 2,
+    }),
     version: integer('version').notNull().default(1),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -4812,6 +4850,12 @@ export const corporateGroupMembers = pgTable(
       .defaultNow(),
   },
   (t) => [
+    check(
+      'corporate_group_members_inversion',
+      sql`(${t.investmentCost} IS NULL) = (${t.investmentAccount} IS NULL)
+        AND (${t.investmentCost} IS NULL OR ${t.investmentCost} >= 0)
+        AND (${t.investmentAccount} IS NULL OR ${t.investmentAccount} ~ '^2[0-9]{3,9}$')`,
+    ),
     // Una sociedad no puede estar dos veces activa en el mismo grupo.
     uniqueIndex('corporate_group_members_activa_unique')
       .on(t.groupId, t.memberCompanyId)
@@ -4920,6 +4964,68 @@ export const consolidationClosings = pgTable(
 );
 
 export type ConsolidationClosing = typeof consolidationClosings.$inferSelect;
+
+export const consolidationFxRateTypeEnum = pgEnum(
+  'consolidation_fx_rate_type',
+  ['cierre', 'medio', 'historico'],
+);
+
+/**
+ * Tipos de cambio de consolidación del grupo (método del tipo de cambio de
+ * cierre, NOFCAC art. 61 / NIC 21): unidades de la moneda de presentación
+ * del grupo por 1 unidad de `currency`. Cierre e histórico valen para una
+ * fecha (`valid_from = valid_to`); el medio, para un periodo.
+ */
+export const consolidationFxRates = pgTable(
+  'consolidation_fx_rates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** Matriz (dueña del grupo). */
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    groupId: uuid('group_id')
+      .notNull()
+      .references(() => corporateGroups.id, { onDelete: 'restrict' }),
+    currency: char('currency', { length: 3 }).notNull(),
+    rateType: consolidationFxRateTypeEnum('rate_type').notNull(),
+    validFrom: date('valid_from').notNull(),
+    validTo: date('valid_to').notNull(),
+    rate: numeric('rate', { precision: 18, scale: 8 }).notNull(),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('consolidation_fx_rates_unique').on(
+      t.groupId,
+      t.currency,
+      t.rateType,
+      t.validFrom,
+      t.validTo,
+    ),
+    index('consolidation_fx_rates_company_group_idx').on(
+      t.companyId,
+      t.groupId,
+      t.currency,
+    ),
+    check(
+      'consolidation_fx_rates_valores',
+      sql`${t.rate} > 0 AND ${t.currency} ~ '^[A-Z]{3}$' AND ${t.validTo} >= ${t.validFrom}`,
+    ),
+    check(
+      'consolidation_fx_rates_fecha_unica',
+      sql`${t.rateType} = 'medio' OR ${t.validFrom} = ${t.validTo}`,
+    ),
+  ],
+);
+
+export type ConsolidationFxRate = typeof consolidationFxRates.$inferSelect;
 
 /* ───────────────────── Solicitudes de material de obra ─────────────────────
  * Reserva de stock por obra y requisición de compra del faltante (SAP MM,

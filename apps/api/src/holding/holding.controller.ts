@@ -19,6 +19,10 @@ import {
   miembroUpdateSchema,
   periodoConsolidacionSchema,
   permisoConsolidacionSchema,
+  sociedadCreateSchema,
+  sociedadUpdateSchema,
+  tipoCambioCreateSchema,
+  tipoCambioUpdateSchema,
   type AjusteConsolidacionCreateInput,
   type AnularAjusteInput,
   type GrupoCreateInput,
@@ -27,12 +31,17 @@ import {
   type MiembroUpdateInput,
   type PeriodoConsolidacion,
   type PermisoConsolidacionInput,
+  type SociedadCreateInput,
+  type SociedadUpdateInput,
+  type TipoCambioCreateInput,
+  type TipoCambioUpdateInput,
 } from '@erp/shared';
 import { Roles } from '../auth/roles';
 import { Idempotente } from '../common/idempotencia/idempotente.decorator';
 import { VersionEsperada } from '../common/version';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { HoldingService } from './holding.service';
+import { TiposCambioService } from './tipos-cambio.service';
 
 const cierreSchema = periodoConsolidacionSchema.and(
   z.object({ forzar: z.boolean().optional() }),
@@ -48,16 +57,76 @@ const fechaQuery = z.object({
  * lector (información financiera de grupo, nunca el rol obra). Grupos,
  * miembros, ajustes y cierres: admin y gerente. Permisos de consolidación
  * de la propia sociedad: solo su admin. El acceso a cada sociedad integrada
- * se comprueba en el servicio (`HOLDING_COMPANY_ACCESS_DENIED`).
+ * se comprueba en el servicio (`HOLDING_COMPANY_ACCESS_DENIED`). Alta y
+ * edición de sociedades: solo admin. Tipos de cambio: admin y gerente.
  */
 @Controller('holding')
 @Roles('admin', 'gerente', 'administracion', 'lector')
 export class HoldingController {
-  constructor(private readonly service: HoldingService) {}
+  constructor(
+    private readonly service: HoldingService,
+    private readonly tiposCambio: TiposCambioService,
+  ) {}
 
   @Get('sociedades')
   sociedades() {
     return this.service.sociedadesAccesibles();
+  }
+
+  /** La propia sociedad y las dadas de alta por ella. */
+  @Get('sociedades/gestionadas')
+  @Roles('admin', 'gerente')
+  sociedadesGestionadas() {
+    return this.service.sociedadesGestionadas();
+  }
+
+  @Post('sociedades')
+  @Roles('admin')
+  @Idempotente()
+  crearSociedad(
+    @Body(new ZodValidationPipe(sociedadCreateSchema))
+    body: SociedadCreateInput,
+  ) {
+    return this.service.crearSociedad(body);
+  }
+
+  @Patch('sociedades/:id')
+  @Roles('admin')
+  actualizarSociedad(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(sociedadUpdateSchema))
+    body: SociedadUpdateInput,
+    @VersionEsperada({ exigible: true }) version: number | undefined,
+  ) {
+    return this.service.actualizarSociedad(id, body, version);
+  }
+
+  @Get('grupos/:id/tipos-cambio')
+  tiposCambioGrupo(@Param('id', ParseUUIDPipe) id: string) {
+    return this.tiposCambio.listar(id);
+  }
+
+  @Post('grupos/:id/tipos-cambio')
+  @Roles('admin', 'gerente')
+  @Idempotente()
+  crearTipoCambio(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(tipoCambioCreateSchema))
+    body: TipoCambioCreateInput,
+  ) {
+    return this.tiposCambio.crear(id, body);
+  }
+
+  @Patch('grupos/:id/tipos-cambio/:tipoId')
+  @Roles('admin', 'gerente')
+  actualizarTipoCambio(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('tipoId', ParseUUIDPipe) tipoId: string,
+    @Body(new ZodValidationPipe(tipoCambioUpdateSchema))
+    body: TipoCambioUpdateInput,
+    @VersionEsperada({ exigible: true }) version: number | undefined,
+  ) {
+    return this.tiposCambio.actualizar(id, tipoId, body, version);
   }
 
   @Get('permisos')

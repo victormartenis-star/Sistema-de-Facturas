@@ -3,7 +3,7 @@ import {
   OnModuleDestroy,
   UnauthorizedException,
 } from '@nestjs/common';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, isNull } from 'drizzle-orm';
 import {
   closeDb,
   companies,
@@ -113,9 +113,12 @@ export class DbService implements OnModuleDestroy {
     // acumuladas hacía que esta consulta devolviera de forma no
     // determinista la empresa de OTRO fichero de test, no la que este
     // proceso acababa de crear. `desc(createdAt)`: la última creada gana.
+    // Las sociedades dadas de alta desde Group Reporting (con
+    // `created_by_company_id`) nunca reciben registros públicos.
     const [company] = await this.db
       .select()
       .from(companies)
+      .where(isNull(companies.createdByCompanyId))
       .orderBy(desc(companies.createdAt))
       .limit(1);
     if (!company) {

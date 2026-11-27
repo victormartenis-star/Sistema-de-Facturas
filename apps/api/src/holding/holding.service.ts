@@ -12,17 +12,38 @@ import {
   consolidationClosings,
   corporateGroupMembers,
   corporateGroups,
+  journalEntryLines,
+  ledgerAccounts,
   userCompanyGrants,
   users,
+  type Company,
   type ConsolidationAdjustment,
   type CorporateGroup,
   type CorporateGroupMember,
+  type Tx,
 } from '@erp/db';
 import {
+  CUENTA_INVERSION_GRUPO,
   ajusteConsolidacionCreateSchema,
   anularAjusteSchema,
   consolidarEstados,
+  convertirImporte,
+  convertirSaldosMoneda,
+  eliminacionInversionPatrimonio,
   eliminacionesIntragrupo,
+  patrimonioNetoDeSaldos,
+  planContableBase,
+  seleccionarTipoCambio,
+  sociedadCreateSchema,
+  sociedadUpdateSchema,
+  type ConversionSociedadDto,
+  type InversionPatrimonioDto,
+  type SociedadCreateInput,
+  type SociedadDto,
+  type SociedadUpdateInput,
+  type TipoCambioConsolidacion,
+  type TipoCambioRegistro,
+  type TiposCambioSociedad,
   grupoCreateSchema,
   grupoUpdateSchema,
   miembroCreateSchema,
@@ -55,9 +76,11 @@ import {
   type TesoreriaGrupoDto,
 } from '@erp/shared';
 import { AuditService } from '../audit/audit.service';
+import { hashPassword } from '../auth/password';
 import { cambiarEstado } from '../common/cambiar-estado';
 import { verificarVersion } from '../common/version';
 import { DbService } from '../db/db.service';
+import { TiposCambioService } from './tipos-cambio.service';
 
 /** La matriz forma parte de su grupo desde siempre. */
 const ALTA_MATRIZ = '1900-01-01';
@@ -85,6 +108,52 @@ interface MiembroCargado {
   m: CorporateGroupMember;
   nombre: string;
   nif: string;
+  /** Moneda funcional de la sociedad. */
+  moneda: string;
+}
+
+/** Campos de inversión–PN tal como llegan del alta o la edición. */
+interface InversionInput {
+  fechaAdquisicion?: string | null;
+  costeInversion?: number | null;
+  cuentaInversion?: string | null;
+  patrimonioAdquisicion?: number | null;
+}
+
+const num2 = (v: number | null | undefined) =>
+  v === null || v === undefined ? null : v.toFixed(2);
+const numODto = (v: string | null) => (v === null ? null : Number(v));
+
+const sociedadNoEncontrada = () =>
+  new NotFoundException({
+    code: 'GROUP_COMPANY_NOT_FOUND',
+    message: 'Sociedad no encontrada o no gestionada por tu sociedad',
+  });
+
+/**
+ * La puesta en equivalencia necesita el coste de la participación; la
+ * cuenta o el PN de adquisición sin coste no tienen sentido.
+ */
+function validarInversion(metodo: MetodoConsolidacion, d: InversionInput) {
+  const coste = d.costeInversion ?? null;
+  if (metodo === 'puesta_equivalencia' && coste === null) {
+    throw new UnprocessableEntityException({
+      code: 'CONSOLIDATION_INVESTMENT_REQUIRED',
+      message:
+        'La puesta en equivalencia exige el coste de la inversión (costeInversion)',
+    });
+  }
+  if (
+    coste === null &&
+    ((d.cuentaInversion ?? null) !== null ||
+      (d.patrimonioAdquisicion ?? null) !== null)
+  ) {
+    throw new UnprocessableEntityException({
+      code: 'CONSOLIDATION_INVESTMENT_INVALID',
+      message:
+        'La cuenta de inversión y el patrimonio de adquisición requieren el coste de la inversión',
+    });
+  }
 }
 
 /**
@@ -102,6 +171,7 @@ export class HoldingService {
   constructor(
     private readonly dbs: DbService,
     private readonly audit: AuditService,
+    private readonly tiposCambio: TiposCambioService,
   ) {}
 
   private ctx() {
@@ -117,6 +187,7 @@ export class HoldingService {
         id: companies.id,
         nombre: companies.name,
         nif: companies.taxId,
+        moneda: companies.functionalCurrency,
       })
       .from(companies)
       .where(
@@ -130,6 +201,7 @@ export class HoldingService {
       nombre: c.nombre,
       nif: c.nif,
       propia: c.id === companyId,
+      monedaFuncional: c.moneda,
     }));
   }
 
@@ -252,6 +324,249 @@ export class HoldingService {
     return this.permisos();
   }
 
+  /* ─────────────────── alta de sociedades del grupo ─────────────────── */
+
+  private sociedadDto(c: Company): SociedadDto {
+    return {
+      id: c.id,
+      nombre: c.name,
+      nif: c.taxId,
+      monedaFuncional: c.functionalCurrency,
+      altaPorCompanyId: c.createdByCompanyId,
+      creadaEn: c.createdAt.toISOString(),
+      version: c.version,
+    };
+  }
+
+  /** La propia sociedad y las que ella ha dado de alta. */
+  async sociedadesGestionadas(): Promise<SociedadDto[]> {
+    const { companyId } = this.ctx();
+    const filas = await this.dbs.db
+      .select()
+      .from(companies)
+      .where(
+        sql`${companies.id} = ${companyId} OR ${companies.createdByCompanyId} = ${companyId}`,
+      )
+      .orderBy(asc(companies.name));
+    return filas.map((c) => this.sociedadDto(c));
+  }
+
+  /**
+   * Alta controlada de una sociedad (admin de la matriz). En una sola
+   * transacción: la sociedad con su moneda funcional, su PGC base, el
+   * permiso de consolidación para quien la crea, su primer administrador
+   * (opcional) y su integración en un grupo de la matriz (opcional). Se
+   * audita en la cadena de la creadora y abre la cadena de la nueva.
+   */
+  async crearSociedad(input: SociedadCreateInput): Promise<SociedadDto> {
+    const d = sociedadCreateSchema.parse(input);
+    const { companyId, userId } = this.ctx();
+    const g = d.grupo ? await this.cargarGrupo(d.grupo.grupoId) : null;
+    if (d.grupo) validarInversion(d.grupo.metodo, d.grupo);
+    const nif = normalizarNif(d.nif);
+    const passwordHash = d.administrador
+      ? await hashPassword(d.administrador.password)
+      : null;
+    const r = await this.dbs.db.transaction(async (tx) => {
+      // Serializa las altas con el mismo NIF (sin índice único heredado).
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`company-nif:${nif}`}))`,
+      );
+      const [dup] = await tx
+        .select({ id: companies.id })
+        .from(companies)
+        .where(sql`${nifNorm(sql`${companies.taxId}`)} = ${nif}`)
+        .limit(1);
+      if (dup) {
+        throw new ConflictException({
+          code: 'GROUP_COMPANY_NIF_DUPLICATE',
+          message: `Ya existe una sociedad con el NIF ${d.nif}`,
+        });
+      }
+      if (d.administrador) {
+        const [u] = await tx
+          .select({ id: users.id })
+          .from(users)
+          .where(sql`lower(${users.email}) = lower(${d.administrador.email})`)
+          .limit(1);
+        if (u) {
+          throw new ConflictException({
+            code: 'USER_EMAIL_DUPLICATED',
+            message: 'Ya existe un usuario con ese email',
+          });
+        }
+      }
+      const [c] = await tx
+        .insert(companies)
+        .values({
+          name: d.nombre,
+          taxId: d.nif,
+          functionalCurrency: d.monedaFuncional,
+          createdByCompanyId: companyId,
+        })
+        .returning();
+      const cuentas = d.inicializarPlan
+        ? await tx
+            .insert(ledgerAccounts)
+            .values(
+              planContableBase().map((cu) => ({
+                companyId: c.id,
+                code: cu.codigo,
+                name: cu.nombre,
+                type: cu.tipo,
+                postable: cu.imputable,
+              })),
+            )
+            .onConflictDoNothing()
+            .returning({ id: ledgerAccounts.id })
+        : [];
+      // Quien la crea puede consolidarla desde el primer momento.
+      const [grant] = await tx
+        .insert(userCompanyGrants)
+        .values({ companyId: c.id, userId, grantedBy: userId })
+        .returning();
+      let admin: { userId: string; email: string } | null = null;
+      if (d.administrador && passwordHash) {
+        const [u] = await tx
+          .insert(users)
+          .values({
+            companyId: c.id,
+            email: d.administrador.email,
+            passwordHash,
+            fullName: d.administrador.fullName,
+            role: 'admin',
+          })
+          .returning({ id: users.id, email: users.email });
+        admin = { userId: u.id, email: u.email };
+      }
+      const miembro =
+        g && d.grupo
+          ? await this.insertarMiembro(tx, g, { ...d.grupo, companyId: c.id })
+          : null;
+      const alta = {
+        id: c.id,
+        nombre: c.name,
+        nif: c.taxId,
+        monedaFuncional: c.functionalCurrency,
+        altaPor: companyId,
+        planContable: cuentas.length,
+      };
+      await this.audit.registrar(tx, [
+        {
+          entityType: 'company',
+          entityId: c.id,
+          action: 'create',
+          newData: alta,
+        },
+        {
+          entityType: 'user_company_grant',
+          entityId: grant.id,
+          action: 'create',
+          newData: grant,
+        },
+      ]);
+      // Génesis de la cadena de la nueva sociedad.
+      await this.audit.registrar(
+        tx,
+        [
+          {
+            entityType: 'company',
+            entityId: c.id,
+            action: 'create',
+            newData: alta,
+          },
+          ...(admin
+            ? [
+                {
+                  entityType: 'user',
+                  entityId: admin.userId,
+                  action: 'create' as const,
+                  newData: { email: admin.email, role: 'admin' },
+                },
+              ]
+            : []),
+        ],
+        { companyId: c.id },
+      );
+      return {
+        ...this.sociedadDto(c),
+        administrador: admin,
+        miembroId: miembro?.id ?? null,
+      };
+    });
+    return r;
+  }
+
+  /**
+   * Edita nombre o moneda funcional de la propia sociedad o de una dada de
+   * alta por ella. La moneda no cambia si ya hay asientos (cambiaría el
+   * significado de todo su mayor).
+   */
+  async actualizarSociedad(
+    id: string,
+    input: SociedadUpdateInput,
+    version?: number,
+  ): Promise<SociedadDto> {
+    const d = sociedadUpdateSchema.parse(input);
+    const { companyId } = this.ctx();
+    return this.dbs.db.transaction(async (tx) => {
+      const [actual] = await tx
+        .select()
+        .from(companies)
+        .where(
+          and(
+            eq(companies.id, id),
+            sql`(${companies.id} = ${companyId} OR ${companies.createdByCompanyId} = ${companyId})`,
+          ),
+        )
+        .for('update');
+      if (!actual) throw sociedadNoEncontrada();
+      verificarVersion(actual.version, version);
+      if (
+        d.monedaFuncional !== undefined &&
+        d.monedaFuncional !== actual.functionalCurrency
+      ) {
+        const [linea] = await tx
+          .select({ id: journalEntryLines.id })
+          .from(journalEntryLines)
+          .where(eq(journalEntryLines.companyId, id))
+          .limit(1);
+        if (linea) {
+          throw new UnprocessableEntityException({
+            code: 'GROUP_COMPANY_CURRENCY_LOCKED',
+            message:
+              'La sociedad ya tiene asientos: su moneda funcional no se puede cambiar',
+          });
+        }
+      }
+      const [nuevo] = await tx
+        .update(companies)
+        .set({
+          ...(d.nombre !== undefined && { name: d.nombre }),
+          ...(d.monedaFuncional !== undefined && {
+            functionalCurrency: d.monedaFuncional,
+          }),
+          version: actual.version + 1,
+          updatedAt: new Date(),
+        })
+        .where(eq(companies.id, id))
+        .returning();
+      const resumen = (c: Company) => ({
+        nombre: c.name,
+        monedaFuncional: c.functionalCurrency,
+        version: c.version,
+      });
+      await this.audit.registrar(tx, {
+        entityType: 'company',
+        entityId: id,
+        action: 'update',
+        oldData: resumen(actual),
+        newData: resumen(nuevo),
+      });
+      return this.sociedadDto(nuevo);
+    });
+  }
+
   /* ──────────────────────────── grupos ──────────────────────────── */
 
   private async cargarGrupo(id: string): Promise<CorporateGroup> {
@@ -278,6 +593,7 @@ export class HoldingService {
         m: corporateGroupMembers,
         nombre: companies.name,
         nif: companies.taxId,
+        moneda: companies.functionalCurrency,
       })
       .from(corporateGroupMembers)
       .innerJoin(
@@ -321,7 +637,7 @@ export class HoldingService {
       monedaBase: g.baseCurrency,
       matrizId: g.companyId,
       version: g.version,
-      miembros: ms.map(({ m, nombre, nif }): MiembroGrupoDto => ({
+      miembros: ms.map(({ m, nombre, nif, moneda }): MiembroGrupoDto => ({
         id: m.id,
         companyId: m.memberCompanyId,
         nombre,
@@ -331,6 +647,11 @@ export class HoldingService {
         fechaAlta: m.startDate,
         fechaBaja: m.endDate,
         accesible: accesibles.has(m.memberCompanyId),
+        monedaFuncional: moneda,
+        fechaAdquisicion: m.acquisitionDate,
+        costeInversion: numODto(m.investmentCost),
+        cuentaInversion: m.investmentAccount,
+        patrimonioAdquisicion: numODto(m.equityAtAcquisition),
         version: m.version,
       })),
     };
@@ -429,35 +750,55 @@ export class HoldingService {
     return this.grupo(id);
   }
 
+  /** Inserta el miembro (con sus parámetros de inversión–PN) y lo audita. */
+  private async insertarMiembro(
+    tx: Tx,
+    g: CorporateGroup,
+    d: {
+      companyId: string;
+      participacionPct: number;
+      metodo: MetodoConsolidacion;
+      fechaAlta: string;
+    } & InversionInput,
+  ): Promise<CorporateGroupMember> {
+    validarInversion(d.metodo, d);
+    const coste = d.costeInversion ?? null;
+    const [m] = await tx
+      .insert(corporateGroupMembers)
+      .values({
+        groupId: g.id,
+        memberCompanyId: d.companyId,
+        ownershipPct: d.participacionPct.toFixed(2),
+        method: d.metodo,
+        startDate: d.fechaAlta,
+        acquisitionDate: d.fechaAdquisicion ?? null,
+        investmentCost: num2(coste),
+        investmentAccount:
+          coste === null ? null : (d.cuentaInversion ?? CUENTA_INVERSION_GRUPO),
+        equityAtAcquisition: num2(d.patrimonioAdquisicion),
+      })
+      .onConflictDoNothing()
+      .returning();
+    if (!m) {
+      throw new ConflictException({
+        code: 'HOLDING_MEMBER_DUPLICATE',
+        message: 'La sociedad ya está integrada (activa) en el grupo',
+      });
+    }
+    await this.audit.registrar(tx, {
+      entityType: 'corporate_group_member',
+      entityId: m.id,
+      action: 'create',
+      newData: m,
+    });
+    return m;
+  }
+
   async integrarSociedad(groupId: string, input: MiembroCreateInput) {
     const d = miembroCreateSchema.parse(input);
     const g = await this.cargarGrupo(groupId);
     await this.exigirAcceso([d.companyId]);
-    await this.dbs.db.transaction(async (tx) => {
-      const [m] = await tx
-        .insert(corporateGroupMembers)
-        .values({
-          groupId: g.id,
-          memberCompanyId: d.companyId,
-          ownershipPct: d.participacionPct.toFixed(2),
-          method: d.metodo,
-          startDate: d.fechaAlta,
-        })
-        .onConflictDoNothing()
-        .returning();
-      if (!m) {
-        throw new ConflictException({
-          code: 'HOLDING_MEMBER_DUPLICATE',
-          message: 'La sociedad ya está integrada (activa) en el grupo',
-        });
-      }
-      await this.audit.registrar(tx, {
-        entityType: 'corporate_group_member',
-        entityId: m.id,
-        action: 'create',
-        newData: m,
-      });
-    });
+    await this.dbs.db.transaction((tx) => this.insertarMiembro(tx, g, d));
     return this.grupo(groupId);
   }
 
@@ -500,6 +841,29 @@ export class HoldingService {
           message: 'La baja no puede ser anterior al alta',
         });
       }
+      // Estado resultante de la inversión: quitar el coste la desactiva entera.
+      const coste =
+        d.costeInversion !== undefined
+          ? (d.costeInversion ?? null)
+          : numODto(m.investmentCost);
+      const inversion: InversionInput =
+        coste === null
+          ? { costeInversion: null }
+          : {
+              costeInversion: coste,
+              cuentaInversion:
+                d.cuentaInversion !== undefined
+                  ? (d.cuentaInversion ?? CUENTA_INVERSION_GRUPO)
+                  : (m.investmentAccount ?? CUENTA_INVERSION_GRUPO),
+              patrimonioAdquisicion:
+                d.patrimonioAdquisicion !== undefined
+                  ? (d.patrimonioAdquisicion ?? null)
+                  : numODto(m.equityAtAcquisition),
+            };
+      validarInversion(
+        d.metodo ?? (m.method as MetodoConsolidacion),
+        inversion,
+      );
       const [nuevo] = await tx
         .update(corporateGroupMembers)
         .set({
@@ -508,6 +872,12 @@ export class HoldingService {
           }),
           ...(d.metodo !== undefined && { method: d.metodo }),
           ...(d.fechaBaja !== undefined && { endDate: d.fechaBaja ?? null }),
+          ...(d.fechaAdquisicion !== undefined && {
+            acquisitionDate: d.fechaAdquisicion ?? null,
+          }),
+          investmentCost: num2(inversion.costeInversion),
+          investmentAccount: inversion.cuentaInversion ?? null,
+          equityAtAcquisition: num2(inversion.patrimonioAdquisicion),
           version: m.version + 1,
           updatedAt: new Date(),
         })
@@ -690,13 +1060,192 @@ export class HoldingService {
     };
   }
 
+  /**
+   * Tipos de cambio de cada sociedad cuya moneda funcional no es la de
+   * presentación del grupo. Si falta alguno: 422 `FX_RATE_MISSING` con la
+   * lista completa (el consolidado nunca sale con un tipo inventado).
+   */
+  private async tiposPerimetro(
+    g: CorporateGroup,
+    ms: MiembroCargado[],
+    p: PeriodoConsolidacion,
+    necesarios: readonly TipoCambioConsolidacion[],
+  ): Promise<Map<string, TiposCambioSociedad>> {
+    const out = new Map<string, TiposCambioSociedad>();
+    const extranjeras = ms.filter(({ moneda }) => moneda !== g.baseCurrency);
+    if (extranjeras.length === 0) return out;
+    const registros: TipoCambioRegistro[] = await this.tiposCambio.registros(g);
+    const faltan: {
+      companyId: string;
+      moneda: string;
+      tipo: TipoCambioConsolidacion;
+      fecha: string;
+    }[] = [];
+    for (const { m, moneda } of extranjeras) {
+      const busca = (
+        tipo: TipoCambioConsolidacion,
+        desde: string,
+        hasta: string,
+      ) => seleccionarTipoCambio(registros, { moneda, tipo, desde, hasta });
+      // Histórico: el de la toma de control; si no lo hay, el último del periodo.
+      const ref = m.acquisitionDate ?? m.startDate;
+      const encontrados: Record<
+        TipoCambioConsolidacion,
+        TipoCambioRegistro | null
+      > = {
+        cierre: busca('cierre', p.desde, p.hasta),
+        medio: busca('medio', p.desde, p.hasta),
+        historico:
+          busca('historico', ref, ref) ?? busca('historico', p.desde, p.hasta),
+      };
+      for (const tipo of necesarios) {
+        if (!encontrados[tipo]) {
+          faltan.push({
+            companyId: m.memberCompanyId,
+            moneda,
+            tipo,
+            fecha:
+              tipo === 'medio'
+                ? `${p.desde}/${p.hasta}`
+                : tipo === 'historico'
+                  ? ref
+                  : p.hasta,
+          });
+        }
+      }
+      out.set(m.memberCompanyId, {
+        cierre: encontrados.cierre?.tasa ?? '1',
+        medio: encontrados.medio?.tasa ?? '1',
+        historico: encontrados.historico?.tasa ?? '1',
+      });
+    }
+    if (faltan.length > 0) {
+      throw new UnprocessableEntityException({
+        code: 'FX_RATE_MISSING',
+        message: `Faltan tipos de cambio de consolidación: ${faltan
+          .map((f) => `${f.moneda} ${f.tipo} (${f.fecha})`)
+          .join(', ')}`,
+        faltan,
+      });
+    }
+    return out;
+  }
+
+  /** Saldos deudores acumulados a una fecha (todo el histórico del mayor). */
+  private async saldosAFecha(
+    ids: string[],
+    fecha: string,
+  ): Promise<Map<string, SaldoCuenta[]>> {
+    const out = new Map<string, SaldoCuenta[]>(ids.map((id) => [id, []]));
+    if (ids.length === 0) return out;
+    const r = await this.dbs.db.execute(sql`
+      select jl.company_id as company, la.code as codigo,
+        coalesce(sum(jl.debit - jl.credit), 0)::text as saldo
+      from journal_entry_lines jl
+      join ledger_accounts la on la.id = jl.account_id
+      join journal_entries je on je.id = jl.entry_id
+      where jl.company_id in (${lista(ids)}) and je.entry_date <= ${fecha}
+      group by jl.company_id, la.code`);
+    for (const row of r.rows as {
+      company: string;
+      codigo: string;
+      saldo: string;
+    }[]) {
+      out
+        .get(row.company)
+        ?.push({ codigo: row.codigo, saldoDeudor: row.saldo });
+    }
+    return out;
+  }
+
+  /**
+   * Eliminación inversión–patrimonio neto de las sociedades con coste de
+   * inversión informado y toma de control no posterior al periodo. El PN a
+   * la toma de control es el informado o, si no, el de su mayor a esa fecha;
+   * en moneda extranjera se convierte al tipo histórico.
+   */
+  private async inversiones(
+    ms: MiembroCargado[],
+    p: PeriodoConsolidacion,
+    saldos: Map<string, SaldoCuenta[]>,
+    tipos: Map<string, TiposCambioSociedad>,
+  ): Promise<{
+    dto: InversionPatrimonioDto[];
+    ajustes: AjusteConsolidacion[];
+  }> {
+    const conInversion = ms.filter(
+      ({ m }) =>
+        m.investmentCost !== null &&
+        (m.acquisitionDate ?? m.startDate) <= p.hasta,
+    );
+    const pnMayor = new Map<string, number>();
+    const porFecha = new Map<string, string[]>();
+    for (const { m } of conInversion) {
+      if (m.equityAtAcquisition !== null) continue;
+      const f = m.acquisitionDate ?? m.startDate;
+      porFecha.set(f, [...(porFecha.get(f) ?? []), m.memberCompanyId]);
+    }
+    for (const [f, idsF] of porFecha) {
+      const s = await this.saldosAFecha(idsF, f);
+      for (const id of idsF) {
+        const pn = patrimonioNetoDeSaldos(s.get(id) ?? []);
+        pnMayor.set(
+          id,
+          fromCents(toCents(pn.patrimonio) + toCents(pn.resultado)),
+        );
+      }
+    }
+    const dto: InversionPatrimonioDto[] = [];
+    const ajustes: AjusteConsolidacion[] = [];
+    for (const { m, nombre } of conInversion) {
+      const id = m.memberCompanyId;
+      const fechaAdquisicion = m.acquisitionDate ?? m.startDate;
+      const cuentaInversion = m.investmentAccount ?? CUENTA_INVERSION_GRUPO;
+      const pnFuncional = m.equityAtAcquisition ?? pnMayor.get(id) ?? 0;
+      const t = tipos.get(id);
+      const cierre = patrimonioNetoDeSaldos(saldos.get(id) ?? []);
+      const r = eliminacionInversionPatrimonio({
+        companyId: id,
+        nombre,
+        metodo: m.method as MetodoConsolidacion,
+        participacionPct: m.ownershipPct,
+        costeInversion: m.investmentCost!,
+        cuentaInversion,
+        patrimonioAdquisicion: t
+          ? convertirImporte(pnFuncional, t.historico)
+          : pnFuncional,
+        patrimonioCierre: cierre.patrimonio,
+        resultadoPeriodo: cierre.resultado,
+        adquisicionEnPeriodo:
+          fechaAdquisicion >= p.desde && fechaAdquisicion <= p.hasta,
+      });
+      ajustes.push(...r.ajustes);
+      dto.push({
+        ...r,
+        nombre,
+        cuentaInversion,
+        fechaAdquisicion,
+        patrimonioDelMayor: m.equityAtAcquisition === null,
+        ajustes: r.ajustes.map((a) => ({
+          concepto: a.concepto,
+          lineas: a.lineas.map((l) => ({
+            cuenta: l.cuenta,
+            debe: Number(l.debe),
+            haber: Number(l.haber),
+          })),
+        })),
+      });
+    }
+    return { dto, ajustes };
+  }
+
   private async calcularEstados(
     g: CorporateGroup,
     p: PeriodoConsolidacion,
   ): Promise<EstadosConsolidadosDto> {
     const ms = await this.perimetro(g, p);
     const ids = ms.map(({ m }) => m.memberCompanyId);
-    const [saldos, ops, manuales] = await Promise.all([
+    const [saldosFuncionales, ops, manuales, tipos] = await Promise.all([
       this.saldos(ids, p),
       this.operaciones(ms, p),
       this.dbs.db
@@ -710,19 +1259,65 @@ export class HoldingService {
           ),
         )
         .orderBy(asc(consolidationAdjustments.adjustmentDate)),
+      this.tiposPerimetro(g, ms, p, ['cierre', 'medio', 'historico']),
     ]);
+
+    // 1. Conversión a la moneda de presentación (con su CTA en 1350).
+    const conversion: ConversionSociedadDto[] = [];
+    const saldos = new Map<string, SaldoCuenta[]>();
+    for (const { m, nombre, moneda } of ms) {
+      const id = m.memberCompanyId;
+      const propios = saldosFuncionales.get(id) ?? [];
+      const t = tipos.get(id);
+      if (!t) {
+        saldos.set(id, propios);
+        continue;
+      }
+      const c = convertirSaldosMoneda(propios, t);
+      saldos.set(id, c.saldos);
+      conversion.push({
+        companyId: id,
+        nombre,
+        monedaFuncional: moneda,
+        tasas: {
+          cierre: Number(t.cierre),
+          medio: Number(t.medio),
+          historico: Number(t.historico),
+        },
+        diferenciaConversion: c.diferenciaConversion,
+        porMasa: c.porMasa,
+      });
+    }
+
+    // 2. Intragrupo entre sociedades integradas, convertido: operaciones al
+    //    tipo medio y saldos al de cierre de la moneda de cada lado.
     const datos = new Map(ms.map(({ m }) => [m.memberCompanyId, m]));
+    const integrada = (id: string) =>
+      datos.get(id)!.method !== 'puesta_equivalencia';
+    const conv = (id: string, tipo: 'cierre' | 'medio', v: number | string) => {
+      const t = tipos.get(id);
+      return t ? convertirImporte(v, t[tipo]) : v;
+    };
+    const pares = ops.pares
+      .filter((o) => integrada(o.vendedor) && integrada(o.comprador))
+      .map((o) => ({
+        ...o,
+        ventas: conv(o.vendedor, 'medio', o.ventas),
+        compras: conv(o.comprador, 'medio', o.compras),
+        cobrar: conv(o.vendedor, 'cierre', o.cobrar),
+        pagar: conv(o.comprador, 'cierre', o.pagar),
+      }));
     const pctDe = (id: string) =>
       datos.get(id)!.method === 'proporcional'
         ? toCents(datos.get(id)!.ownershipPct)
         : 10_000n;
-    const { conciliacion, ajustes } = eliminacionesIntragrupo(
-      ops.pares,
-      (v, c) => {
-        const min = pctDe(v) < pctDe(c) ? pctDe(v) : pctDe(c);
-        return fromCents(min);
-      },
-    );
+    const { conciliacion, ajustes } = eliminacionesIntragrupo(pares, (v, c) => {
+      const min = pctDe(v) < pctDe(c) ? pctDe(v) : pctDe(c);
+      return fromCents(min);
+    });
+
+    // 3. Inversión–patrimonio neto, socios externos y fondo de comercio.
+    const inversiones = await this.inversiones(ms, p, saldos, tipos);
     const ajustesManuales: AjusteConsolidacion[] = manuales.map((a) => ({
       concepto: a.description,
       origen: 'manual',
@@ -739,19 +1334,32 @@ export class HoldingService {
         participacionPct: m.ownershipPct,
         saldos: saldos.get(m.memberCompanyId) ?? [],
       })),
-      ajustes: [...ajustes, ...ajustesManuales],
+      ajustes: [...ajustes, ...inversiones.ajustes, ...ajustesManuales],
     });
+    const total = (vs: number[]) =>
+      fromCents(sumCents(vs.map((v) => toCents(v))));
     return {
       grupoId: g.id,
       desde: p.desde,
       hasta: p.hasta,
       generadoEn: new Date().toISOString(),
-      sociedades: ms.map(({ m, nombre }) => ({
+      sociedades: ms.map(({ m, nombre, moneda }) => ({
         companyId: m.memberCompanyId,
         nombre,
         metodo: m.method as MetodoConsolidacion,
         participacionPct: Number(m.ownershipPct),
+        monedaFuncional: moneda,
       })),
+      monedaPresentacion: g.baseCurrency,
+      conversion,
+      diferenciaConversion: total(
+        conversion.map((c) => c.diferenciaConversion),
+      ),
+      inversionPatrimonio: inversiones.dto,
+      fondoComercio: total(inversiones.dto.map((i) => i.fondoComercio)),
+      diferenciaNegativa: total(
+        inversiones.dto.map((i) => i.diferenciaNegativa),
+      ),
       ...calculo,
       conciliacionIntragrupo: conciliacion,
       descuadreIntercompania: conciliacion.some((c) => c.descuadre),
@@ -803,8 +1411,17 @@ export class HoldingService {
   async tesoreria(groupId: string, hasta: string): Promise<TesoreriaGrupoDto> {
     const p = periodoConsolidacionSchema.parse({ desde: hasta, hasta });
     const g = await this.cargarGrupo(groupId);
-    const ms = await this.perimetro(g, p);
+    // Las puestas en equivalencia no integran tesorería ni cartera.
+    const ms = (await this.perimetro(g, p)).filter(
+      ({ m }) => m.method !== 'puesta_equivalencia',
+    );
     const ids = ms.map(({ m }) => m.memberCompanyId);
+    const tipos = await this.tiposPerimetro(g, ms, p, ['cierre']);
+    // Moneda extranjera: todo al tipo de cierre de `hasta`.
+    const aCierre = (id: string, cents: bigint) => {
+      const t = tipos.get(id);
+      return t ? toCents(convertirImporte(fromCents(cents), t.cierre)) : cents;
+    };
     const [saldos, ops, cartera] = await Promise.all([
       this.saldos(ids, { desde: '1900-01-01', hasta }),
       this.operaciones(ms, p),
@@ -824,21 +1441,22 @@ export class HoldingService {
     );
     const pos = posicionTesoreriaGrupo(
       ms.map(({ m }) => {
-        const e = ops.externo.get(m.memberCompanyId)!;
+        const id = m.memberCompanyId;
+        const e = ops.externo.get(id)!;
         const liquidez = sumCents(
-          (saldos.get(m.memberCompanyId) ?? [])
+          (saldos.get(id) ?? [])
             .filter((s) => s.codigo.startsWith('57'))
             .map((s) => toCents(s.saldoDeudor)),
         );
         return {
-          companyId: m.memberCompanyId,
+          companyId: id,
           metodo: m.method as MetodoConsolidacion,
           participacionPct: m.ownershipPct,
-          liquidez: fromCents(liquidez),
-          cobrosExternos: fromCents(e.cobros),
-          cobrosIntragrupo: fromCents(e.cobrosIg),
-          pagosExternos: fromCents(e.pagos),
-          pagosIntragrupo: fromCents(e.pagosIg),
+          liquidez: fromCents(aCierre(id, liquidez)),
+          cobrosExternos: fromCents(aCierre(id, e.cobros)),
+          cobrosIntragrupo: fromCents(aCierre(id, e.cobrosIg)),
+          pagosExternos: fromCents(aCierre(id, e.pagos)),
+          pagosIntragrupo: fromCents(aCierre(id, e.pagosIg)),
         };
       }),
     );
@@ -862,8 +1480,8 @@ export class HoldingService {
       })),
       cartera: ids.map((id) => {
         const r = filasCartera.get(id);
-        const contratado = toCents(r?.contratado ?? '0');
-        const certificado = toCents(r?.certificado ?? '0');
+        const contratado = aCierre(id, toCents(r?.contratado ?? '0'));
+        const certificado = aCierre(id, toCents(r?.certificado ?? '0'));
         return {
           companyId: id,
           nombre: nombre.get(id)!,

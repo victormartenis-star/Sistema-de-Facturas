@@ -505,6 +505,13 @@
       "when": 1795718326744,
       "tag": "0071_grc_aprobaciones_sod",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1795801571641,
+      "tag": "0072_group_reporting_fx",
+      "breakpoints": true
     }
   ]
 }

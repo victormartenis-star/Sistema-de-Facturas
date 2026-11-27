@@ -1653,7 +1653,13 @@ export function exigeReaprobacion(
  * céntimos BigInt; los saldos van como saldo deudor (debe − haber).
  */
 
-export type MetodoConsolidacion = 'global' | 'proporcional';
+/**
+ * Global y proporcional integran los estados línea a línea; la puesta en
+ * equivalencia no integra: sustituye la inversión por la parte del
+ * patrimonio neto de la participada (`eliminacionInversionPatrimonio`).
+ */
+export type MetodoConsolidacion =
+  'global' | 'proporcional' | 'puesta_equivalencia';
 
 /** Cuenta puente de las diferencias de conciliación intragrupo (PGC 555). */
 export const CUENTA_DESCUADRE_INTRAGRUPO = '5550';
@@ -1752,7 +1758,11 @@ export function consolidarEstados(p: {
   sociedades: readonly SociedadConsolidable[];
   ajustes: readonly AjusteConsolidacion[];
 }): EstadosConsolidadosCalculo {
-  const ids = p.sociedades.map((s) => s.companyId);
+  // La puesta en equivalencia no agrega saldos: entra solo por sus ajustes.
+  const integradas = p.sociedades.filter(
+    (s) => s.metodo !== 'puesta_equivalencia',
+  );
+  const ids = integradas.map((s) => s.companyId);
   // grupo|masa -> companyId -> saldo deudor (céntimos)
   const porGrupo = new Map<string, Map<string, bigint>>();
   const porMasa = new Map<string, Map<string, bigint>>();
@@ -1763,7 +1773,7 @@ export function consolidarEstados(p: {
   }[] = [];
   let redondeo = 0n;
 
-  for (const s of p.sociedades) {
+  for (const s of integradas) {
     const pctCent = toScaled(s.participacionPct, 2);
     if (pctCent <= 0n || pctCent > 10_000n) {
       throw new RangeError(`Participación no válida: ${s.participacionPct}`);
@@ -2053,6 +2063,444 @@ export function posicionTesoreriaGrupo(
       cobros: fromCents(cobrosIg),
       pagos: fromCents(pagosIg),
     },
+  };
+}
+
+/* ───────── Group Reporting: conversión de moneda e inversión–patrimonio ─────────
+ * Modelo de SAP S/4HANA Group Reporting (Currency Translation, Consolidation
+ * of Investments) y Oracle FCCS adaptado a las NOFCAC (RD 1159/2010):
+ *  - Conversión por el método del tipo de cambio de cierre (art. 61): activo
+ *    y pasivo al de cierre, PyG al medio del periodo y patrimonio neto al
+ *    histórico; la diferencia va a «Diferencias de conversión» (1350, CTA).
+ *  - Eliminación inversión–patrimonio neto (art. 22 a 27): el coste de la
+ *    participación contra la parte del PN de la dependiente a la toma de
+ *    control; el exceso es fondo de comercio de consolidación (2040) y el
+ *    defecto, diferencia negativa (7740 en el ejercicio de adquisición,
+ *    reservas después). En integración global, los socios externos reciben
+ *    su parte del PN (1160).
+ *  - Puesta en equivalencia (art. 52 a 56): la participación se valora por
+ *    el coste más la parte de la variación del PN de la participada.
+ * Todo en céntimos BigInt y tipos de cambio con 8 decimales: cada ajuste
+ * cuadra al céntimo por construcción.
+ */
+
+/** Diferencias de conversión (CTA), PGC 135. */
+export const CUENTA_DIFERENCIAS_CONVERSION = '1350';
+/** Socios externos (participaciones no dominantes), subcuenta de consolidación. */
+export const CUENTA_SOCIOS_EXTERNOS = '1160';
+/** Reservas en sociedades consolidadas (subcuenta de 113). */
+export const CUENTA_RESERVAS_CONSOLIDADAS = '1135';
+/** Reservas en sociedades puestas en equivalencia (subcuenta de 113). */
+export const CUENTA_RESERVAS_PUESTA_EQUIVALENCIA = '1136';
+/** Fondo de comercio de consolidación (PGC 204). */
+export const CUENTA_FONDO_COMERCIO_CONSOLIDACION = '2040';
+/** Diferencia negativa en combinaciones de negocios (PGC 774). */
+export const CUENTA_DIFERENCIA_NEGATIVA = '7740';
+/** Participaciones puestas en equivalencia (subcuenta de 240). */
+export const CUENTA_PARTICIPACIONES_PUESTA_EQUIVALENCIA = '2400';
+/** Participación en resultados de sociedades puestas en equivalencia. */
+export const CUENTA_RESULTADO_PUESTA_EQUIVALENCIA = '7609';
+/** Cuenta de patrimonio contra la que se elimina el PN de la dependiente. */
+export const CUENTA_PATRIMONIO_ELIMINADO = '1000';
+/** Cuenta por defecto de las participaciones en empresas del grupo. */
+export const CUENTA_INVERSION_GRUPO = '2403';
+
+export type TipoCambioConsolidacion = 'cierre' | 'medio' | 'historico';
+
+/** Los tipos de cambio llevan 8 decimales (`numeric(18, 8)`). */
+const ESCALA_TASA = 10n ** 8n;
+
+function tasaEscalada(tasa: Importe): bigint {
+  const v = toScaled(tasa, 8);
+  if (v <= 0n) throw new RangeError(`Tipo de cambio no válido: ${tasa}`);
+  return v;
+}
+
+const TIPO_CAMBIO_MASA: Record<MasaConsolidacion, TipoCambioConsolidacion> = {
+  activo: 'cierre',
+  pasivo: 'cierre',
+  patrimonio: 'historico',
+  ingreso: 'medio',
+  gasto: 'medio',
+};
+
+/** Tipo de cambio que corresponde a una cuenta (método del tipo de cierre). */
+export function tipoCambioDeCuenta(codigo: string): TipoCambioConsolidacion {
+  return TIPO_CAMBIO_MASA[tipoCuentaPorCodigo(codigo)];
+}
+
+/** `importe × tasa` redondeado half-up al céntimo (tasa con 8 decimales). */
+export function convertirImporte(importe: Importe, tasa: Importe): number {
+  return fromCents(
+    mulDivRound(toCents(importe), tasaEscalada(tasa), ESCALA_TASA),
+  );
+}
+
+export interface TiposCambioSociedad {
+  /** Unidades de moneda de presentación por 1 de la moneda funcional. */
+  cierre: Importe;
+  medio: Importe;
+  historico: Importe;
+}
+
+export interface ConversionMasa {
+  masa: MasaConsolidacion;
+  tipo: TipoCambioConsolidacion;
+  /** Saldo natural en moneda funcional. */
+  original: number;
+  /** Saldo natural en moneda de presentación. */
+  convertido: number;
+}
+
+export interface ConversionMonedaCalculo {
+  /** Saldos deudores convertidos, con la línea de CTA (1350) si no es cero. */
+  saldos: SaldoCuenta[];
+  /** CTA del periodo: positivo si aumenta el patrimonio neto (haber). */
+  diferenciaConversion: number;
+  porMasa: ConversionMasa[];
+}
+
+/**
+ * Convierte los saldos deudores de una sociedad de su moneda funcional a la
+ * de presentación del grupo. Como el balance de partida cuadra (suma de
+ * saldos deudores = 0), el descuadre que introduce aplicar tipos distintos
+ * es exactamente la diferencia de conversión: se lleva a 1350 y el balance
+ * convertido vuelve a sumar cero, sin perder un céntimo.
+ */
+export function convertirSaldosMoneda(
+  saldos: readonly SaldoCuenta[],
+  tipos: TiposCambioSociedad,
+): ConversionMonedaCalculo {
+  const tasas: Record<TipoCambioConsolidacion, bigint> = {
+    cierre: tasaEscalada(tipos.cierre),
+    medio: tasaEscalada(tipos.medio),
+    historico: tasaEscalada(tipos.historico),
+  };
+  const masas = new Map<
+    MasaConsolidacion,
+    { original: bigint; convertido: bigint }
+  >(MASAS.map((m) => [m, { original: 0n, convertido: 0n }]));
+  const out: SaldoCuenta[] = [];
+  let suma = 0n;
+  for (const s of saldos) {
+    const original = toCents(s.saldoDeudor);
+    const convertido = mulDivRound(
+      original,
+      tasas[tipoCambioDeCuenta(s.codigo)],
+      ESCALA_TASA,
+    );
+    suma += convertido;
+    const m = masas.get(tipoCuentaPorCodigo(s.codigo))!;
+    m.original += original;
+    m.convertido += convertido;
+    if (convertido !== 0n) {
+      out.push({ codigo: s.codigo, saldoDeudor: fromCents(convertido) });
+    }
+  }
+  if (suma !== 0n) {
+    out.push({
+      codigo: CUENTA_DIFERENCIAS_CONVERSION,
+      saldoDeudor: fromCents(-suma),
+    });
+  }
+  return {
+    saldos: out,
+    diferenciaConversion: fromCents(suma),
+    porMasa: MASAS.map((masa) => {
+      const v = masas.get(masa)!;
+      return {
+        masa,
+        tipo: TIPO_CAMBIO_MASA[masa],
+        original: fromCents(natural(masa, v.original)),
+        convertido: fromCents(natural(masa, v.convertido)),
+      };
+    }),
+  };
+}
+
+function patrimonioNetoCents(saldos: readonly SaldoCuenta[]) {
+  let patrimonio = 0n;
+  let resultado = 0n;
+  for (const s of saldos) {
+    const masa = tipoCuentaPorCodigo(s.codigo);
+    const v = toCents(s.saldoDeudor);
+    if (masa === 'patrimonio') patrimonio -= v;
+    else if (masa === 'ingreso' || masa === 'gasto') resultado -= v;
+  }
+  return { patrimonio, resultado };
+}
+
+/**
+ * Patrimonio neto (saldo natural de las cuentas de patrimonio, sin el
+ * resultado) y resultado (ingresos − gastos) de unos saldos deudores.
+ */
+export function patrimonioNetoDeSaldos(saldos: readonly SaldoCuenta[]): {
+  patrimonio: number;
+  resultado: number;
+} {
+  const { patrimonio, resultado } = patrimonioNetoCents(saldos);
+  return { patrimonio: fromCents(patrimonio), resultado: fromCents(resultado) };
+}
+
+export interface TipoCambioRegistro {
+  moneda: string;
+  tipo: TipoCambioConsolidacion;
+  /** AAAA-MM-DD; en cierre e histórico, `desde = hasta`. */
+  desde: string;
+  hasta: string;
+  tasa: Importe;
+}
+
+const amplitudPeriodo = (a: string, b: string) =>
+  (Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000;
+
+/**
+ * Tipo aplicable, determinista:
+ *  - cierre / histórico: el último con fecha ≤ `hasta` (la fecha de cierre o
+ *    de toma de control);
+ *  - medio: el del periodo exacto; si no, el más estrecho que lo cubra.
+ * Null si no hay ninguno (`FX_RATE_MISSING`).
+ */
+export function seleccionarTipoCambio(
+  registros: readonly TipoCambioRegistro[],
+  c: {
+    moneda: string;
+    tipo: TipoCambioConsolidacion;
+    desde: string;
+    hasta: string;
+  },
+): TipoCambioRegistro | null {
+  const candidatos = registros.filter(
+    (r) => r.moneda === c.moneda && r.tipo === c.tipo,
+  );
+  if (c.tipo === 'medio') {
+    const exacto = candidatos.find(
+      (r) => r.desde === c.desde && r.hasta === c.hasta,
+    );
+    if (exacto) return exacto;
+    const cubren = candidatos
+      .filter((r) => r.desde <= c.desde && r.hasta >= c.hasta)
+      .sort(
+        (a, b) =>
+          amplitudPeriodo(a.desde, a.hasta) -
+            amplitudPeriodo(b.desde, b.hasta) ||
+          (a.desde < b.desde ? 1 : a.desde > b.desde ? -1 : 0),
+      );
+    return cubren[0] ?? null;
+  }
+  let mejor: TipoCambioRegistro | null = null;
+  for (const r of candidatos) {
+    if (r.desde <= c.hasta && (!mejor || r.desde > mejor.desde)) mejor = r;
+  }
+  return mejor;
+}
+
+export interface InversionPatrimonioEntrada {
+  companyId: string;
+  /** Nombre para los conceptos de los ajustes (por defecto, el id). */
+  nombre?: string;
+  metodo: MetodoConsolidacion;
+  /** Participación de la dominante, 0,01–100 con 2 decimales. */
+  participacionPct: Importe;
+  /** Coste de la participación en la dominante (moneda de presentación). */
+  costeInversion: Importe;
+  /** Cuenta 2xx de la dominante donde figura la participación. */
+  cuentaInversion: string;
+  /** PN (100 %) de la dependiente a la toma de control, en presentación. */
+  patrimonioAdquisicion: Importe;
+  /** PN (100 %) al cierre sin el resultado del periodo, en presentación. */
+  patrimonioCierre: Importe;
+  /** Resultado (100 %) del periodo, en presentación. */
+  resultadoPeriodo: Importe;
+  /** La toma de control cae en el periodo: la diferencia negativa es resultado. */
+  adquisicionEnPeriodo: boolean;
+}
+
+export interface InversionPatrimonioCalculo {
+  companyId: string;
+  metodo: MetodoConsolidacion;
+  participacionPct: number;
+  costeInversion: number;
+  patrimonioAdquisicion: number;
+  /** Parte del PN a la toma de control que corresponde a la dominante. */
+  participacionAdquirida: number;
+  fondoComercio: number;
+  diferenciaNegativa: number;
+  /** Socios externos: su parte del PN a la toma de control (global). */
+  sociosExternosAdquisicion: number;
+  /** Socios externos: su parte de la variación posterior del PN (global). */
+  sociosExternosPosteriores: number;
+  /** Puesta en equivalencia: valor de la participación al cierre. */
+  valorPuestaEquivalencia: number | null;
+  /** Puesta en equivalencia: parte del resultado del periodo. */
+  resultadoPuestaEquivalencia: number | null;
+  ajustes: AjusteConsolidacion[];
+}
+
+/** Línea de ajuste desde un saldo deudor con signo; null si es cero. */
+function lineaDeudora(
+  cuenta: string,
+  deudor: bigint,
+): LineaAjusteConsolidacion | null {
+  if (deudor === 0n) return null;
+  return deudor > 0n
+    ? { cuenta, debe: centsToNumeric(deudor), haber: '0.00' }
+    : { cuenta, debe: '0.00', haber: centsToNumeric(-deudor) };
+}
+
+function ajusteCuadrado(
+  concepto: string,
+  pares: readonly [string, bigint][],
+): AjusteConsolidacion | null {
+  const lineas = pares
+    .map(([c, v]) => lineaDeudora(c, v))
+    .filter((l): l is LineaAjusteConsolidacion => l !== null);
+  if (lineas.length === 0) return null;
+  const cuadre = sumCents(pares.map(([, v]) => v));
+  if (cuadre !== 0n) {
+    throw new RangeError(`Ajuste de consolidación descuadrado: ${concepto}`);
+  }
+  return { concepto, origen: 'automatico', lineas };
+}
+
+/**
+ * Eliminación inversión–patrimonio neto de una sociedad del perímetro.
+ *
+ * Global: se elimina el 100 % del PN a la toma de control; la dominante
+ * compensa su coste con su parte (`pct × PN`) y el resto es de socios
+ * externos, que además reciben su parte de la variación posterior del PN
+ * (reclasificada desde reservas). Fondo de comercio = coste − parte de la
+ * dominante; si es negativo, diferencia negativa.
+ *
+ * Proporcional: se elimina solo la parte integrada (`pct × PN`), sin socios
+ * externos.
+ *
+ * Puesta en equivalencia: la participación se reclasifica a 2400 y se ajusta
+ * por la parte de la variación del PN desde la toma de control (reservas,
+ * 1136) y del resultado del periodo (7609). El fondo de comercio queda
+ * implícito en el valor; la diferencia negativa lo aumenta.
+ *
+ * Los socios externos de la adquisición se calculan por diferencia
+ * (`PN − parte dominante`) y los posteriores también
+ * (`round((1 − pct) × PN cierre) − externos adquisición`): la suma coincide
+ * al céntimo con la de `consolidarEstados`.
+ */
+export function eliminacionInversionPatrimonio(
+  e: InversionPatrimonioEntrada,
+): InversionPatrimonioCalculo {
+  const pct = toScaled(e.participacionPct, 2);
+  if (pct <= 0n || pct > 10_000n) {
+    throw new RangeError(`Participación no válida: ${e.participacionPct}`);
+  }
+  if (!/^2\d{3,9}$/.test(e.cuentaInversion)) {
+    throw new RangeError(`Cuenta de inversión no válida: ${e.cuentaInversion}`);
+  }
+  const coste = toCents(e.costeInversion);
+  if (coste < 0n) throw new RangeError('El coste de la inversión es negativo');
+  const pnAdq = toCents(e.patrimonioAdquisicion);
+  const pnCierre = toCents(e.patrimonioCierre);
+  const resultado = toCents(e.resultadoPeriodo);
+  const quien = e.nombre ?? e.companyId;
+  const cuentaDifNeg = (reservas: string) =>
+    e.adquisicionEnPeriodo ? CUENTA_DIFERENCIA_NEGATIVA : reservas;
+  const ajustes: AjusteConsolidacion[] = [];
+  const push = (a: AjusteConsolidacion | null) => a && ajustes.push(a);
+
+  if (e.metodo === 'puesta_equivalencia') {
+    const dominante = mulDivRound(pnAdq, pct, 10_000n);
+    const dif = coste - dominante;
+    const variacion = mulDivRound(pnCierre, pct, 10_000n) - dominante;
+    const resultadoPeq = mulDivRound(resultado, pct, 10_000n);
+    const exceso = dif < 0n ? -dif : 0n;
+    const valorPeq = coste + variacion + resultadoPeq + exceso;
+    push(
+      ajusteCuadrado(
+        `Puesta en equivalencia de ${quien}: reclasificación de la participación`,
+        [
+          [CUENTA_PARTICIPACIONES_PUESTA_EQUIVALENCIA, coste],
+          [e.cuentaInversion, -coste],
+        ],
+      ),
+    );
+    push(
+      ajusteCuadrado(
+        `Puesta en equivalencia de ${quien}: variación del patrimonio neto`,
+        [
+          [
+            CUENTA_PARTICIPACIONES_PUESTA_EQUIVALENCIA,
+            variacion + resultadoPeq + exceso,
+          ],
+          [CUENTA_RESERVAS_PUESTA_EQUIVALENCIA, -variacion],
+          [CUENTA_RESULTADO_PUESTA_EQUIVALENCIA, -resultadoPeq],
+          [cuentaDifNeg(CUENTA_RESERVAS_PUESTA_EQUIVALENCIA), -exceso],
+        ],
+      ),
+    );
+    return {
+      companyId: e.companyId,
+      metodo: e.metodo,
+      participacionPct: Number(pct) / 100,
+      costeInversion: fromCents(coste),
+      patrimonioAdquisicion: fromCents(pnAdq),
+      participacionAdquirida: fromCents(dominante),
+      fondoComercio: fromCents(dif > 0n ? dif : 0n),
+      diferenciaNegativa: fromCents(exceso),
+      sociosExternosAdquisicion: 0,
+      sociosExternosPosteriores: 0,
+      valorPuestaEquivalencia: fromCents(valorPeq),
+      resultadoPuestaEquivalencia: fromCents(resultadoPeq),
+      ajustes,
+    };
+  }
+
+  let eliminado: bigint;
+  let dominante: bigint;
+  let extAdq = 0n;
+  let extPost = 0n;
+  if (e.metodo === 'proporcional') {
+    eliminado = applyPct(pnAdq, e.participacionPct);
+    dominante = eliminado;
+  } else {
+    eliminado = pnAdq;
+    const externos = 10_000n - pct;
+    extAdq = mulDivRound(pnAdq, externos, 10_000n);
+    dominante = pnAdq - extAdq;
+    extPost = mulDivRound(pnCierre, externos, 10_000n) - extAdq;
+  }
+  const dif = coste - dominante;
+  push(
+    ajusteCuadrado(`Eliminación inversión–patrimonio neto de ${quien}`, [
+      [CUENTA_PATRIMONIO_ELIMINADO, eliminado],
+      [e.cuentaInversion, -coste],
+      [CUENTA_SOCIOS_EXTERNOS, -extAdq],
+      dif > 0n
+        ? [CUENTA_FONDO_COMERCIO_CONSOLIDACION, dif]
+        : [cuentaDifNeg(CUENTA_RESERVAS_CONSOLIDADAS), dif],
+    ]),
+  );
+  push(
+    ajusteCuadrado(
+      `Socios externos en la variación del patrimonio de ${quien}`,
+      [
+        [CUENTA_RESERVAS_CONSOLIDADAS, extPost],
+        [CUENTA_SOCIOS_EXTERNOS, -extPost],
+      ],
+    ),
+  );
+  return {
+    companyId: e.companyId,
+    metodo: e.metodo,
+    participacionPct: Number(pct) / 100,
+    costeInversion: fromCents(coste),
+    patrimonioAdquisicion: fromCents(pnAdq),
+    participacionAdquirida: fromCents(dominante),
+    fondoComercio: fromCents(dif > 0n ? dif : 0n),
+    diferenciaNegativa: fromCents(dif < 0n ? -dif : 0n),
+    sociosExternosAdquisicion: fromCents(extAdq),
+    sociosExternosPosteriores: fromCents(extPost),
+    valorPuestaEquivalencia: null,
+    resultadoPuestaEquivalencia: null,
+    ajustes,
   };
 }
 

@@ -67,6 +67,8 @@ export const AUDIT_ENTITY_TYPES = [
   'corporate_group_member',
   'consolidation_adjustment',
   'consolidation_closing',
+  'consolidation_fx_rate',
+  'company',
   'material_request',
   'work_in_progress',
   'loss_provision',
