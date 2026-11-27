@@ -131,7 +131,12 @@ import type {
   MiembroUpdateInput,
   PermisoConsolidacionDto,
   SociedadAccesibleDto,
+  SociedadCreateInput,
+  SociedadDto,
+  SociedadUpdateInput,
   TesoreriaGrupoDto,
+  TipoCambioCreateInput,
+  TipoCambioDto,
   EstadoAprobacionDto,
   OperacionAprobacion,
   ReglaAprobacionCreateInput,
@@ -2983,8 +2988,48 @@ export const holdingApi = {
     request<GrupoDto>(`/holding/grupos/${grupoId}/miembros/${miembroId}`, {
       method: 'PATCH',
       body: JSON.stringify(input),
-      headers: ifMatch(version),
+      headers: siVersion(version),
     }),
+  /* Group Reporting: alta de sociedades y tipos de cambio. */
+  sociedadesGestionadas: () =>
+    request<SociedadDto[]>('/holding/sociedades/gestionadas'),
+  crearSociedad: (input: SociedadCreateInput, clave: string) =>
+    request<SociedadDto>('/holding/sociedades', postHolding(input, clave)),
+  actualizarSociedad: (
+    id: string,
+    input: SociedadUpdateInput,
+    version: number,
+  ) =>
+    request<SociedadDto>(`/holding/sociedades/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+      headers: siVersion(version),
+    }),
+  tiposCambio: (grupoId: string) =>
+    request<TipoCambioDto[]>(`/holding/grupos/${grupoId}/tipos-cambio`),
+  crearTipoCambio: (
+    grupoId: string,
+    input: TipoCambioCreateInput,
+    clave: string,
+  ) =>
+    request<TipoCambioDto>(
+      `/holding/grupos/${grupoId}/tipos-cambio`,
+      postHolding(input, clave),
+    ),
+  actualizarTipoCambio: (
+    grupoId: string,
+    tipoId: string,
+    tasa: number,
+    version: number,
+  ) =>
+    request<TipoCambioDto>(
+      `/holding/grupos/${grupoId}/tipos-cambio/${tipoId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ tasa }),
+        headers: siVersion(version),
+      },
+    ),
   estados: (grupoId: string, desde: string, hasta: string) =>
     request<EstadosConsolidadosDto>(
       `/holding/grupos/${grupoId}/estados${qs({ desde, hasta })}`,
