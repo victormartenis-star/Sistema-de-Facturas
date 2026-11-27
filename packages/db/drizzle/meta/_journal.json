@@ -498,6 +498,13 @@
       "when": 1795715827104,
       "tag": "0070_eam_maquinaria",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1795718326744,
+      "tag": "0071_grc_aprobaciones_sod",
+      "breakpoints": true
     }
   ]
 }

@@ -9,15 +9,18 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { z } from 'zod';
 import {
   OPERACIONES_APROBACION,
   decisionAprobarSchema,
   decisionMotivoSchema,
   estadoAprobacionQuerySchema,
+  reasignarPasoSchema,
   reglaAprobacionCreateSchema,
   reglaAprobacionUpdateSchema,
   solicitudAprobacionCreateSchema,
   solicitudesQuerySchema,
+  type ReasignarPasoInput,
   type DecisionAprobarInput,
   type DecisionMotivoInput,
   type EstadoAprobacionQuery,
@@ -32,6 +35,11 @@ import { Idempotente } from '../common/idempotencia/idempotente.decorator';
 import { VersionEsperada } from '../common/version';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { AprobacionesService } from './aprobaciones.service';
+
+/** Instante de evaluación del escalado (ISO); por defecto, ahora. */
+const escalarSchema = z.object({
+  referencia: z.string().datetime().optional(),
+});
 
 /**
  * Flujos de aprobación por umbral. Lectura: internos, obra (sus obras) y
@@ -137,5 +145,30 @@ export class AprobacionesController {
     @VersionEsperada() version: number | undefined,
   ) {
     return this.service.anular(id, body, version);
+  }
+
+  /** Reasigna el nivel activo a otro aprobador (admin o gerente). */
+  @Post('solicitudes/:id/reasignar')
+  @Roles('admin', 'gerente')
+  @Idempotente()
+  @HttpCode(200)
+  reasignar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(reasignarPasoSchema))
+    body: ReasignarPasoInput,
+    @VersionEsperada() version: number | undefined,
+  ) {
+    return this.service.reasignar(id, body, version);
+  }
+
+  /** Escala los niveles activos con el plazo vencido al rol superior. */
+  @Post('escalar')
+  @Roles('admin', 'gerente', 'administracion')
+  @Idempotente()
+  @HttpCode(200)
+  escalar(
+    @Body(new ZodValidationPipe(escalarSchema)) body: { referencia?: string },
+  ) {
+    return this.service.escalarVencidos(body.referencia);
   }
 }

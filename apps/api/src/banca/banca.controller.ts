@@ -90,10 +90,11 @@ export class BancaController {
   @HttpCode(200)
   remitir(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body(new ZodValidationPipe(remesaRemitirSchema)) body: { fecha: string },
+    @Body(new ZodValidationPipe(remesaRemitirSchema))
+    body: { fecha: string; justificacionSod?: string | null },
     @VersionEsperada() version: number | undefined,
   ) {
-    return this.remesas.remitir(id, body.fecha, version);
+    return this.remesas.remitir(id, body.fecha, version, body.justificacionSod);
   }
 
   @Post('remesas/:id/anular')

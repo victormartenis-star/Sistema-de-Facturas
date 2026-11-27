@@ -44,6 +44,7 @@ import { ProjectSystemModule } from './project-system/project-system.module';
 import { TalonesModule } from './talones/talones.module';
 import { BancaModule } from './banca/banca.module';
 import { EamModule } from './eam/eam.module';
+import { GrcModule } from './grc/grc.module';
 import { AprobacionesModule } from './aprobaciones/aprobaciones.module';
 import { HoldingModule } from './holding/holding.module';
 import { WipModule } from './wip/wip.module';
@@ -97,6 +98,7 @@ import { InformesModule } from './modules/informes/informes.module';
     TalonesModule,
     BancaModule,
     EamModule,
+    GrcModule,
     ProjectSystemModule,
     ActivosModule,
     AlmacenModule,

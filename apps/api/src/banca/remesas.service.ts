@@ -52,6 +52,7 @@ import { getRequestContext } from '../common/request-context';
 import { verificarVersion } from '../common/version';
 import { ContabilidadService } from '../contabilidad/contabilidad.service';
 import { DbService } from '../db/db.service';
+import { GrcService } from '../grc/grc.service';
 import {
   anularLiquidacion,
   registrarLiquidacion,
@@ -79,6 +80,7 @@ export class RemesasService {
     private readonly dbs: DbService,
     private readonly audit: AuditService,
     private readonly contabilidad: ContabilidadService,
+    private readonly grc: GrcService,
   ) {}
 
   private contexto(tx: Tx): Contexto {
@@ -523,6 +525,7 @@ export class RemesasService {
     id: string,
     fecha: string,
     version: number | undefined,
+    justificacionSod?: string | null,
   ): Promise<RemesaDto> {
     const companyId = this.dbs.getCompanyId();
     await this.dbs.db.transaction(async (tx) => {
@@ -553,6 +556,24 @@ export class RemesasService {
           ),
         )
         .orderBy(asc(sepaRemittanceItems.position));
+      if (r.type === 'transferencia' && items.length > 0) {
+        // Segregación: quien aprobó alguna de las facturas no la remite sin política.
+        const facturas = await tx
+          .selectDistinct({ id: paymentMilestones.invoiceId })
+          .from(paymentMilestones)
+          .where(
+            inArray(
+              paymentMilestones.id,
+              items.map((p) => p.milestoneId),
+            ),
+          );
+        await this.grc.verificarAprobadorPaga(
+          tx,
+          facturas.map((f) => f.id),
+          { operacion: 'remesa_sepa', entidadId: r.id, referencia: r.number },
+          justificacionSod,
+        );
+      }
       const ctx = this.contexto(tx);
       for (const p of items) {
         const liq = await registrarLiquidacion(ctx, p.milestoneId, {

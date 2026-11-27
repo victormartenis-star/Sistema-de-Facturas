@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
 import { NotificacionesModule } from '../alerts/notificaciones.module';
+import { GrcModule } from '../grc/grc.module';
 import { AprobacionesController } from './aprobaciones.controller';
 import { AprobacionesService } from './aprobaciones.service';
 
 @Module({
-  imports: [NotificacionesModule],
+  imports: [NotificacionesModule, GrcModule],
   controllers: [AprobacionesController],
   providers: [AprobacionesService],
   // Pedidos, albaranes, facturas y subcontratas aplican la puerta y la

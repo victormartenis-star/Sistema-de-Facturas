@@ -1,10 +1,20 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  and,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  or,
+  sql,
+} from 'drizzle-orm';
 import {
   AlertRule,
   Notification,
   alertRules,
   companies,
+  notificationRecipients,
   notifications,
   users,
 } from '@erp/db';
@@ -23,7 +33,10 @@ import {
   todayIso,
   withinAlertWindow,
 } from '@erp/shared';
-import { runWithRequestContext } from '../common/request-context';
+import {
+  getRequestContext,
+  runWithRequestContext,
+} from '../common/request-context';
 import { AuditService } from '../audit/audit.service';
 import { ComplianceService } from '../compliance/compliance.service';
 import { CostControlService } from '../cost-control/cost-control.service';
@@ -168,36 +181,99 @@ export class AlertsService {
 
   /* ────────────────────── notificaciones ────────────────────── */
 
-  async listNotifications(onlyUnread = false): Promise<NotificationDto[]> {
+  /**
+   * Bandeja del usuario: las de empresa (alertas programadas) y las
+   * dirigidas a él (fase 7). Una dirigida a otros no se ve; su lectura es
+   * por destinatario.
+   */
+  private visibles(unread: boolean) {
     const companyId = this.dbs.getCompanyId();
-    const filters = [eq(notifications.companyId, companyId)];
-    if (onlyUnread) filters.push(isNull(notifications.readAt));
+    const userId = getRequestContext()?.userId ?? null;
+    const destino = userId
+      ? and(
+          eq(notificationRecipients.notificationId, notifications.id),
+          eq(notificationRecipients.userId, userId),
+        )
+      : sql`false`;
+    const filtros = [
+      eq(notifications.companyId, companyId),
+      or(
+        eq(notifications.dirigida, false),
+        isNotNull(notificationRecipients.id),
+      ),
+    ];
+    if (unread) {
+      filtros.push(
+        or(
+          and(eq(notifications.dirigida, false), isNull(notifications.readAt)),
+          and(
+            eq(notifications.dirigida, true),
+            isNull(notificationRecipients.readAt),
+          ),
+        ),
+      );
+    }
+    return { destino, filtros };
+  }
+
+  async listNotifications(onlyUnread = false): Promise<NotificationDto[]> {
+    const { destino, filtros } = this.visibles(onlyUnread);
     const rows = await this.dbs.db
-      .select()
+      .select({ n: notifications, leida: notificationRecipients.readAt })
       .from(notifications)
-      .where(and(...filters))
+      .leftJoin(notificationRecipients, destino)
+      .where(and(...filtros))
       .orderBy(desc(notifications.createdAt))
       .limit(200);
-    return rows.map(toNotificationDto);
+    return rows.map(({ n, leida }) => ({
+      ...toNotificationDto(n),
+      read: n.dirigida ? leida !== null : n.readAt !== null,
+      dirigida: n.dirigida,
+    }));
   }
 
   async unreadCount(): Promise<number> {
-    const companyId = this.dbs.getCompanyId();
+    const { destino, filtros } = this.visibles(true);
     // count(*) en la base: no trae las filas para contarlas.
     const [{ n }] = await this.dbs.db
       .select({ n: sql<number>`count(*)::int` })
       .from(notifications)
-      .where(
-        and(
-          eq(notifications.companyId, companyId),
-          isNull(notifications.readAt),
-        ),
-      );
+      .leftJoin(notificationRecipients, destino)
+      .where(and(...filtros));
     return Number(n);
   }
 
+  /** Marca leída; una dirigida, solo para su destinatario (404 si no lo es). */
   async markRead(id: string): Promise<void> {
     const companyId = this.dbs.getCompanyId();
+    const userId = getRequestContext()?.userId ?? null;
+    const [n] = await this.dbs.db
+      .select({ dirigida: notifications.dirigida })
+      .from(notifications)
+      .where(
+        and(eq(notifications.id, id), eq(notifications.companyId, companyId)),
+      );
+    if (n?.dirigida) {
+      const marcadas = userId
+        ? await this.dbs.db
+            .update(notificationRecipients)
+            .set({ readAt: new Date() })
+            .where(
+              and(
+                eq(notificationRecipients.notificationId, id),
+                eq(notificationRecipients.userId, userId),
+              ),
+            )
+            .returning({ id: notificationRecipients.id })
+        : [];
+      if (marcadas.length === 0) {
+        throw new NotFoundException({
+          code: 'NOTIFICATION_NOT_FOUND',
+          message: 'Notificación no encontrada',
+        });
+      }
+      return;
+    }
     await this.dbs.db
       .update(notifications)
       .set({ readAt: new Date() })
@@ -208,12 +284,26 @@ export class AlertsService {
 
   async markAllRead(): Promise<void> {
     const companyId = this.dbs.getCompanyId();
+    const userId = getRequestContext()?.userId ?? null;
+    if (userId) {
+      await this.dbs.db
+        .update(notificationRecipients)
+        .set({ readAt: new Date() })
+        .where(
+          and(
+            eq(notificationRecipients.companyId, companyId),
+            eq(notificationRecipients.userId, userId),
+            isNull(notificationRecipients.readAt),
+          ),
+        );
+    }
     await this.dbs.db
       .update(notifications)
       .set({ readAt: new Date() })
       .where(
         and(
           eq(notifications.companyId, companyId),
+          eq(notifications.dirigida, false),
           isNull(notifications.readAt),
         ),
       );

@@ -20,6 +20,12 @@ import type {
   RolAprobador,
 } from './calculo';
 import type { Transiciones } from './maquina-estados';
+import {
+  MAX_NIVELES_APROBACION,
+  nivelAprobacionSchema,
+  type NivelAprobacionDto,
+  type PasoAprobacionDto,
+} from './grc';
 
 export type {
   EstadoSolicitudAprobacion,
@@ -108,6 +114,11 @@ export const reglaAprobacionCreateSchema = z.object({
   /** Obra concreta; sin ella, la regla vale para todas. */
   projectId: z.string().uuid().nullish(),
   activa: z.boolean().default(true),
+  /** Cadena multinivel (fase 7); vacía = un solo nivel con `rolRequerido`. */
+  niveles: z
+    .array(nivelAprobacionSchema)
+    .max(MAX_NIVELES_APROBACION)
+    .optional(),
 });
 export type ReglaAprobacionCreateInput = z.input<
   typeof reglaAprobacionCreateSchema
@@ -119,6 +130,10 @@ export const reglaAprobacionUpdateSchema = z
     importeMinimo: importe.optional(),
     rolRequerido: z.enum(ROLES_APROBADOR).optional(),
     activa: z.boolean().optional(),
+    niveles: z
+      .array(nivelAprobacionSchema)
+      .max(MAX_NIVELES_APROBACION)
+      .optional(),
   })
   .refine((v) => Object.keys(v).length > 0, {
     message: 'Indica al menos un campo a modificar',
@@ -138,6 +153,8 @@ export type SolicitudAprobacionCreateInput = z.input<
 
 export const decisionAprobarSchema = z.object({
   comentario: z.string().trim().max(500).nullish(),
+  /** Justificación de una excepción de segregación de funciones (política «justificar»). */
+  justificacionSod: z.string().trim().max(500).nullish(),
 });
 export type DecisionAprobarInput = z.input<typeof decisionAprobarSchema>;
 
@@ -175,6 +192,8 @@ export interface ReglaAprobacionDto {
   projectCodigo: string | null;
   activa: boolean;
   version: number;
+  /** Cadena multinivel; vacía = un solo nivel con `rolRequerido`. */
+  niveles?: NivelAprobacionDto[];
 }
 
 export interface SolicitudAprobacionDto {
@@ -197,6 +216,12 @@ export interface SolicitudAprobacionDto {
   /** El usuario actual puede aprobarla o rechazarla. */
   puedoDecidir: boolean;
   version: number;
+  /** Multinivel (fase 7): nivel activo, total y pasos de la cadena. */
+  nivelActual?: number;
+  totalNiveles?: number;
+  pasos?: PasoAprobacionDto[];
+  /** Por qué el usuario no puede decidir (rol, asignación o SoD), o conflictos auditables. */
+  avisoSod?: string | null;
 }
 
 export interface EstadoAprobacionDto {

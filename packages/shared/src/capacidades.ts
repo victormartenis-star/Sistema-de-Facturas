@@ -56,6 +56,8 @@ export const RECURSOS_UI = [
   'mantenimiento',
   /** Aviso de avería y lectura de contadores: también el jefe de obra. */
   'aviso_averia',
+  /** Políticas SoD, niveles de aprobación, delegaciones ajenas y escalado: admin, gerente y administración. */
+  'gobierno',
 ] as const;
 export type RecursoUi = (typeof RECURSOS_UI)[number];
 
@@ -88,7 +90,8 @@ export function can(
     recurso === 'talon' ||
     recurso === 'retencion' ||
     recurso === 'banca' ||
-    recurso === 'mantenimiento';
+    recurso === 'mantenimiento' ||
+    recurso === 'gobierno';
   if (restringida) return ROLES_RECTIFICAR.includes(rol);
   return true;
 }

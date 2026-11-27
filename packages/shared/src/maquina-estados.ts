@@ -45,6 +45,7 @@ import {
 } from './talones';
 import { AVAL_TRANSITIONS } from './avales';
 import { ORDEN_TRABAJO_TRANSITIONS, type EstadoOrdenTrabajo } from './eam';
+import { APPROVAL_STEP_TRANSITIONS, type EstadoPasoAprobacion } from './grc';
 import {
   PARTIDA_REMESA_TRANSITIONS,
   REMESA_TRANSITIONS,
@@ -130,6 +131,8 @@ export interface EstadoPorEntidad {
   sepa_remittance_item: EstadoPartidaRemesa;
   /** Orden de trabajo de mantenimiento (EAM). */
   orden_trabajo: EstadoOrdenTrabajo;
+  /** Paso (nivel) de una solicitud de aprobación multinivel. */
+  approval_step: EstadoPasoAprobacion;
 }
 
 export type EntidadConEstado = keyof EstadoPorEntidad;
@@ -215,6 +218,8 @@ function tablaDe(entidad: EntidadConEstado): Record<string, readonly string[]> {
       return PARTIDA_REMESA_TRANSITIONS;
     case 'orden_trabajo':
       return ORDEN_TRABAJO_TRANSITIONS;
+    case 'approval_step':
+      return APPROVAL_STEP_TRANSITIONS;
   }
 }
 

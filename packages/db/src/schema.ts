@@ -3520,6 +3520,8 @@ export const notifications = pgTable(
     /** Ruta relativa del frontend a la que lleva la notificación, p.ej. "/cumplimiento". */
     link: text('link'),
     dedupeKey: text('dedupe_key').notNull(),
+    /** Dirigida (0071): solo la ven sus destinatarios, con lectura por usuario. */
+    dirigida: boolean('dirigida').notNull().default(false),
     readAt: timestamp('read_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
@@ -4674,12 +4676,19 @@ export const approvalRequests = pgTable(
     decidedBy: uuid('decided_by').references(() => users.id),
     decidedAt: timestamp('decided_at', { withTimezone: true }),
     decisionReason: varchar('decision_reason', { length: 500 }),
+    /** Multinivel (0071): nivel activo y total de la cadena de la solicitud. */
+    currentLevel: smallint('current_level').notNull().default(1),
+    totalLevels: smallint('total_levels').notNull().default(1),
     version: integer('version').notNull().default(1),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
   (t) => [
+    check(
+      'approval_requests_niveles',
+      sql`${t.totalLevels} BETWEEN 1 AND 9 AND ${t.currentLevel} BETWEEN 1 AND ${t.totalLevels}`,
+    ),
     // Una sola solicitud viva (pendiente o aprobada) por documento.
     uniqueIndex('approval_requests_viva_unique')
       .on(t.companyId, t.operation, t.entityId)
@@ -6794,3 +6803,214 @@ export type EquipoLecturaContador = typeof equipoLecturasContador.$inferSelect;
 export type EquipoAsignacion = typeof equipoAsignaciones.$inferSelect;
 export type PlanMantenimiento = typeof planesMantenimiento.$inferSelect;
 export type OrdenTrabajo = typeof ordenesTrabajo.$inferSelect;
+
+/* ───────────── Fase 7: Governance, Risk & Compliance (0071) ───────────── */
+
+/** Cadena multinivel de una regla de umbral (vacía = un nivel con su rol). */
+export const approvalRuleLevels = pgTable(
+  'approval_rule_levels',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    ruleId: uuid('rule_id')
+      .notNull()
+      .references(() => approvalRules.id),
+    level: smallint('level').notNull(),
+    /** Desde qué importe del documento interviene (inclusive). */
+    minAmount: numeric('min_amount', { precision: 14, scale: 2 })
+      .notNull()
+      .default('0'),
+    requiredRole: approvalRoleEnum('required_role').notNull(),
+    /** Aprobador concreto; null = cualquiera con el rol o superior. */
+    approverUserId: uuid('approver_user_id').references(() => users.id),
+    /** Plazo para decidir antes del escalado. */
+    slaHours: integer('sla_hours'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('approval_rule_levels_rule_level_unique').on(t.ruleId, t.level),
+    index('approval_rule_levels_company_rule_idx').on(t.companyId, t.ruleId),
+    check(
+      'approval_rule_levels_valores',
+      sql`${t.level} BETWEEN 1 AND 9 AND ${t.minAmount} >= 0 AND (${t.slaHours} IS NULL OR ${t.slaHours} > 0)`,
+    ),
+  ],
+);
+
+export const approvalStepStatusEnum = pgEnum('approval_step_status', [
+  'en_espera',
+  'activo',
+  'aprobado',
+  'rechazado',
+  'cancelado',
+]);
+
+/** Paso (nivel) de una solicitud: quién debía decidir, quién decidió y cuándo. */
+export const approvalSteps = pgTable(
+  'approval_steps',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    requestId: uuid('request_id')
+      .notNull()
+      .references(() => approvalRequests.id),
+    level: smallint('level').notNull(),
+    requiredRole: approvalRoleEnum('required_role').notNull(),
+    approverUserId: uuid('approver_user_id').references(() => users.id),
+    status: approvalStepStatusEnum('status').notNull().default('en_espera'),
+    activatedAt: timestamp('activated_at', { withTimezone: true }),
+    dueAt: timestamp('due_at', { withTimezone: true }),
+    escalated: boolean('escalated').notNull().default(false),
+    decidedBy: uuid('decided_by').references(() => users.id),
+    /** Delegante cuando decide un delegado. */
+    onBehalfOf: uuid('on_behalf_of').references(() => users.id),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    comment: varchar('comment', { length: 500 }),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('approval_steps_request_level_unique').on(t.requestId, t.level),
+    // Un solo paso activo por solicitud.
+    uniqueIndex('approval_steps_activo_unique')
+      .on(t.requestId)
+      .where(sql`${t.status} = 'activo'`),
+    index('approval_steps_company_status_due_idx').on(
+      t.companyId,
+      t.status,
+      t.dueAt,
+    ),
+    index('approval_steps_company_approver_idx').on(
+      t.companyId,
+      t.approverUserId,
+      t.status,
+    ),
+    check(
+      'approval_steps_valores',
+      sql`${t.level} BETWEEN 1 AND 9 AND (${t.status} IN ('aprobado', 'rechazado')) = (${t.decidedAt} IS NOT NULL AND ${t.decidedBy} IS NOT NULL) AND (${t.status} <> 'activo' OR ${t.activatedAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+/** Suplencia: el delegado decide en nombre del delegante entre dos fechas. */
+export const approvalDelegations = pgTable(
+  'approval_delegations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    delegatorId: uuid('delegator_id')
+      .notNull()
+      .references(() => users.id),
+    delegateId: uuid('delegate_id')
+      .notNull()
+      .references(() => users.id),
+    fromDate: date('from_date').notNull(),
+    toDate: date('to_date').notNull(),
+    reason: varchar('reason', { length: 240 }).notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('approval_delegations_company_delegate_idx').on(
+      t.companyId,
+      t.delegateId,
+      t.isActive,
+    ),
+    index('approval_delegations_company_delegator_idx').on(
+      t.companyId,
+      t.delegatorId,
+    ),
+    check(
+      'approval_delegations_valores',
+      sql`${t.delegatorId} <> ${t.delegateId} AND ${t.toDate} >= ${t.fromDate}`,
+    ),
+  ],
+);
+
+/** Política de segregación de funciones por empresa (sin fila: la de defecto). */
+export const sodPolicies = pgTable(
+  'sod_policies',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    conflict: varchar('conflict', { length: 40 }).notNull(),
+    mode: varchar('mode', { length: 12 }).notNull(),
+    updatedBy: uuid('updated_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('sod_policies_company_conflict_unique').on(
+      t.companyId,
+      t.conflict,
+    ),
+    check(
+      'sod_policies_valores',
+      sql`${t.conflict} IN ('solicitante_aprueba', 'mismo_aprobador_niveles', 'creador_aprueba', 'aprobador_paga') AND ${t.mode} IN ('bloquear', 'justificar', 'auditar') AND (${t.conflict} NOT IN ('solicitante_aprueba', 'mismo_aprobador_niveles') OR ${t.mode} = 'bloquear')`,
+    ),
+  ],
+);
+
+/** Destinatarios de una notificación dirigida, con su lectura. */
+export const notificationRecipients = pgTable(
+  'notification_recipients',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    notificationId: uuid('notification_id')
+      .notNull()
+      .references(() => notifications.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('notification_recipients_unique').on(
+      t.notificationId,
+      t.userId,
+    ),
+    index('notification_recipients_company_user_idx').on(
+      t.companyId,
+      t.userId,
+      t.readAt,
+    ),
+  ],
+);
+
+export type ApprovalRuleLevel = typeof approvalRuleLevels.$inferSelect;
+export type ApprovalStep = typeof approvalSteps.$inferSelect;
+export type ApprovalDelegation = typeof approvalDelegations.$inferSelect;
+export type SodPolicy = typeof sodPolicies.$inferSelect;

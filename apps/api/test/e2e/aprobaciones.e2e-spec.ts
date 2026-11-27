@@ -162,22 +162,32 @@ describe('Aprobaciones por umbral (integración)', () => {
       .expect(200);
     await validar(alb).expect(201);
 
-    // Bandeja in-app: la solicitud y la decisión llegan como notificaciones.
-    const bandeja = await como(admin).get('/alerts/notifications').expect(200);
-    const titulos = bandeja.body
-      .filter((n: { type: string }) => n.type === 'aprobacion')
-      .map((n: { title: string }) => n.title);
-    expect(titulos).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining('Aprobación pendiente'),
-        expect.stringContaining('Aprobación aprobada'),
-      ]),
-    );
+    // Bandeja in-app dirigida (fase 7): el aviso de pendiente llega a quien
+    // puede decidir (gerente) y la decisión a quien solicitó (admin); nadie
+    // recibe lo que no le toca.
+    const titulosDe = async (t: string) =>
+      (
+        (await como(t).get('/alerts/notifications').expect(200)).body as {
+          type: string;
+          title: string;
+        }[]
+      )
+        .filter((n) => n.type === 'aprobacion')
+        .map((n) => n.title);
+    const delAdmin = await titulosDe(admin);
+    expect(delAdmin).toEqual([expect.stringContaining('Aprobación aprobada')]);
+    expect(await titulosDe(gerente)).toEqual([
+      expect.stringContaining('Aprobación pendiente'),
+    ]);
+    expect(await titulosDe(administracion)).toEqual([]);
+    const bandejaAdmin = await como(admin)
+      .get('/alerts/notifications')
+      .expect(200);
     const noLeidas = await como(admin)
       .get('/alerts/notifications/no-leidas')
       .expect(200);
-    expect(noLeidas.body).toEqual({ count: bandeja.body.length });
-    expect(titulos.length).toBeGreaterThanOrEqual(2);
+    expect(noLeidas.body).toEqual({ count: bandejaAdmin.body.length });
+    expect(delAdmin).toHaveLength(1);
   });
 
   it('rechazo con motivo obligatorio; tras rechazar se puede volver a solicitar', async () => {

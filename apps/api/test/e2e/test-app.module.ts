@@ -48,6 +48,7 @@ import { ProjectSystemModule } from '../../src/project-system/project-system.mod
 import { TalonesModule } from '../../src/talones/talones.module';
 import { BancaModule } from '../../src/banca/banca.module';
 import { EamModule } from '../../src/eam/eam.module';
+import { GrcModule } from '../../src/grc/grc.module';
 import { UsersModule } from '../../src/users/users.module';
 import { SubcontratasModule } from '../../src/modules/subcontratas/subcontratas.module';
 
@@ -125,6 +126,7 @@ import { SubcontratasModule } from '../../src/modules/subcontratas/subcontratas.
     TalonesModule,
     BancaModule,
     EamModule,
+    GrcModule,
     ProjectSystemModule,
     DashboardModule,
     CopilotoModule,

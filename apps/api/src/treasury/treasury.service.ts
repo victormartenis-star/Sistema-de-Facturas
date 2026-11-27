@@ -68,6 +68,7 @@ import { AuditService } from '../audit/audit.service';
 import { ComplianceService } from '../compliance/compliance.service';
 import { getRequestContext } from '../common/request-context';
 import { DbService } from '../db/db.service';
+import { GrcService } from '../grc/grc.service';
 import {
   anularLiquidacion,
   anularTodas,
@@ -146,6 +147,7 @@ export class TreasuryService {
     private readonly dbs: DbService,
     private readonly compliance: ComplianceService,
     private readonly audit: AuditService,
+    private readonly grc: GrcService,
   ) {}
 
   /* ─────────────────────── cuentas bancarias y caja ─────────────────────── */
@@ -478,8 +480,32 @@ export class TreasuryService {
   ): Promise<MilestoneDetailDto> {
     const data = settlementCreateSchema.parse(input);
     await this.comprobarAcceso(id, true);
-    await this.dbs.db.transaction((tx) =>
-      registrarLiquidacion(
+    await this.dbs.db.transaction(async (tx) => {
+      // Segregación de funciones: quien aprobó la factura de compra no la
+      // paga sin que lo permita la política (bloquear, justificar o auditar).
+      const [v] = await tx
+        .select({
+          invoiceId: paymentMilestones.invoiceId,
+          direction: paymentMilestones.direction,
+          numero: invoices.invoiceNumber,
+        })
+        .from(paymentMilestones)
+        .innerJoin(invoices, eq(invoices.id, paymentMilestones.invoiceId))
+        .where(
+          and(
+            eq(paymentMilestones.id, id),
+            eq(paymentMilestones.companyId, this.dbs.getCompanyId()),
+          ),
+        );
+      if (v?.direction === 'pago') {
+        await this.grc.verificarAprobadorPaga(
+          tx,
+          [v.invoiceId],
+          { operacion: 'pago_factura', entidadId: id, referencia: v.numero },
+          data.justificacionSod,
+        );
+      }
+      await registrarLiquidacion(
         this.contexto(tx),
         id,
         {
@@ -491,8 +517,8 @@ export class TreasuryService {
           notas: data.notas,
         },
         versionEsperada,
-      ),
-    );
+      );
+    });
     return this.milestoneDetail(id);
   }
 

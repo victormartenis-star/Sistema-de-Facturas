@@ -884,7 +884,11 @@ export const remesaCreateSchema = z.object({
 });
 export type RemesaCreateInput = z.input<typeof remesaCreateSchema>;
 
-export const remesaRemitirSchema = z.object({ fecha });
+export const remesaRemitirSchema = z.object({
+  fecha,
+  /** Justificación si quien remite aprobó alguna factura y la política SoD lo exige. */
+  justificacionSod: z.string().trim().max(500).nullish(),
+});
 export const remesaAnularSchema = z.object({
   motivo: z.string().trim().min(3).max(240),
 });

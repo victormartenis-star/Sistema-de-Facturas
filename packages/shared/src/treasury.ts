@@ -134,6 +134,8 @@ export const settlementCreateSchema = z.object({
   paymentInstrument: z.enum(PAYMENT_INSTRUMENTS).optional(),
   referencia: z.string().trim().max(80).nullish(),
   notas: z.string().trim().max(500).nullish(),
+  /** Justificación si quien paga aprobó la factura y la política SoD lo exige. */
+  justificacionSod: z.string().trim().max(500).nullish(),
 });
 export type SettlementCreateInput = z.input<typeof settlementCreateSchema>;
 

@@ -111,6 +111,8 @@ export interface NotificationDto {
   link: string | null;
   read: boolean;
   createdAt: string;
+  /** Dirigida a destinatarios concretos (con lectura por usuario) o de empresa. */
+  dirigida?: boolean;
 }
 
 export interface NotificationsRunSummaryDto {

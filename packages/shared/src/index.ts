@@ -74,4 +74,5 @@ export * from './talones';
 export * from './project-system';
 export * from './banca';
 export * from './eam';
+export * from './grc';
 export * from './consolidacion';
