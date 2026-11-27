@@ -98,22 +98,29 @@ export function registrarAprobaciones(server: McpServer) {
     {
       title: 'Aprobar o rechazar una solicitud',
       description:
-        'Aprueba o rechaza (motivo obligatorio al rechazar) una solicitud ' +
-        'pendiente. Lee la versión y envía If-Match. Errores: ' +
-        'SELF_APPROVAL_FORBIDDEN, APPROVAL_ROLE_INSUFFICIENT, APPROVAL_STALE.',
+        'Aprueba o rechaza (motivo obligatorio al rechazar) el nivel activo ' +
+        'de una solicitud pendiente; en una cadena multinivel, aprobar pasa ' +
+        'al siguiente nivel. Lee la versión y envía If-Match. Errores: ' +
+        'SELF_APPROVAL_FORBIDDEN, APPROVAL_ROLE_INSUFFICIENT, ' +
+        'APPROVAL_NOT_ASSIGNEE, SOD_CONFLICT, SOD_JUSTIFICATION_REQUIRED ' +
+        '(envía justificacionSod), APPROVAL_STALE.',
       inputSchema: {
         id: z.string().uuid(),
         decision: z.enum(['aprobar', 'rechazar']),
         motivo: z.string().trim().max(500).optional(),
+        justificacionSod: z.string().trim().max(500).optional(),
       },
       annotations: { readOnlyHint: false, idempotentHint: false },
     },
-    async ({ id, decision, motivo }) =>
+    async ({ id, decision, motivo, justificacionSod }) =>
       ejecutar(async () => {
         const cuerpo =
           decision === 'rechazar'
             ? decisionMotivoSchema.parse({ motivo: motivo ?? '' })
-            : { comentario: motivo ?? null };
+            : {
+                comentario: motivo ?? null,
+                justificacionSod: justificacionSod ?? null,
+              };
         return pedirVersionado<SolicitudAprobacionDto>(
           `/aprobaciones/solicitudes/${id}/${decision}`,
           post(cuerpo),

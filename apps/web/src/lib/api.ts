@@ -1,5 +1,13 @@
 import { DOCUMENT_MAX_SIZE_MB } from '@erp/shared';
 import type {
+  ConflictoSod,
+  DelegacionCreateInput,
+  DelegacionDto,
+  ModoSod,
+  PoliticaSodDto,
+  ReasignarPasoInput,
+} from '@erp/shared';
+import type {
   AsignacionCreateInput,
   AsignacionDto,
   EquipoEamDto,
@@ -2847,7 +2855,11 @@ export const aprobacionesApi = {
   decidir: (
     id: string,
     accion: 'aprobar' | 'rechazar' | 'anular',
-    body: { comentario?: string | null; motivo?: string },
+    body: {
+      comentario?: string | null;
+      motivo?: string;
+      justificacionSod?: string | null;
+    },
     version: number,
     clave: string,
   ) =>
@@ -2856,9 +2868,81 @@ export const aprobacionesApi = {
       {
         method: 'POST',
         body: JSON.stringify(body),
-        headers: { ...ifMatch(version), ...idempotencyKey(clave) },
+        headers: { ...siVersion(version), ...idempotencyKey(clave) },
       },
     ),
+  reasignar: (
+    id: string,
+    input: ReasignarPasoInput,
+    version: number,
+    clave: string,
+  ) =>
+    request<SolicitudAprobacionDto>(
+      `/aprobaciones/solicitudes/${id}/reasignar`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+        headers: { ...siVersion(version), ...idempotencyKey(clave) },
+      },
+    ),
+  escalar: (clave: string) =>
+    request<SolicitudAprobacionDto[]>('/aprobaciones/escalar', {
+      method: 'POST',
+      body: JSON.stringify({}),
+      headers: idempotencyKey(clave),
+    }),
+};
+
+/** Gobierno: políticas de segregación de funciones, eventos y delegaciones. */
+export const grcApi = {
+  politicas: () => request<PoliticaSodDto[]>('/grc/sod/politicas'),
+  actualizarPolitica: (
+    conflicto: ConflictoSod,
+    modo: ModoSod,
+    version: number,
+    clave: string,
+  ) =>
+    request<PoliticaSodDto[]>(`/grc/sod/politicas/${conflicto}`, {
+      method: 'PUT',
+      body: JSON.stringify({ modo }),
+      headers: { ...siVersion(version), ...idempotencyKey(clave) },
+    }),
+  eventos: () =>
+    request<
+      {
+        id: string;
+        fecha: string;
+        usuario: string | null;
+        entidadId: string;
+        datos: {
+          resultado: 'bloqueado' | 'permitido';
+          operacion: string;
+          referencia: string;
+          errorCode?: string;
+          conflictos?: { conflicto: ConflictoSod; modo: ModoSod }[];
+          excepciones?: {
+            conflicto: ConflictoSod;
+            modo: ModoSod;
+            justificacion: string | null;
+          }[];
+        };
+      }[]
+    >('/grc/sod/eventos'),
+  delegaciones: (todas = false) =>
+    request<DelegacionDto[]>(
+      `/grc/delegaciones${qs({ todas: todas ? 'true' : undefined })}`,
+    ),
+  crearDelegacion: (input: DelegacionCreateInput, clave: string) =>
+    request<DelegacionDto>('/grc/delegaciones', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      headers: idempotencyKey(clave),
+    }),
+  revocarDelegacion: (id: string, version: number) =>
+    request<DelegacionDto>(`/grc/delegaciones/${id}/revocar`, {
+      method: 'POST',
+      headers: siVersion(version),
+    }),
 };
 
 /* ─────────────────────── Consolidación de grupo ─────────────────────── */

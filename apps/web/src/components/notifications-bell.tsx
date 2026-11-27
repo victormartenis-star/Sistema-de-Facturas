@@ -106,6 +106,11 @@ export function NotificationsBell() {
                       <span className="mb-1 inline-block rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500 uppercase">
                         {TYPE_LABELS[n.type] ?? n.type}
                       </span>
+                      {n.dirigida && (
+                        <span className="mb-1 ml-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800 uppercase">
+                          Para ti
+                        </span>
+                      )}
                       <p className="text-sm font-medium text-gray-900">
                         {n.title}
                       </p>

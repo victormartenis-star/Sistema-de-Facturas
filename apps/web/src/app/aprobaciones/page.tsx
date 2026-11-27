@@ -10,14 +10,27 @@ import {
   PUERTA_APROBACION_LABELS,
   ROLES_APROBADOR,
   ROL_APROBADOR_LABELS,
+  CONFLICTO_SOD_LABELS,
+  MODOS_SOD,
+  type ConflictoSod,
+  type EstadoPasoAprobacion,
+  type ModoSod,
+  type PoliticaSodDto,
   type EstadoSolicitudAprobacion,
   type OperacionAprobacion,
   type ReglaAprobacionDto,
   type RolAprobador,
   type SolicitudAprobacionDto,
 } from '@erp/shared';
-import { aprobacionesApi, formatDate, formatEur } from '@/lib/api';
+import {
+  aprobacionesApi,
+  formatDate,
+  formatEur,
+  grcApi,
+  usersApi,
+} from '@/lib/api';
 import { nuevoUuid } from '@/lib/api-error';
+import { crearGuardaEnvio } from '@/lib/envio-unico';
 import { useAuth } from '@/lib/auth';
 import { usePermisos } from '@/lib/permisos';
 import { IconCheck } from '@/components/icons';
@@ -35,7 +48,15 @@ import {
   selectCls,
 } from '@/components/ui';
 
-type Vista = 'paraMi' | 'todas' | 'reglas';
+type Vista = 'paraMi' | 'todas' | 'reglas' | 'delegaciones' | 'gobierno';
+
+const COLOR_PASO: Record<EstadoPasoAprobacion, string> = {
+  en_espera: 'bg-gray-100 text-gray-500',
+  activo: 'bg-amber-100 text-amber-800',
+  aprobado: 'bg-emerald-100 text-emerald-700',
+  rechazado: 'bg-red-100 text-red-700',
+  cancelado: 'bg-gray-100 text-gray-400 line-through',
+};
 
 const COLOR_ESTADO: Record<EstadoSolicitudAprobacion, string> = {
   pendiente: 'bg-amber-100 text-amber-800',
@@ -66,6 +87,8 @@ export default function AprobacionesPage() {
             ['paraMi', 'Pendientes para mí'],
             ['todas', 'Todas las solicitudes'],
             ['reglas', 'Reglas de umbral'],
+            ['delegaciones', 'Delegaciones'],
+            ['gobierno', 'Segregación de funciones'],
           ] as const
         ).map(([v, t]) => (
           <button
@@ -84,6 +107,10 @@ export default function AprobacionesPage() {
       </div>
       {vista === 'reglas' ? (
         <Reglas editable={gestionaReglas} />
+      ) : vista === 'delegaciones' ? (
+        <Delegaciones />
+      ) : vista === 'gobierno' ? (
+        <Gobierno editable={gestionaReglas} />
       ) : (
         <Solicitudes paraMi={vista === 'paraMi'} />
       )}
@@ -187,7 +214,27 @@ function Solicitudes({ paraMi }: { paraMi: boolean }) {
                     {formatEur(s.importe)}
                   </td>
                   <td className="px-3 py-2">
-                    {ROL_APROBADOR_LABELS[s.rolRequerido]}
+                    {(s.totalNiveles ?? 1) > 1
+                      ? `Nivel ${s.nivelActual}/${s.totalNiveles}`
+                      : ROL_APROBADOR_LABELS[s.rolRequerido]}
+                    {(s.pasos ?? []).length > 1 && (
+                      <span className="mt-0.5 flex gap-1">
+                        {(s.pasos ?? []).map((p) => (
+                          <span
+                            key={p.id}
+                            title={`${ROL_APROBADOR_LABELS[p.rolRequerido]}${p.aprobadorNombre ? ` · ${p.aprobadorNombre}` : ''}${p.decididoPorNombre ? ` · decidió ${p.decididoPorNombre}` : ''}${p.enNombreDe ? ' (por delegación)' : ''}${p.escalado ? ' · escalado' : ''}`}
+                            className={`rounded px-1 text-[10px] ${COLOR_PASO[p.estado]}`}
+                          >
+                            N{p.nivel}
+                          </span>
+                        ))}
+                      </span>
+                    )}
+                    {s.avisoSod && (
+                      <span className="block text-[11px] text-amber-700">
+                        {s.avisoSod}
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     <span
@@ -250,6 +297,7 @@ function DecisionModal({
   onClose: () => void;
 }) {
   const [texto, setTexto] = useState('');
+  const [justificacion, setJustificacion] = useState('');
   const clave = useRef(nuevoUuid());
   const qc = useQueryClient();
   const toast = useToast();
@@ -263,7 +311,10 @@ function DecisionModal({
         d.s.id,
         d.accion,
         d.accion === 'aprobar'
-          ? { comentario: texto.trim() || null }
+          ? {
+              comentario: texto.trim() || null,
+              justificacionSod: justificacion.trim() || null,
+            }
           : { motivo: texto.trim() },
         d.s.version,
         clave.current,
@@ -272,9 +323,16 @@ function DecisionModal({
     onSuccess: (r) => {
       clave.current = nuevoUuid();
       toast(
-        `${r.referencia}: ${r.estado === 'aprobada' ? 'aprobada' : 'rechazada'}`,
+        `${r.referencia}: ${
+          r.estado === 'aprobada'
+            ? 'aprobada'
+            : r.estado === 'pendiente'
+              ? `nivel aprobado, pasa al nivel ${r.nivelActual}`
+              : 'rechazada'
+        }`,
       );
       setTexto('');
+      setJustificacion('');
       refrescar();
       onClose();
     },
@@ -316,6 +374,22 @@ function DecisionModal({
               onChange={(e) => setTexto(e.target.value)}
             />
           </div>
+          {!rechazo && d.s.avisoSod && (
+            <div>
+              <p className="mb-1 text-xs text-amber-700">{d.s.avisoSod}</p>
+              <label className={labelCls} htmlFor="dec-sod">
+                Justificación de la excepción (segregación de funciones)
+              </label>
+              <textarea
+                id="dec-sod"
+                className={fieldCls}
+                rows={2}
+                maxLength={500}
+                value={justificacion}
+                onChange={(e) => setJustificacion(e.target.value)}
+              />
+            </div>
+          )}
           <div className="flex justify-end gap-2">
             <button type="button" className={btnGhostCls} onClick={onClose}>
               Cancelar
@@ -398,7 +472,19 @@ function Reglas({ editable }: { editable: boolean }) {
                   key={r.id}
                   className={`border-t border-gray-100 ${r.activa ? '' : 'text-gray-400'}`}
                 >
-                  <td className="px-3 py-2 font-medium">{r.nombre}</td>
+                  <td className="px-3 py-2 font-medium">
+                    {r.nombre}
+                    {(r.niveles ?? []).length > 0 && (
+                      <span className="block text-xs font-normal text-gray-500">
+                        {(r.niveles ?? [])
+                          .map(
+                            (n) =>
+                              `N${n.nivel} ≥ ${formatEur(n.importeMinimo)}: ${n.aprobadorNombre ?? ROL_APROBADOR_LABELS[n.rolRequerido]}${n.plazoHoras ? ` (${n.plazoHoras} h)` : ''}`,
+                          )
+                          .join(' → ')}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2">
                     {OPERACION_APROBACION_LABELS[r.operacion]}
                   </td>
@@ -450,6 +536,10 @@ function NuevaReglaModal({
     importeMinimo: '',
     rolRequerido: 'gerente' as RolAprobador,
   });
+  // Cadena multinivel opcional: cada nivel desde un importe, con su rol y plazo.
+  const [niveles, setNiveles] = useState<
+    { importe: string; rol: RolAprobador; plazo: string }[]
+  >([]);
   const clave = useRef(nuevoUuid());
   const qc = useQueryClient();
   const toast = useToast();
@@ -462,6 +552,13 @@ function NuevaReglaModal({
           operacion: f.operacion,
           importeMinimo: Number(f.importeMinimo.replace(',', '.')),
           rolRequerido: f.rolRequerido,
+          ...(niveles.length > 0 && {
+            niveles: niveles.map((n) => ({
+              importeMinimo: Number(n.importe.replace(',', '.') || 0),
+              rolRequerido: n.rol,
+              plazoHoras: n.plazo ? Number(n.plazo) : null,
+            })),
+          }),
         },
         clave.current,
       ),
@@ -546,6 +643,92 @@ function NuevaReglaModal({
             ))}
           </select>
         </div>
+        <div className="sm:col-span-2">
+          <p className={labelCls}>
+            Cadena de niveles (opcional: sin niveles, aprueba un solo nivel)
+          </p>
+          {niveles.map((n, i) => (
+            <div
+              key={i}
+              className="mb-1 flex flex-wrap items-center gap-1 text-xs"
+            >
+              <span className="w-14">Nivel {i + 1}</span>
+              <input
+                className={`${fieldCls} w-28`}
+                inputMode="decimal"
+                placeholder="Desde €"
+                value={n.importe}
+                aria-label={`Importe del nivel ${i + 1}`}
+                onChange={(e) =>
+                  setNiveles(
+                    niveles.map((x, j) =>
+                      j === i ? { ...x, importe: e.target.value } : x,
+                    ),
+                  )
+                }
+              />
+              <select
+                className={`${fieldCls} w-36`}
+                value={n.rol}
+                aria-label={`Rol del nivel ${i + 1}`}
+                onChange={(e) =>
+                  setNiveles(
+                    niveles.map((x, j) =>
+                      j === i
+                        ? { ...x, rol: e.target.value as RolAprobador }
+                        : x,
+                    ),
+                  )
+                }
+              >
+                {ROLES_APROBADOR.map((r) => (
+                  <option key={r} value={r}>
+                    {ROL_APROBADOR_LABELS[r]}
+                  </option>
+                ))}
+              </select>
+              <input
+                className={`${fieldCls} w-24`}
+                inputMode="numeric"
+                placeholder="Plazo h"
+                value={n.plazo}
+                aria-label={`Plazo del nivel ${i + 1}`}
+                onChange={(e) =>
+                  setNiveles(
+                    niveles.map((x, j) =>
+                      j === i ? { ...x, plazo: e.target.value } : x,
+                    ),
+                  )
+                }
+              />
+              <button
+                type="button"
+                className={btnGhostCls}
+                onClick={() => setNiveles(niveles.filter((_, j) => j !== i))}
+              >
+                Quitar
+              </button>
+            </div>
+          ))}
+          {niveles.length < 9 && (
+            <button
+              type="button"
+              className={btnGhostCls}
+              onClick={() =>
+                setNiveles([
+                  ...niveles,
+                  {
+                    importe: '',
+                    rol: niveles[niveles.length - 1]?.rol ?? 'administracion',
+                    plazo: '',
+                  },
+                ])
+              }
+            >
+              Añadir nivel
+            </button>
+          )}
+        </div>
         <p className="text-xs text-gray-500 sm:col-span-2">
           Sin aprobación no se podrá {PUERTA_APROBACION_LABELS[f.operacion]}.
         </p>
@@ -563,5 +746,326 @@ function NuevaReglaModal({
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** Mis delegaciones de aprobación (suplencias) y alta de una nueva. */
+function Delegaciones() {
+  const hoy = new Date().toISOString().slice(0, 10);
+  const [f, setF] = useState({
+    delegadoId: '',
+    desde: hoy,
+    hasta: hoy,
+    motivo: '',
+  });
+  const [guarda] = useState(crearGuardaEnvio);
+  const clave = useRef(nuevoUuid());
+  const { user } = useAuth();
+  const { can } = usePermisos();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const avisarError = useAvisarError();
+  const refrescar = () => void qc.invalidateQueries({ queryKey: ['grc'] });
+  const lista = useQuery({
+    queryKey: ['grc', 'delegaciones'],
+    queryFn: () => grcApi.delegaciones(),
+  });
+  const usuarios = useQuery({
+    queryKey: ['users', 'delegables'],
+    queryFn: () => usersApi.list(),
+    retry: false,
+  });
+  const crear = useMutation({
+    mutationFn: () => grcApi.crearDelegacion(f, clave.current),
+    onSuccess: () => {
+      clave.current = nuevoUuid();
+      setF({ ...f, delegadoId: '', motivo: '' });
+      toast(
+        'Delegación creada: el delegado decide en tu nombre en esas fechas',
+      );
+      refrescar();
+    },
+    onError: (e) => avisarError(e, refrescar),
+    onSettled: () => guarda.liberar(),
+  });
+  const revocar = useMutation({
+    mutationFn: (d: { id: string; version: number }) =>
+      grcApi.revocarDelegacion(d.id, d.version),
+    onSuccess: () => {
+      toast('Delegación revocada');
+      refrescar();
+    },
+    onError: (e) => avisarError(e, refrescar),
+  });
+  const aprueba =
+    user?.role === 'admin' ||
+    user?.role === 'gerente' ||
+    user?.role === 'administracion';
+  const candidatos = (usuarios.data ?? []).filter(
+    (x) =>
+      x.id !== user?.id &&
+      ['admin', 'gerente', 'administracion'].includes(x.role),
+  );
+  const valido =
+    f.delegadoId !== '' && f.hasta >= f.desde && f.motivo.trim().length >= 3;
+  return (
+    <div>
+      {aprueba && can('crear') && (
+        <form
+          className="mb-4 flex flex-wrap items-end gap-2 rounded-xl border bg-white p-3 shadow-sm"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!valido || crear.isPending || !guarda.intentar()) return;
+            crear.mutate();
+          }}
+        >
+          {candidatos.length > 0 ? (
+            <select
+              className={selectCls}
+              value={f.delegadoId}
+              onChange={(e) => setF({ ...f, delegadoId: e.target.value })}
+              aria-label="Delegado"
+            >
+              <option value="">Delegar en…</option>
+              {candidatos.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.fullName} ({x.role})
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              className={fieldCls}
+              placeholder="Id del delegado"
+              value={f.delegadoId}
+              onChange={(e) => setF({ ...f, delegadoId: e.target.value })}
+              aria-label="Delegado"
+            />
+          )}
+          <input
+            type="date"
+            className={selectCls}
+            value={f.desde}
+            min={hoy}
+            onChange={(e) => setF({ ...f, desde: e.target.value })}
+            aria-label="Desde"
+          />
+          <input
+            type="date"
+            className={selectCls}
+            value={f.hasta}
+            min={f.desde}
+            onChange={(e) => setF({ ...f, hasta: e.target.value })}
+            aria-label="Hasta"
+          />
+          <input
+            className={`${fieldCls} flex-1`}
+            placeholder="Motivo (vacaciones, baja…)"
+            value={f.motivo}
+            onChange={(e) => setF({ ...f, motivo: e.target.value })}
+            aria-label="Motivo"
+          />
+          <button
+            type="submit"
+            className={btnPrimaryCls}
+            disabled={!valido || crear.isPending}
+          >
+            Delegar
+          </button>
+        </form>
+      )}
+      {lista.isError && (
+        <ErrorBanner message={(lista.error as Error).message} />
+      )}
+      <ul className="space-y-1 text-sm">
+        {(lista.data ?? []).map((d) => (
+          <li
+            key={d.id}
+            className="flex items-center justify-between rounded border border-gray-100 bg-white px-3 py-2"
+          >
+            <span>
+              {d.deleganteNombre} → {d.delegadoNombre} · {formatDate(d.desde)} –{' '}
+              {formatDate(d.hasta)} · {d.motivo}
+              {!d.activa && (
+                <span className="ml-2 text-xs text-gray-400">revocada</span>
+              )}
+            </span>
+            {d.activa && d.deleganteId === user?.id && can('anular') && (
+              <button
+                type="button"
+                className={btnGhostCls}
+                disabled={revocar.isPending}
+                onClick={() =>
+                  !revocar.isPending &&
+                  revocar.mutate({ id: d.id, version: d.version })
+                }
+              >
+                Revocar
+              </button>
+            )}
+          </li>
+        ))}
+        {lista.data?.length === 0 && (
+          <li className="text-gray-500">Sin delegaciones.</li>
+        )}
+      </ul>
+    </div>
+  );
+}
+
+/** Políticas de segregación de funciones e informe de eventos (bloqueos y excepciones). */
+function Gobierno({ editable }: { editable: boolean }) {
+  const [guarda] = useState(crearGuardaEnvio);
+  const clave = useRef(nuevoUuid());
+  const { can } = usePermisos();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const avisarError = useAvisarError();
+  const refrescar = () => void qc.invalidateQueries({ queryKey: ['grc'] });
+  const politicas = useQuery({
+    queryKey: ['grc', 'politicas'],
+    queryFn: () => grcApi.politicas(),
+  });
+  const eventos = useQuery({
+    queryKey: ['grc', 'eventos'],
+    queryFn: () => grcApi.eventos(),
+    retry: false,
+  });
+  const cambiar = useMutation({
+    mutationFn: (p: { politica: PoliticaSodDto; modo: ModoSod }) =>
+      grcApi.actualizarPolitica(
+        p.politica.conflicto,
+        p.modo,
+        p.politica.version,
+        clave.current,
+      ),
+    onSuccess: () => {
+      clave.current = nuevoUuid();
+      toast('Política de segregación actualizada');
+      refrescar();
+    },
+    onError: (e) => avisarError(e, refrescar),
+    onSettled: () => guarda.liberar(),
+  });
+  const escalar = useMutation({
+    mutationFn: () => aprobacionesApi.escalar(nuevoUuid()),
+    onSuccess: (r) => {
+      toast(
+        r.length
+          ? `${r.length} solicitud(es) escaladas al nivel superior`
+          : 'Nada vencido que escalar',
+      );
+      void qc.invalidateQueries({ queryKey: ['aprobaciones'] });
+    },
+    onError: (e) => avisarError(e),
+  });
+  const MODO_LABEL: Record<ModoSod, string> = {
+    bloquear: 'Bloquear',
+    justificar: 'Permitir con justificación',
+    auditar: 'Permitir y auditar',
+  };
+  return (
+    <div className="space-y-6">
+      <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-left text-xs text-gray-500">
+            <tr>
+              <th className="px-3 py-2">Conflicto</th>
+              <th className="px-3 py-2">Política</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(politicas.data ?? []).map((p) => (
+              <tr key={p.conflicto} className="border-t border-gray-100">
+                <td className="px-3 py-2">{p.descripcion}</td>
+                <td className="px-3 py-2">
+                  {editable && !p.fija && can('editar', 'gobierno') ? (
+                    <select
+                      className={selectCls}
+                      value={p.modo}
+                      disabled={cambiar.isPending}
+                      aria-label={`Política: ${p.descripcion}`}
+                      onChange={(e) => {
+                        if (!guarda.intentar()) return;
+                        cambiar.mutate({
+                          politica: p,
+                          modo: e.target.value as ModoSod,
+                        });
+                      }}
+                    >
+                      {MODOS_SOD.map((m) => (
+                        <option key={m} value={m}>
+                          {MODO_LABEL[m]}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span>
+                      {MODO_LABEL[p.modo]}
+                      {p.fija && (
+                        <span className="ml-2 text-xs text-gray-500">
+                          (siempre)
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {can('editar', 'gobierno') && (
+        <button
+          type="button"
+          className={btnGhostCls}
+          disabled={escalar.isPending}
+          onClick={() => !escalar.isPending && escalar.mutate()}
+        >
+          Escalar aprobaciones con el plazo vencido
+        </button>
+      )}
+      <div>
+        <h3 className="mb-2 text-sm font-semibold">
+          Eventos de segregación de funciones
+        </h3>
+        {eventos.isError && (
+          <p className="text-xs text-gray-500">
+            Sin acceso al informe de eventos.
+          </p>
+        )}
+        <ul className="space-y-1 text-xs">
+          {(eventos.data ?? []).map((e) => (
+            <li
+              key={e.id}
+              className="rounded border border-gray-100 bg-white px-3 py-1.5"
+            >
+              <span
+                className={
+                  e.datos.resultado === 'bloqueado'
+                    ? 'font-semibold text-red-700'
+                    : 'text-amber-700'
+                }
+              >
+                {e.datos.resultado === 'bloqueado' ? 'Bloqueado' : 'Permitido'}
+              </span>{' '}
+              · {formatDate(e.fecha.slice(0, 10))} · {e.usuario ?? '—'} ·{' '}
+              {e.datos.operacion} {e.datos.referencia} ·{' '}
+              {(e.datos.conflictos ?? e.datos.excepciones ?? [])
+                .map((c) => CONFLICTO_SOD_LABELS[c.conflicto as ConflictoSod])
+                .join('; ')}
+              {(e.datos.excepciones ?? []).some((x) => x.justificacion) &&
+                ` · «${(e.datos.excepciones ?? [])
+                  .map((x) => x.justificacion)
+                  .filter(Boolean)
+                  .join(' / ')}»`}
+            </li>
+          ))}
+          {eventos.data?.length === 0 && (
+            <li className="text-gray-500">Sin eventos.</li>
+          )}
+        </ul>
+      </div>
+    </div>
   );
 }
