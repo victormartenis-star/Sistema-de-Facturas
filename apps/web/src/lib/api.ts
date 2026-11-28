@@ -137,6 +137,19 @@ import type {
   TesoreriaGrupoDto,
   TipoCambioCreateInput,
   TipoCambioDto,
+  CentroCosteCreateInput,
+  CentroCosteDto,
+  CentroCosteUpdateInput,
+  CicloRepartoCreateInput,
+  CicloRepartoDto,
+  CosteCompletoObraDto,
+  EjecucionRepartoDto,
+  EscenarioDto,
+  EscenarioUpdateInput,
+  FotoPrevisionDto,
+  PrevisionDto,
+  SaldoCentroDto,
+  SimulacionRepartoDto,
   EstadoAprobacionDto,
   OperacionAprobacion,
   ReglaAprobacionCreateInput,
@@ -3438,4 +3451,96 @@ export const estimacionCierreApi = {
         },
       },
     ),
+};
+
+/* ───────────────── Control analítico (centros, repartos y forecast) ───────────────── */
+
+const postCo = (body: unknown, clave?: string, version?: number) => ({
+  method: 'POST',
+  body: JSON.stringify(body),
+  headers: {
+    ...(clave ? idempotencyKey(clave) : {}),
+    ...siVersion(version),
+  },
+});
+const patchCo = (body: unknown, version: number) => ({
+  method: 'PATCH',
+  body: JSON.stringify(body),
+  headers: siVersion(version),
+});
+
+export const controlAnaliticoApi = {
+  centros: () => request<CentroCosteDto[]>('/control-analitico/centros'),
+  saldos: (desde: string, hasta: string) =>
+    request<SaldoCentroDto[]>(
+      `/control-analitico/centros/saldos${qs({ desde, hasta })}`,
+    ),
+  crearCentro: (input: CentroCosteCreateInput, clave: string) =>
+    request<CentroCosteDto>('/control-analitico/centros', postCo(input, clave)),
+  actualizarCentro: (
+    id: string,
+    input: CentroCosteUpdateInput,
+    version: number,
+  ) =>
+    request<CentroCosteDto>(
+      `/control-analitico/centros/${id}`,
+      patchCo(input, version),
+    ),
+  ciclos: () => request<CicloRepartoDto[]>('/control-analitico/ciclos'),
+  crearCiclo: (input: CicloRepartoCreateInput, clave: string) =>
+    request<CicloRepartoDto>('/control-analitico/ciclos', postCo(input, clave)),
+  activarCiclo: (id: string, activo: boolean, version: number) =>
+    request<CicloRepartoDto>(
+      `/control-analitico/ciclos/${id}`,
+      patchCo({ activo }, version),
+    ),
+  simular: (id: string, desde: string, hasta: string) =>
+    request<SimulacionRepartoDto>(
+      `/control-analitico/ciclos/${id}/simular`,
+      postCo({ desde, hasta }),
+    ),
+  ejecutar: (id: string, desde: string, hasta: string, clave: string) =>
+    request<EjecucionRepartoDto>(
+      `/control-analitico/ciclos/${id}/ejecutar`,
+      postCo({ desde, hasta }, clave),
+    ),
+  ejecuciones: () =>
+    request<EjecucionRepartoDto[]>('/control-analitico/ejecuciones'),
+  revertir: (id: string, motivo: string, version: number, clave: string) =>
+    request<EjecucionRepartoDto>(
+      `/control-analitico/ejecuciones/${id}/revertir`,
+      postCo({ motivo }, clave, version),
+    ),
+  costeObras: (hasta: string) =>
+    request<CosteCompletoObraDto[]>(
+      `/control-analitico/coste-obras${qs({ hasta })}`,
+    ),
+  escenarios: () => request<EscenarioDto[]>('/control-analitico/escenarios'),
+  escenariosPredeterminados: () =>
+    request<EscenarioDto[]>(
+      '/control-analitico/escenarios/predeterminados',
+      postCo({}),
+    ),
+  actualizarEscenario: (
+    id: string,
+    input: EscenarioUpdateInput,
+    version: number,
+  ) =>
+    request<EscenarioDto>(
+      `/control-analitico/escenarios/${id}`,
+      patchCo(input, version),
+    ),
+  forecast: (escenarioId: string, fecha: string, horizonte = 12) =>
+    request<PrevisionDto>(
+      `/control-analitico/forecast${qs({ escenarioId, fecha, horizonte })}`,
+    ),
+  fotos: (escenarioId?: string) =>
+    request<FotoPrevisionDto[]>(
+      `/control-analitico/fotos${qs({ escenarioId })}`,
+    ),
+  crearFoto: (
+    input: { escenarioId: string; fecha: string; etiqueta: string },
+    clave: string,
+  ) =>
+    request<FotoPrevisionDto>('/control-analitico/fotos', postCo(input, clave)),
 };

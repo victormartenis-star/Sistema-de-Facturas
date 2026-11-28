@@ -33,6 +33,7 @@ import { registrarAlmacen } from './tools/almacen';
 import { registrarMargenes } from './tools/margenes';
 import { registrarAprobaciones } from './tools/aprobaciones';
 import { registrarHolding } from './tools/holding';
+import { registrarControlAnalitico } from './tools/control-analitico';
 import { registrarSolicitudesMaterial } from './tools/solicitudes-material';
 import { registrarWip } from './tools/wip';
 import { registrarAvales } from './tools/avales';
@@ -71,6 +72,7 @@ async function main() {
   registrarMargenes(server);
   registrarAprobaciones(server);
   registrarHolding(server);
+  registrarControlAnalitico(server);
   registrarSolicitudesMaterial(server);
   registrarWip(server);
   registrarAvales(server);

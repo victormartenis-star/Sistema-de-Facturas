@@ -114,6 +114,11 @@ const GESTION: NavItem[] = [
     label: 'Consolidación de grupo',
     icon: IconBuilding,
   },
+  {
+    href: '/control-analitico',
+    label: 'Control analítico',
+    icon: IconPercent,
+  },
   { href: '/almacen', label: 'Almacén y stock', icon: IconCube },
   {
     href: '/tesoreria/conciliacion',
