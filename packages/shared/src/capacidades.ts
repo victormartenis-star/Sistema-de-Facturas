@@ -58,6 +58,8 @@ export const RECURSOS_UI = [
   'aviso_averia',
   /** Políticas SoD, niveles de aprobación, delegaciones ajenas y escalado: admin, gerente y administración. */
   'gobierno',
+  /** Centros de coste, ciclos de reparto y escenarios (y ejecutar repartos): admin y gerente. */
+  'control_analitico',
 ] as const;
 export type RecursoUi = (typeof RECURSOS_UI)[number];
 
@@ -77,7 +79,7 @@ export function can(
   if (isPortalRole(rol)) return false;
   if (accion === 'exportar') return true;
   if (isReadOnlyRole(rol)) return false;
-  if (recurso === 'cierre_ejercicio')
+  if (recurso === 'cierre_ejercicio' || recurso === 'control_analitico')
     return rol === 'admin' || rol === 'gerente';
   const restringida =
     (accion === 'rectificar' &&

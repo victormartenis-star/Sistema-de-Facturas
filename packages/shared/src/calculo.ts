@@ -4283,3 +4283,367 @@ export function saldoTerceroAFecha(x: {
     total: fromCents(ordinario + retencion),
   };
 }
+
+/* ─────────── Control analítico: centros de coste, repartos y rolling forecast ───────────
+ * Modelo de SAP S/4HANA Controlling (CO-OM: centros de coste, ciclos de
+ * distribución y de imputación —assessment—) y Oracle Cost Management /
+ * Essbase (rolling forecast por escenarios). Céntimos BigInt; los pesos con
+ * 4 decimales. El reparto usa el resto mayor de `repartirCents`: la suma
+ * repartida es exactamente el saldo del emisor y cada céntimo de resto queda
+ * anotado en la línea que lo recibe.
+ */
+
+/**
+ * Centro de coste de una cuenta de gasto por sus asignaciones: gana el
+ * prefijo más largo; null si ninguna aplica.
+ */
+export function centroPorCuenta(
+  codigo: string,
+  asignaciones: readonly { prefijo: string; centroId: string }[],
+): string | null {
+  let mejor: { prefijo: string; centroId: string } | null = null;
+  for (const a of asignaciones) {
+    if (
+      codigo.startsWith(a.prefijo) &&
+      (!mejor || a.prefijo.length > mejor.prefijo.length)
+    ) {
+      mejor = a;
+    }
+  }
+  return mejor?.centroId ?? null;
+}
+
+export type TipoCicloReparto = 'distribucion' | 'imputacion';
+
+export interface EmisorReparto {
+  centroId: string;
+  /** Saldo del centro por cuenta de gasto en el periodo (con signo). */
+  partidas: readonly { cuenta: string; importe: Importe }[];
+}
+
+export interface ReceptorReparto {
+  /** `obra:<id>` o `centro:<id>`. */
+  clave: string;
+  /** Peso del criterio (porcentaje, presupuesto, producción u horas). */
+  peso: Importe;
+}
+
+export interface LineaRepartoCalculo {
+  emisor: string;
+  receptor: string;
+  cuenta: string;
+  /** Saldo del emisor en esa cuenta que se reparte. */
+  base: number;
+  peso: number;
+  importe: number;
+  /** Céntimos de resto asignados a esta línea (0 o ±1). */
+  residuo: number;
+}
+
+export interface RepartoCicloCalculo {
+  lineas: LineaRepartoCalculo[];
+  totalRepartido: number;
+  porEmisor: { centroId: string; importe: number }[];
+  porReceptor: { clave: string; importe: number }[];
+  /** Cuota del peso de cada receptor, en % con 4 decimales. */
+  cuotas: { clave: string; pct: number }[];
+}
+
+/**
+ * Ciclo de reparto (SAP KSU5 / KSV5). Distribución: conserva la cuenta de
+ * gasto original de cada partida. Imputación: el saldo total del emisor se
+ * reparte con la cuenta secundaria del ciclo. Cada partida se reparte por
+ * resto mayor entre los receptores en proporción a su peso, así que:
+ *  - Σ líneas de una partida = su saldo, al céntimo (también si es negativo);
+ *  - el resto (siempre < nº de receptores) va a los de mayor fracción, con
+ *    desempate por el orden de los receptores (determinista).
+ * Pesos negativos, todos cero o un emisor que se reparte a sí mismo: RangeError.
+ */
+export function repartoCiclo(p: {
+  tipo: TipoCicloReparto;
+  cuentaImputacion?: string | null;
+  emisores: readonly EmisorReparto[];
+  receptores: readonly ReceptorReparto[];
+}): RepartoCicloCalculo {
+  if (p.receptores.length === 0) {
+    throw new RangeError('El ciclo no tiene receptores');
+  }
+  const pesos = p.receptores.map((r) => toScaled(r.peso, 4));
+  if (pesos.some((w) => w < 0n)) {
+    throw new RangeError('Los pesos de reparto no pueden ser negativos');
+  }
+  const totalPeso = sumCents(pesos);
+  if (totalPeso === 0n) {
+    throw new RangeError('Los receptores no tienen base de reparto');
+  }
+  if (p.tipo === 'imputacion' && !p.cuentaImputacion) {
+    throw new RangeError('La imputación exige cuenta secundaria');
+  }
+  const claves = new Set(p.receptores.map((r) => r.clave));
+  const lineas: LineaRepartoCalculo[] = [];
+  const porEmisor = new Map<string, bigint>();
+  const porReceptor = new Map<string, bigint>(
+    p.receptores.map((r) => [r.clave, 0n]),
+  );
+  for (const e of p.emisores) {
+    if (claves.has(`centro:${e.centroId}`)) {
+      throw new RangeError('Un centro no puede repartirse a sí mismo');
+    }
+    const partidas =
+      p.tipo === 'imputacion'
+        ? [
+            {
+              cuenta: p.cuentaImputacion!,
+              importe: sumCents(e.partidas.map((x) => toCents(x.importe))),
+            },
+          ]
+        : e.partidas.map((x) => ({
+            cuenta: x.cuenta,
+            importe: toCents(x.importe),
+          }));
+    for (const { cuenta, importe } of partidas) {
+      if (importe === 0n) continue;
+      const cuotas = repartirCents(importe, pesos);
+      const abs = importe < 0n ? -importe : importe;
+      cuotas.forEach((c, i) => {
+        const suelo = (abs * pesos[i]) / totalPeso;
+        const exacto = importe < 0n ? -suelo : suelo;
+        porReceptor.set(
+          p.receptores[i].clave,
+          porReceptor.get(p.receptores[i].clave)! + c,
+        );
+        lineas.push({
+          emisor: e.centroId,
+          receptor: p.receptores[i].clave,
+          cuenta,
+          base: fromCents(importe),
+          peso: Number(pesos[i]) / 10_000,
+          importe: fromCents(c),
+          residuo: Number(c - exacto),
+        });
+      });
+      porEmisor.set(e.centroId, (porEmisor.get(e.centroId) ?? 0n) + importe);
+    }
+  }
+  const total = sumCents([...porEmisor.values()]);
+  if (total !== sumCents([...porReceptor.values()])) {
+    throw new RangeError('Reparto descuadrado');
+  }
+  return {
+    lineas,
+    totalRepartido: fromCents(total),
+    porEmisor: [...porEmisor].map(([centroId, v]) => ({
+      centroId,
+      importe: fromCents(v),
+    })),
+    porReceptor: [...porReceptor].map(([clave, v]) => ({
+      clave,
+      importe: fromCents(v),
+    })),
+    cuotas: p.receptores.map((r, i) => ({
+      clave: r.clave,
+      pct: Number(mulDivRound(pesos[i], 1_000_000n, totalPeso)) / 10_000,
+    })),
+  };
+}
+
+export interface EscenarioPrevision {
+  /** Ajuste del coste pendiente (ETC), % con signo (2 decimales). */
+  ajusteCostePct: Importe;
+  /** Ajuste de lo pendiente de certificar, % con signo. */
+  ajusteIngresoPct: Importe;
+  /** Meses de retraso del fin de obra. */
+  retrasoMeses: number;
+  /** Proyecta los indirectos repartidos sobre el coste pendiente. */
+  incluirIndirectos: boolean;
+}
+
+export interface EntradaPrevisionObra {
+  contrato: Importe | null;
+  /** Presupuesto de coste (BAC). */
+  presupuestado: Importe;
+  /** Coste directo real a la fecha de corte (cuadro de márgenes). */
+  costeReal: Importe;
+  /** Indirectos recibidos por repartos a la fecha de corte. */
+  indirectos: Importe;
+  certificado: Importe;
+  /** Estimación de coste directo al cierre (EAC vigente). */
+  costeEstimadoCierre: Importe;
+  fechaCorte: string;
+  finPrevista: string | null;
+}
+
+export type AlertaPrevision =
+  'perdida' | 'sobrecoste' | 'sin_presupuesto' | 'plazo_vencido';
+
+export interface PrevisionObraCalculo {
+  presupuestado: number;
+  costeReal: number;
+  indirectos: number;
+  /** Coste directo pendiente del escenario (ETC). */
+  costePendiente: number;
+  /** Indirectos proyectados sobre el ETC (tasa real indirectos / directos). */
+  indirectosPendientes: number;
+  /** Coste total previsto al cierre: real + indirectos + pendientes. */
+  eac: number;
+  certificado: number;
+  ingresosPendientes: number;
+  ingresosPrevistos: number;
+  margen: number;
+  margenPct: number | null;
+  /** EAC − presupuesto (positivo = sobrecoste). */
+  desviacionPresupuesto: number;
+  /** Tasa de indirectos sobre el coste directo, % con 2 decimales. */
+  tasaIndirectosPct: number | null;
+  mesesRestantes: number;
+  serie: { mes: string; coste: number; ingreso: number }[];
+  fueraHorizonte: { coste: number; ingreso: number };
+  alertas: AlertaPrevision[];
+}
+
+function masPct(v: bigint, pct: Importe): bigint {
+  return v + mulDivRound(v, toScaled(pct, 2), 10_000n);
+}
+
+/**
+ * Rolling forecast de una obra: real a la fecha de corte más lo pendiente
+ * según el escenario, repartido por meses hasta el fin previsto (más el
+ * retraso) con resto mayor, de modo que la serie suma exactamente lo
+ * pendiente. Margen = ingresos previstos − EAC.
+ */
+export function previsionObra(
+  e: EntradaPrevisionObra,
+  esc: EscenarioPrevision,
+  horizonteMeses = 12,
+): PrevisionObraCalculo {
+  if (!Number.isInteger(esc.retrasoMeses) || esc.retrasoMeses < 0) {
+    throw new RangeError('Retraso no válido');
+  }
+  const presupuestado = toCents(e.presupuestado);
+  const real = toCents(e.costeReal);
+  const indirectosReales = esc.incluirIndirectos ? toCents(e.indirectos) : 0n;
+  const eacDirecto = toCents(e.costeEstimadoCierre);
+  const etcBase = eacDirecto > real ? eacDirecto - real : 0n;
+  let etc = masPct(etcBase, esc.ajusteCostePct);
+  if (etc < 0n) etc = 0n;
+  const indirectosEtc =
+    esc.incluirIndirectos && real > 0n
+      ? mulDivRound(etc, indirectosReales, real)
+      : 0n;
+  const eac = real + indirectosReales + etc + indirectosEtc;
+  const certificado = toCents(e.certificado);
+  const contrato = e.contrato === null ? null : toCents(e.contrato);
+  const pendienteBase =
+    contrato !== null && contrato > certificado ? contrato - certificado : 0n;
+  let pendiente = masPct(pendienteBase, esc.ajusteIngresoPct);
+  if (pendiente < 0n) pendiente = 0n;
+  const ingresos = certificado + pendiente;
+  const margen = ingresos - eac;
+
+  // Meses del mes siguiente al corte al fin previsto + retraso (mínimo uno).
+  const primero = addMonths(`${e.fechaCorte.slice(0, 7)}-01`, 1).slice(0, 7);
+  const fin =
+    e.finPrevista && e.finPrevista.slice(0, 7) >= primero
+      ? e.finPrevista.slice(0, 7)
+      : primero;
+  const ultimo = addMonths(`${fin}-01`, esc.retrasoMeses).slice(0, 7);
+  const meses = mesesEntre(primero, ultimo);
+  const unos = meses.map(() => 1n);
+  const costes = repartirCents(etc + indirectosEtc, unos);
+  const ingresosMes = repartirCents(pendiente, unos);
+  const serie = meses.slice(0, horizonteMeses).map((mes, i) => ({
+    mes,
+    coste: fromCents(costes[i]),
+    ingreso: fromCents(ingresosMes[i]),
+  }));
+  const resto = (v: bigint[]) => sumCents(v.slice(horizonteMeses));
+
+  const alertas: AlertaPrevision[] = [];
+  if (margen < 0n) alertas.push('perdida');
+  if (presupuestado === 0n) alertas.push('sin_presupuesto');
+  else if (eac > presupuestado) alertas.push('sobrecoste');
+  if (e.finPrevista && e.finPrevista < e.fechaCorte && etc + pendiente > 0n) {
+    alertas.push('plazo_vencido');
+  }
+  return {
+    presupuestado: fromCents(presupuestado),
+    costeReal: fromCents(real),
+    indirectos: fromCents(indirectosReales),
+    costePendiente: fromCents(etc),
+    indirectosPendientes: fromCents(indirectosEtc),
+    eac: fromCents(eac),
+    certificado: fromCents(certificado),
+    ingresosPendientes: fromCents(pendiente),
+    ingresosPrevistos: fromCents(ingresos),
+    margen: fromCents(margen),
+    margenPct:
+      ingresos === 0n
+        ? null
+        : Number(mulDivRound(margen, 10_000n, ingresos)) / 100,
+    desviacionPresupuesto: fromCents(eac - presupuestado),
+    tasaIndirectosPct:
+      real === 0n
+        ? null
+        : Number(mulDivRound(indirectosReales, 10_000n, real)) / 100,
+    mesesRestantes: meses.length,
+    serie,
+    fueraHorizonte: {
+      coste: fromCents(resto(costes)),
+      ingreso: fromCents(resto(ingresosMes)),
+    },
+    alertas,
+  };
+}
+
+export interface TotalesPrevision {
+  presupuestado: number;
+  costeReal: number;
+  indirectos: number;
+  eac: number;
+  ingresosPrevistos: number;
+  margen: number;
+  margenPct: number | null;
+}
+
+/** Suma exacta de las previsiones de varias obras. */
+export function totalesPrevision(
+  obras: readonly Pick<
+    PrevisionObraCalculo,
+    | 'presupuestado'
+    | 'costeReal'
+    | 'indirectos'
+    | 'eac'
+    | 'ingresosPrevistos'
+    | 'margen'
+  >[],
+): TotalesPrevision {
+  const s = (f: (o: (typeof obras)[number]) => number) =>
+    sumCents(obras.map((o) => toCents(f(o))));
+  const ingresos = s((o) => o.ingresosPrevistos);
+  const margen = s((o) => o.margen);
+  return {
+    presupuestado: fromCents(s((o) => o.presupuestado)),
+    costeReal: fromCents(s((o) => o.costeReal)),
+    indirectos: fromCents(s((o) => o.indirectos)),
+    eac: fromCents(s((o) => o.eac)),
+    ingresosPrevistos: fromCents(ingresos),
+    margen: fromCents(margen),
+    margenPct:
+      ingresos === 0n
+        ? null
+        : Number(mulDivRound(margen, 10_000n, ingresos)) / 100,
+  };
+}
+
+/** Varianza de una previsión frente a su línea base (foto anterior). */
+export function varianzaPrevision(
+  actual: Pick<TotalesPrevision, 'eac' | 'ingresosPrevistos' | 'margen'>,
+  base: Pick<TotalesPrevision, 'eac' | 'ingresosPrevistos' | 'margen'>,
+): { eac: number; ingresosPrevistos: number; margen: number } {
+  const d = (a: number, b: number) => fromCents(toCents(a) - toCents(b));
+  return {
+    eac: d(actual.eac, base.eac),
+    ingresosPrevistos: d(actual.ingresosPrevistos, base.ingresosPrevistos),
+    margen: d(actual.margen, base.margen),
+  };
+}

@@ -47,6 +47,7 @@ import { EamModule } from './eam/eam.module';
 import { GrcModule } from './grc/grc.module';
 import { AprobacionesModule } from './aprobaciones/aprobaciones.module';
 import { HoldingModule } from './holding/holding.module';
+import { ControlAnaliticoModule } from './control-analitico/control-analitico.module';
 import { WipModule } from './wip/wip.module';
 import { AvalesModule } from './avales/avales.module';
 import { EsgModule } from './modules/esg/esg.module';
@@ -104,6 +105,7 @@ import { InformesModule } from './modules/informes/informes.module';
     AlmacenModule,
     AprobacionesModule,
     HoldingModule,
+    ControlAnaliticoModule,
     WipModule,
     AvalesModule,
     OcrModule,

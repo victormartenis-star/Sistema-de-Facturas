@@ -3877,6 +3877,13 @@ export const journalEntryLines = pgTable(
       .default('0'),
     /** Imputación analítica por obra (centro de coste). */
     projectId: uuid('project_id').references(() => projects.id),
+    /**
+     * Centro de coste (CO-OM) de un gasto general sin obra. Excluyente con
+     * `project_id`: un apunte va a una obra o a un centro, nunca a ambos.
+     */
+    costCenterId: uuid('cost_center_id').references(
+      (): AnyPgColumn => costCenters.id,
+    ),
     description: varchar('description', { length: 240 }),
     /**
      * Tercero (cliente o proveedor) de las líneas de 430/400/438/407: el
@@ -3896,14 +3903,400 @@ export const journalEntryLines = pgTable(
     index('journal_entry_lines_company_project_idx')
       .on(t.companyId, t.projectId)
       .where(sql`project_id IS NOT NULL`),
+    index('journal_entry_lines_company_cost_center_idx')
+      .on(t.companyId, t.costCenterId)
+      .where(sql`cost_center_id IS NOT NULL`),
     check(
       'journal_entry_lines_un_lado',
       sql`${t.debit} >= 0 AND ${t.credit} >= 0 AND (${t.debit} > 0) <> (${t.credit} > 0)`,
+    ),
+    check(
+      'journal_entry_lines_obra_o_centro',
+      sql`${t.projectId} IS NULL OR ${t.costCenterId} IS NULL`,
     ),
   ],
 );
 
 export type JournalEntryLine = typeof journalEntryLines.$inferSelect;
+
+/* ─────────────── Control analítico (SAP CO-OM / Oracle Cost Management) ───────────────
+ * Centros de coste con jerarquía y cuentas asignadas, ciclos de reparto
+ * (distribución e imputación) con sus ejecuciones como mayor analítico
+ * secundario (no generan asientos FI: no duplican coste ni resultado) y
+ * escenarios y fotos del rolling forecast. Reglas puras en `calculo.ts`.
+ */
+
+export const costCenterKindEnum = pgEnum('cost_center_kind', [
+  'estructura',
+  'general',
+  'apoyo',
+  'receptor',
+]);
+
+export const costCenters = pgTable(
+  'cost_centers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    code: varchar('code', { length: 20 }).notNull(),
+    name: varchar('name', { length: 160 }).notNull(),
+    kind: costCenterKindEnum('kind').notNull().default('general'),
+    parentId: uuid('parent_id').references((): AnyPgColumn => costCenters.id),
+    responsibleUserId: uuid('responsible_user_id').references(() => users.id),
+    isActive: boolean('is_active').notNull().default(true),
+    notes: varchar('notes', { length: 500 }),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('cost_centers_company_code_unique').on(t.companyId, t.code),
+    index('cost_centers_company_parent_idx').on(t.companyId, t.parentId),
+    check(
+      'cost_centers_codigo',
+      sql`${t.code} ~ '^[A-Z0-9][A-Z0-9._-]{0,19}$' AND (${t.parentId} IS NULL OR ${t.parentId} <> ${t.id})`,
+    ),
+  ],
+);
+
+export type CostCenter = typeof costCenters.$inferSelect;
+
+/**
+ * Cuentas de gasto asignadas a un centro: los apuntes sin obra ni centro de
+ * esas cuentas (prefijo más largo) son coste primario del centro.
+ */
+export const costCenterAccounts = pgTable(
+  'cost_center_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    costCenterId: uuid('cost_center_id')
+      .notNull()
+      .references(() => costCenters.id, { onDelete: 'restrict' }),
+    accountPrefix: varchar('account_prefix', { length: 10 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('cost_center_accounts_company_prefix_unique').on(
+      t.companyId,
+      t.accountPrefix,
+    ),
+    index('cost_center_accounts_center_idx').on(t.costCenterId),
+    check(
+      'cost_center_accounts_prefijo',
+      sql`${t.accountPrefix} ~ '^6[0-9]{0,9}$'`,
+    ),
+  ],
+);
+
+export type CostCenterAccount = typeof costCenterAccounts.$inferSelect;
+
+export const allocationCycleTypeEnum = pgEnum('allocation_cycle_type', [
+  'distribucion',
+  'imputacion',
+]);
+
+export const allocationBasisEnum = pgEnum('allocation_basis', [
+  'porcentaje',
+  'presupuesto',
+  'produccion',
+  'horas',
+]);
+
+export const allocationCycles = pgTable(
+  'allocation_cycles',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    code: varchar('code', { length: 20 }).notNull(),
+    name: varchar('name', { length: 160 }).notNull(),
+    type: allocationCycleTypeEnum('type').notNull(),
+    basis: allocationBasisEnum('basis').notNull(),
+    /** Imputación (assessment): cuenta secundaria con la que se reparte. */
+    assessmentAccount: varchar('assessment_account', { length: 10 }),
+    isActive: boolean('is_active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('allocation_cycles_company_code_unique').on(
+      t.companyId,
+      t.code,
+    ),
+    check(
+      'allocation_cycles_cuenta',
+      sql`(${t.type} = 'imputacion') = (${t.assessmentAccount} IS NOT NULL)
+        AND (${t.assessmentAccount} IS NULL OR ${t.assessmentAccount} ~ '^6[0-9]{2,9}$')`,
+    ),
+  ],
+);
+
+export type AllocationCycle = typeof allocationCycles.$inferSelect;
+
+export const allocationCycleSenders = pgTable(
+  'allocation_cycle_senders',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    cycleId: uuid('cycle_id')
+      .notNull()
+      .references(() => allocationCycles.id, { onDelete: 'cascade' }),
+    costCenterId: uuid('cost_center_id')
+      .notNull()
+      .references(() => costCenters.id, { onDelete: 'restrict' }),
+  },
+  (t) => [
+    uniqueIndex('allocation_cycle_senders_unique').on(
+      t.cycleId,
+      t.costCenterId,
+    ),
+    index('allocation_cycle_senders_company_idx').on(
+      t.companyId,
+      t.costCenterId,
+    ),
+  ],
+);
+
+export const allocationCycleReceivers = pgTable(
+  'allocation_cycle_receivers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    cycleId: uuid('cycle_id')
+      .notNull()
+      .references(() => allocationCycles.id, { onDelete: 'cascade' }),
+    projectId: uuid('project_id').references(() => projects.id),
+    costCenterId: uuid('cost_center_id').references(() => costCenters.id),
+    /** Peso fijo (criterio porcentaje), 4 decimales. */
+    weightPct: numeric('weight_pct', { precision: 9, scale: 4 }),
+  },
+  (t) => [
+    uniqueIndex('allocation_cycle_receivers_obra_unique')
+      .on(t.cycleId, t.projectId)
+      .where(sql`project_id IS NOT NULL`),
+    uniqueIndex('allocation_cycle_receivers_centro_unique')
+      .on(t.cycleId, t.costCenterId)
+      .where(sql`cost_center_id IS NOT NULL`),
+    index('allocation_cycle_receivers_company_idx').on(t.companyId, t.cycleId),
+    check(
+      'allocation_cycle_receivers_destino',
+      sql`(${t.projectId} IS NULL) <> (${t.costCenterId} IS NULL)
+        AND (${t.weightPct} IS NULL OR (${t.weightPct} > 0 AND ${t.weightPct} <= 100))`,
+    ),
+  ],
+);
+
+export const allocationRunStatusEnum = pgEnum('allocation_run_status', [
+  'contabilizado',
+  'revertido',
+]);
+
+/** Ejecución de un ciclo en un periodo: cabecera del mayor analítico. */
+export const allocationRuns = pgTable(
+  'allocation_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    cycleId: uuid('cycle_id')
+      .notNull()
+      .references(() => allocationCycles.id, { onDelete: 'restrict' }),
+    /** Orden de ejecución por empresa: solo se revierte la última vigente. */
+    seq: integer('seq').notNull(),
+    periodFrom: date('period_from').notNull(),
+    periodTo: date('period_to').notNull(),
+    status: allocationRunStatusEnum('status')
+      .notNull()
+      .default('contabilizado'),
+    totalAmount: numeric('total_amount', { precision: 14, scale: 2 }).notNull(),
+    reverseReason: varchar('reverse_reason', { length: 240 }),
+    reversedAt: timestamp('reversed_at', { withTimezone: true }),
+    reversedBy: uuid('reversed_by').references(() => users.id),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('allocation_runs_company_seq_unique').on(t.companyId, t.seq),
+    uniqueIndex('allocation_runs_vigente_unique')
+      .on(t.cycleId, t.periodFrom, t.periodTo)
+      .where(sql`status = 'contabilizado'`),
+    index('allocation_runs_company_periodo_idx').on(
+      t.companyId,
+      t.periodFrom,
+      t.periodTo,
+    ),
+    check('allocation_runs_periodo', sql`${t.periodTo} >= ${t.periodFrom}`),
+    check(
+      'allocation_runs_reversion',
+      sql`(${t.status} = 'revertido') = (${t.reversedAt} IS NOT NULL AND ${t.reverseReason} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export type AllocationRun = typeof allocationRuns.$inferSelect;
+
+/** Línea del reparto: emisor, receptor, cuenta y importe (con signo). */
+export const allocationRunLines = pgTable(
+  'allocation_run_lines',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => allocationRuns.id, { onDelete: 'restrict' }),
+    senderCostCenterId: uuid('sender_cost_center_id')
+      .notNull()
+      .references(() => costCenters.id),
+    receiverProjectId: uuid('receiver_project_id').references(
+      () => projects.id,
+    ),
+    receiverCostCenterId: uuid('receiver_cost_center_id').references(
+      () => costCenters.id,
+    ),
+    accountCode: varchar('account_code', { length: 10 }).notNull(),
+    /** Saldo del emisor en esa cuenta que se reparte (con signo). */
+    baseAmount: numeric('base_amount', { precision: 14, scale: 2 }).notNull(),
+    /** Peso del receptor usado (4 decimales). */
+    weight: numeric('weight', { precision: 20, scale: 4 }).notNull(),
+    amount: numeric('amount', { precision: 14, scale: 2 }).notNull(),
+    /** Céntimos de resto mayor asignados a esta línea (0 o ±1). */
+    residueCents: smallint('residue_cents').notNull().default(0),
+  },
+  (t) => [
+    index('allocation_run_lines_run_idx').on(t.runId),
+    index('allocation_run_lines_company_project_idx')
+      .on(t.companyId, t.receiverProjectId)
+      .where(sql`receiver_project_id IS NOT NULL`),
+    index('allocation_run_lines_company_receiver_center_idx')
+      .on(t.companyId, t.receiverCostCenterId)
+      .where(sql`receiver_cost_center_id IS NOT NULL`),
+    index('allocation_run_lines_company_sender_idx').on(
+      t.companyId,
+      t.senderCostCenterId,
+    ),
+    check(
+      'allocation_run_lines_destino',
+      sql`(${t.receiverProjectId} IS NULL) <> (${t.receiverCostCenterId} IS NULL) AND ${t.weight} >= 0`,
+    ),
+  ],
+);
+
+export type AllocationRunLine = typeof allocationRunLines.$inferSelect;
+
+export const forecastScenarioKindEnum = pgEnum('forecast_scenario_kind', [
+  'base',
+  'optimista',
+  'pesimista',
+  'personalizado',
+]);
+
+/** Escenario del rolling forecast: supuestos sobre lo pendiente. */
+export const forecastScenarios = pgTable(
+  'forecast_scenarios',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    code: varchar('code', { length: 20 }).notNull(),
+    name: varchar('name', { length: 160 }).notNull(),
+    kind: forecastScenarioKindEnum('kind').notNull().default('personalizado'),
+    /** Ajuste del coste pendiente (ETC), % con signo. */
+    costAdjustPct: numeric('cost_adjust_pct', { precision: 7, scale: 2 })
+      .notNull()
+      .default('0'),
+    /** Ajuste de los ingresos pendientes de certificar, % con signo. */
+    revenueAdjustPct: numeric('revenue_adjust_pct', { precision: 7, scale: 2 })
+      .notNull()
+      .default('0'),
+    /** Retraso del fin de obra, en meses. */
+    delayMonths: smallint('delay_months').notNull().default(0),
+    /** Proyecta también los costes indirectos repartidos. */
+    includeOverhead: boolean('include_overhead').notNull().default(true),
+    isActive: boolean('is_active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('forecast_scenarios_company_code_unique').on(
+      t.companyId,
+      t.code,
+    ),
+    check(
+      'forecast_scenarios_supuestos',
+      sql`${t.costAdjustPct} BETWEEN -100 AND 1000 AND ${t.revenueAdjustPct} BETWEEN -100 AND 1000
+        AND ${t.delayMonths} BETWEEN 0 AND 60`,
+    ),
+  ],
+);
+
+export type ForecastScenario = typeof forecastScenarios.$inferSelect;
+
+/** Foto inmutable de una previsión: línea base para las varianzas. */
+export const forecastSnapshots = pgTable(
+  'forecast_snapshots',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id),
+    scenarioId: uuid('scenario_id')
+      .notNull()
+      .references(() => forecastScenarios.id, { onDelete: 'restrict' }),
+    cutoffDate: date('cutoff_date').notNull(),
+    label: varchar('label', { length: 120 }).notNull(),
+    totals: jsonb('totals').notNull(),
+    lines: jsonb('lines').notNull(),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index('forecast_snapshots_company_scenario_idx').on(
+      t.companyId,
+      t.scenarioId,
+      t.cutoffDate,
+    ),
+  ],
+);
+
+export type ForecastSnapshot = typeof forecastSnapshots.$inferSelect;
 
 /* ───────────── Liquidaciones de vencimientos (cobros y pagos parciales) ─────────────
  * Cada cobro o pago, total o parcial, contra un vencimiento. Inmutables: una

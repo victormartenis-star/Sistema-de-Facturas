@@ -344,10 +344,16 @@ export const lineaAsientoSchema = z
     debe: importe.default(0),
     haber: importe.default(0),
     projectId: z.string().uuid().nullish(),
+    /** Centro de coste de un gasto general (excluyente con la obra). */
+    costCenterId: z.string().uuid().nullish(),
     concepto: z.string().trim().max(240).nullish(),
   })
   .refine((l) => l.debe > 0 !== l.haber > 0, {
     message: 'Cada línea lleva importe en el debe o en el haber, no en ambos',
+  })
+  .refine((l) => !(l.projectId && l.costCenterId), {
+    path: ['costCenterId'],
+    message: 'Un apunte va a una obra o a un centro de coste, no a ambos',
   });
 export type LineaAsientoInput = z.input<typeof lineaAsientoSchema>;
 
@@ -440,6 +446,8 @@ export interface LineaPropuesta {
   haber: string;
   projectId: string | null;
   concepto: string;
+  /** Centro de coste (CO-OM); excluyente con `projectId`. */
+  costCenterId?: string | null;
 }
 
 /**
@@ -659,6 +667,7 @@ export interface LineaAsientoDto {
   debe: number;
   haber: number;
   projectId: string | null;
+  costCenterId?: string | null;
   concepto: string | null;
 }
 

@@ -40,6 +40,7 @@ import { ActivosModule } from '../../src/activos/activos.module';
 import { AlmacenModule } from '../../src/almacen/almacen.module';
 import { AprobacionesModule } from '../../src/aprobaciones/aprobaciones.module';
 import { HoldingModule } from '../../src/holding/holding.module';
+import { ControlAnaliticoModule } from '../../src/control-analitico/control-analitico.module';
 import { WipModule } from '../../src/wip/wip.module';
 import { AvalesModule } from '../../src/avales/avales.module';
 import { CarteraModule } from '../../src/cartera/cartera.module';
@@ -119,6 +120,7 @@ import { SubcontratasModule } from '../../src/modules/subcontratas/subcontratas.
     AlmacenModule,
     AprobacionesModule,
     HoldingModule,
+    ControlAnaliticoModule,
     WipModule,
     AvalesModule,
     CarteraModule,

@@ -19,6 +19,7 @@ import {
 } from 'drizzle-orm';
 import {
   contacts,
+  costCenters,
   fiscalPeriods,
   fiscalYearClosings,
   invoiceLines,
@@ -377,6 +378,43 @@ export class ContabilidadService {
       }
     }
 
+    // Centros de coste (CO-OM): de la empresa, excluyentes con la obra y
+    // activos (un contra-asiento sí admite centros dados de baja).
+    if (a.lineas.some((l) => l.projectId && l.costCenterId)) {
+      throw new UnprocessableEntityException({
+        code: 'COST_CENTER_PROJECT_CONFLICT',
+        message: 'Un apunte va a una obra o a un centro de coste, no a ambos',
+      });
+    }
+    const centros = [
+      ...new Set(
+        a.lineas.map((l) => l.costCenterId).filter((c): c is string => !!c),
+      ),
+    ];
+    if (centros.length > 0) {
+      const encontrados = await tx
+        .select({ id: costCenters.id, activo: costCenters.isActive })
+        .from(costCenters)
+        .where(
+          and(
+            eq(costCenters.companyId, a.companyId),
+            inArray(costCenters.id, centros),
+          ),
+        );
+      if (encontrados.length !== centros.length) {
+        throw new UnprocessableEntityException({
+          code: 'COST_CENTER_NOT_FOUND',
+          message: 'Algún centro de coste de la imputación no existe',
+        });
+      }
+      if (!a.reversesId && encontrados.some((c) => !c.activo)) {
+        throw new UnprocessableEntityException({
+          code: 'COST_CENTER_INACTIVE',
+          message: 'No se imputa a un centro de coste inactivo',
+        });
+      }
+    }
+
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext(${`asiento:${a.companyId}:${ejercicio}`}))`,
     );
@@ -417,6 +455,7 @@ export class ContabilidadService {
         debit: centsToNumeric(toCents(l.debe)),
         credit: centsToNumeric(toCents(l.haber)),
         projectId: l.projectId ?? null,
+        costCenterId: l.costCenterId ?? null,
         description: l.concepto ? l.concepto.slice(0, 240) : null,
         contactId: esCuentaTercero(l.cuenta)
           ? (l.contactId ?? a.contactId ?? null)
@@ -503,6 +542,7 @@ export class ContabilidadService {
           debe: l.debe.toFixed(2),
           haber: l.haber.toFixed(2),
           projectId: l.projectId ?? null,
+          costCenterId: l.costCenterId ?? null,
           concepto: l.concepto ?? data.concepto,
         })),
       });
@@ -580,6 +620,7 @@ export class ContabilidadService {
         debe: journalEntryLines.debit,
         haber: journalEntryLines.credit,
         projectId: journalEntryLines.projectId,
+        costCenterId: journalEntryLines.costCenterId,
         concepto: journalEntryLines.description,
         contactId: journalEntryLines.contactId,
       })
@@ -606,6 +647,7 @@ export class ContabilidadService {
           debe: l.debe,
           haber: l.haber,
           projectId: l.projectId,
+          costCenterId: l.costCenterId,
           concepto: l.concepto ?? '',
           // El contra-asiento conserva el tercero de cada línea.
           contactId: l.contactId,
@@ -703,6 +745,7 @@ export class ContabilidadService {
         debe: journalEntryLines.debit,
         haber: journalEntryLines.credit,
         projectId: journalEntryLines.projectId,
+        costCenterId: journalEntryLines.costCenterId,
         concepto: journalEntryLines.description,
       })
       .from(journalEntryLines)
@@ -741,6 +784,7 @@ export class ContabilidadService {
           debe: Number(l.debe),
           haber: Number(l.haber),
           projectId: l.projectId,
+          costCenterId: l.costCenterId,
           concepto: l.concepto,
         })),
       };

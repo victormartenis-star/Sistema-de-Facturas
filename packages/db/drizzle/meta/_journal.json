@@ -512,6 +512,13 @@
       "when": 1795801571641,
       "tag": "0072_group_reporting_fx",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1795871697402,
+      "tag": "0073_control_analitico",
+      "breakpoints": true
     }
   ]
 }

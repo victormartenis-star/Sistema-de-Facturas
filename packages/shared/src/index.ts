@@ -76,3 +76,4 @@ export * from './banca';
 export * from './eam';
 export * from './grc';
 export * from './consolidacion';
+export * from './control-analitico';

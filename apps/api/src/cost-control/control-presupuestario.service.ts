@@ -580,10 +580,12 @@ export class ControlPresupuestarioService {
   async cuadrosObras(
     ex: DbOrTx,
     obras: readonly { id: string; contrato: string | null }[],
+    hasta?: string,
   ) {
     const datos = await this.cargar(
       ex,
       obras.map((o) => o.id),
+      hasta ? { hasta } : {},
     );
     return new Map(
       obras.map((o) => [
